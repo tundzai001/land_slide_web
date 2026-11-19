@@ -335,14 +335,13 @@ class RoundRobinReceiverMixin:
         deadline = loop.time() + self.CROSS_BASE_SWITCH_TIMEOUT_SECONDS
         handover_verified = False
         verified_participants: set[str] = set()
-        stable_participants: set[str] = set()
         partial_started_at: Optional[float] = None
         latest_status: dict = {}
 
         while True:
             latest_status = dict(collection_status_callback() or {})
             now = loop.time()
-            stable_participants, verified_participants, handover_verified, partial_started_at = (
+            _, verified_participants, handover_verified, partial_started_at = (
                 self._evaluate_handover_status(latest_status, expected, partial_started_at, now)
             )
             if handover_verified or now >= deadline:
@@ -465,6 +464,18 @@ class RoundRobinReceiverMixin:
         await self._emit_progress(project_id, f"{rover_code}: stationary solver window opened.")
         return True, new_deadline, counts, epochs
 
+    def _check_stability_timeout(
+        self, now: float, deadline: float, solver_window_open: bool, on_invalid: Any, rover_code: str
+    ) -> None:
+        if now < deadline:
+            return
+        if on_invalid:
+            reason = "duration" if solver_window_open else "stability"
+            on_invalid(reason)
+        raise RuntimeError(
+            f"{rover_code}: no complete stationary solver window within {self.CROSS_BASE_STABILITY_TIMEOUT_SECONDS}s"
+        )
+
     async def _monitor_temporary_base_stability(
         self, rover_code: str, project_id: Optional[int], collection_status_callback: Any,
         on_stable_collection_started: Any, on_stable_collection_invalid: Any,
@@ -501,12 +512,9 @@ class RoundRobinReceiverMixin:
                     )
                 )
 
-            if now >= stability_deadline:
-                if on_stable_collection_invalid:
-                    on_stable_collection_invalid("duration" if solver_window_open else "stability")
-                raise RuntimeError(
-                    f"{rover_code}: no complete stationary solver window within {self.CROSS_BASE_STABILITY_TIMEOUT_SECONDS}s"
-                )
+            self._check_stability_timeout(
+                now, stability_deadline, solver_window_open, on_stable_collection_invalid, rover_code
+            )
             await asyncio.sleep(self.CROSS_BASE_STATUS_POLL_SECONDS)
 
     async def _run_adaptive_temporary_base_collection(

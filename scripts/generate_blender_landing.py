@@ -40,6 +40,46 @@ def clear_scene():
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
 
+def _calculate_diffuse_color(base_color, emission_color, emission_strength, alpha):
+    em_boost = min(0.38, emission_strength * 0.18) if emission_color else 0.0
+    final_alpha = alpha if alpha < 1.0 else (base_color[3] if len(base_color) > 3 else 1.0)
+    channels = []
+    for i in range(3):
+        em = emission_color[i] * em_boost if emission_color else 0.0
+        channels.append(min(1.0, base_color[i] + em))
+    channels.append(final_alpha)
+    return tuple(channels)
+
+
+def _configure_material_nodes(mat, base_color, metallic, roughness, emission_color, emission_strength, alpha, use_vertex_color):
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    bsdf = nodes.get(PRINCIPLED_BSDF_NODE)
+    if not bsdf:
+        return
+    bsdf.inputs[BSDF_BASE_COLOR].default_value = base_color
+    bsdf.inputs["Metallic"].default_value = metallic
+    bsdf.inputs["Roughness"].default_value = roughness
+    if "Alpha" in bsdf.inputs:
+        bsdf.inputs["Alpha"].default_value = alpha
+    if emission_color and BSDF_EMISSION_COLOR in bsdf.inputs:
+        bsdf.inputs[BSDF_EMISSION_COLOR].default_value = (*emission_color[:3], 1.0)
+        bsdf.inputs[BSDF_EMISSION_STRENGTH].default_value = emission_strength
+    if use_vertex_color:
+        vc_node = nodes.new(type="ShaderNodeVertexColor")
+        vc_node.layer_name = "Col"
+        links.new(vc_node.outputs["Color"], bsdf.inputs[BSDF_BASE_COLOR])
+
+
+def _configure_material_transparency(mat, alpha):
+    if alpha >= 1.0:
+        return
+    if hasattr(mat, "surface_render_method"):
+        mat.surface_render_method = "BLENDED"
+    elif hasattr(mat, "blend_method"):
+        mat.blend_method = "BLEND"
+
+
 def make_material(
     name: str,
     base_color=(0.06, 0.42, 0.39, 1.0),
@@ -52,45 +92,11 @@ def make_material(
 ):
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
-
-    # Set Blender Solid Viewport display colors so opening .blend in Blender is immediately vibrant!
-    em_boost = min(0.38, emission_strength * 0.18) if emission_color else 0.0
-    if alpha < 1.0:
-        final_alpha = alpha
-    elif len(base_color) > 3:
-        final_alpha = base_color[3]
-    else:
-        final_alpha = 1.0
-    mat.diffuse_color = (
-        min(1.0, base_color[0] + (emission_color[0] * em_boost if emission_color else 0.0)),
-        min(1.0, base_color[1] + (emission_color[1] * em_boost if emission_color else 0.0)),
-        min(1.0, base_color[2] + (emission_color[2] * em_boost if emission_color else 0.0)),
-        final_alpha,
-    )
+    mat.diffuse_color = _calculate_diffuse_color(base_color, emission_color, emission_strength, alpha)
     mat.metallic = metallic
     mat.roughness = roughness
-
-    nodes = mat.node_tree.nodes
-    links = mat.node_tree.links
-    bsdf = nodes.get(PRINCIPLED_BSDF_NODE)
-    if bsdf:
-        bsdf.inputs[BSDF_BASE_COLOR].default_value = base_color
-        bsdf.inputs["Metallic"].default_value = metallic
-        bsdf.inputs["Roughness"].default_value = roughness
-        if "Alpha" in bsdf.inputs:
-            bsdf.inputs["Alpha"].default_value = alpha
-        if emission_color and BSDF_EMISSION_COLOR in bsdf.inputs:
-            bsdf.inputs[BSDF_EMISSION_COLOR].default_value = (*emission_color[:3], 1.0)
-            bsdf.inputs[BSDF_EMISSION_STRENGTH].default_value = emission_strength
-        if use_vertex_color:
-            vc_node = nodes.new(type="ShaderNodeVertexColor")
-            vc_node.layer_name = "Col"
-            links.new(vc_node.outputs["Color"], bsdf.inputs[BSDF_BASE_COLOR])
-    if alpha < 1.0:
-        if hasattr(mat, "surface_render_method"):
-            mat.surface_render_method = "BLENDED"
-        elif hasattr(mat, "blend_method"):
-            mat.blend_method = "BLEND"
+    _configure_material_nodes(mat, base_color, metallic, roughness, emission_color, emission_strength, alpha, use_vertex_color)
+    _configure_material_transparency(mat, alpha)
     return mat
 
 
@@ -222,13 +228,45 @@ def lerp_color(c0, c1, t):
     )
 
 
-def build_geological_block(root, mats):
-    """Build expanded 15.6m x 10.8m sculpted mountain terrain with vertex colors, 3-layer cutaway + pedestal, slip zone, and groundwater."""
-    nx, ny = 96, 70
-    width, depth = TERRAIN_WIDTH, TERRAIN_DEPTH
-    base_z = -2.45
+def _calculate_vertex_color(v):
+    c_high_forest = (0.04, 0.34, 0.26, 1.0)
+    c_mid_meadow = (0.10, 0.48, 0.38, 1.0)
+    c_steep_rock = (0.20, 0.32, 0.34, 1.0)
+    c_scar_soil = (0.46, 0.31, 0.16, 1.0)
+    c_valley = (0.06, 0.26, 0.25, 1.0)
 
-    # 1. High-Res Top Terrain Surface Mesh with Biome Vertex Colors
+    vx, vy, vz = v.co.x, v.co.y, v.co.z
+    elev_t = (vz + 1.25) / 3.7
+    col = lerp_color(c_valley, c_mid_meadow, min(1.0, elev_t * 1.3))
+    if elev_t > 0.55:
+        col = lerp_color(col, c_high_forest, (elev_t - 0.55) / 0.45)
+
+    steepness = 1.0 - max(0.0, v.normal.z)
+    if steepness > 0.24:
+        col = lerp_color(col, c_steep_rock, min(1.0, (steepness - 0.24) * 2.8))
+
+    dx_s = (vx - (-1.15)) / 2.85
+    dy_s = (vy - (-0.30)) / 2.45
+    dist_scar = math.sqrt(dx_s * dx_s + dy_s * dy_s)
+    if dist_scar < 1.15:
+        scar_w = max(0.0, 1.0 - dist_scar / 1.15) ** 1.4
+        col = lerp_color(col, c_scar_soil, scar_w * 0.75)
+
+    if -2.78 <= vx <= -0.76 and -4.85 <= vy <= -2.28:
+        surf_ref = terrain_height(vx, vy)
+        depth_in_pit = surf_ref - vz
+        if depth_in_pit > 0.08:
+            col = (0.34, 0.23, 0.14, 1.0) if depth_in_pit < 0.58 else (0.14, 0.24, 0.30, 1.0)
+    return col
+
+
+def _paint_terrain_vertex_colors(bm, color_layer):
+    for face in bm.faces:
+        for loop in face.loops:
+            loop[color_layer] = _calculate_vertex_color(loop.vert)
+
+
+def _build_terrain_surface(root, mats, nx, ny, width, depth):
     mesh_top = bpy.data.meshes.new("TerrainSurfaceMesh")
     bm = bmesh.new()
     color_layer = bm.loops.layers.color.new("Col")
@@ -255,42 +293,7 @@ def build_geological_block(root, mats):
             f.smooth = True
 
     bm.normal_update()
-
-    # Paint rich biome vertex colors based on elevation, slope steepness, and landslide scar proximity
-    c_high_forest = (0.04, 0.34, 0.26, 1.0)
-    c_mid_meadow = (0.10, 0.48, 0.38, 1.0)
-    c_steep_rock = (0.20, 0.32, 0.34, 1.0)
-    c_scar_soil = (0.46, 0.31, 0.16, 1.0)
-    c_valley = (0.06, 0.26, 0.25, 1.0)
-
-    for face in bm.faces:
-        for loop in face.loops:
-            v = loop.vert
-            vx, vy, vz = v.co.x, v.co.y, v.co.z
-            elev_t = (vz + 1.25) / 3.7
-            col = lerp_color(c_valley, c_mid_meadow, min(1.0, elev_t * 1.3))
-            if elev_t > 0.55:
-                col = lerp_color(col, c_high_forest, (elev_t - 0.55) / 0.45)
-
-            steepness = 1.0 - max(0.0, v.normal.z)
-            if steepness > 0.24:
-                col = lerp_color(col, c_steep_rock, min(1.0, (steepness - 0.24) * 2.8))
-
-            dx_s = (vx - (-1.15)) / 2.85
-            dy_s = (vy - (-0.30)) / 2.45
-            dist_scar = math.sqrt(dx_s * dx_s + dy_s * dy_s)
-            if dist_scar < 1.15:
-                scar_w = max(0.0, 1.0 - dist_scar / 1.15) ** 1.4
-                col = lerp_color(col, c_scar_soil, scar_w * 0.75)
-
-            if -2.78 <= vx <= -0.76 and -4.85 <= vy <= -2.28:
-                surf_ref = terrain_height(vx, vy)
-                depth_in_pit = surf_ref - vz
-                if depth_in_pit > 0.08:
-                    col = (0.34, 0.23, 0.14, 1.0) if depth_in_pit < 0.58 else (0.14, 0.24, 0.30, 1.0)
-
-            loop[color_layer] = col
-
+    _paint_terrain_vertex_colors(bm, color_layer)
     bm.to_mesh(mesh_top)
     bm.free()
 
@@ -298,42 +301,30 @@ def build_geological_block(root, mats):
     terrain_obj.data.materials.append(mats["terrain_surface"])
     link_obj(terrain_obj, root)
 
-    # 2. Multi-Layer Geological Cutaway Walls + Architectural Museum Pedestal
-    mesh_soil_wall = bpy.data.meshes.new("SoilCutawayMesh")
-    bm_soil = bmesh.new()
-    mesh_rock_wall = bpy.data.meshes.new("BedrockCutawayMesh")
-    bm_rock = bmesh.new()
 
-    def add_wall_strip(perimeter_pts):
-        for k in range(len(perimeter_pts) - 1):
-            x0, y0 = perimeter_pts[k]
-            x1, y1 = perimeter_pts[k + 1]
-            z_top0 = terrain_height(x0, y0)
-            z_top1 = terrain_height(x1, y1)
-            z_mid0 = max(base_z + 0.48, z_top0 - 0.90 - 0.15 * math.sin(x0 * 0.8))
-            z_mid1 = max(base_z + 0.48, z_top1 - 0.90 - 0.15 * math.sin(x1 * 0.8))
+def _add_cutaway_wall_strip(bm_soil, bm_rock, perimeter_pts, base_z):
+    for k in range(len(perimeter_pts) - 1):
+        x0, y0 = perimeter_pts[k]
+        x1, y1 = perimeter_pts[k + 1]
+        z_top0 = terrain_height(x0, y0)
+        z_top1 = terrain_height(x1, y1)
+        z_mid0 = max(base_z + 0.48, z_top0 - 0.90 - 0.15 * math.sin(x0 * 0.8))
+        z_mid1 = max(base_z + 0.48, z_top1 - 0.90 - 0.15 * math.sin(x1 * 0.8))
 
-            sv1 = bm_soil.verts.new((x0, y0, z_mid0))
-            sv2 = bm_soil.verts.new((x1, y1, z_mid1))
-            sv3 = bm_soil.verts.new((x1, y1, z_top1))
-            sv4 = bm_soil.verts.new((x0, y0, z_top0))
-            bm_soil.faces.new((sv1, sv2, sv3, sv4))
+        sv1 = bm_soil.verts.new((x0, y0, z_mid0))
+        sv2 = bm_soil.verts.new((x1, y1, z_mid1))
+        sv3 = bm_soil.verts.new((x1, y1, z_top1))
+        sv4 = bm_soil.verts.new((x0, y0, z_top0))
+        bm_soil.faces.new((sv1, sv2, sv3, sv4))
 
-            rv1 = bm_rock.verts.new((x0, y0, base_z))
-            rv2 = bm_rock.verts.new((x1, y1, base_z))
-            rv3 = bm_rock.verts.new((x1, y1, z_mid1))
-            rv4 = bm_rock.verts.new((x0, y0, z_mid0))
-            bm_rock.faces.new((rv1, rv2, rv3, rv4))
+        rv1 = bm_rock.verts.new((x0, y0, base_z))
+        rv2 = bm_rock.verts.new((x1, y1, base_z))
+        rv3 = bm_rock.verts.new((x1, y1, z_mid1))
+        rv4 = bm_rock.verts.new((x0, y0, z_mid0))
+        bm_rock.faces.new((rv1, rv2, rv3, rv4))
 
-    front_edge = [(-width / 2 + (i / (nx - 1)) * width, -depth / 2) for i in range(nx)]
-    right_edge = [(width / 2, -depth / 2 + (j / (ny - 1)) * depth) for j in range(ny)]
-    back_edge = [(width / 2 - (i / (nx - 1)) * width, depth / 2) for i in range(nx)]
-    left_edge = [(-width / 2, depth / 2 - (j / (ny - 1)) * depth) for j in range(ny)]
 
-    for edge in (front_edge, right_edge, back_edge, left_edge):
-        add_wall_strip(edge)
-
-    # Embedded rock boulders & strata striations along front cutaway wall
+def _add_strata_boulders(bm_soil, bm_rock, width, depth, base_z):
     rng = random.Random(42)
     for _ in range(38):
         bx = rng.uniform(-width / 2 + 0.5, width / 2 - 0.5)
@@ -347,13 +338,32 @@ def build_geological_block(root, mats):
             matrix=Matrix.Translation((bx, -depth / 2 - 0.012, bz)) @ Matrix.Diagonal((1.4, 0.35, 0.75, 1.0)),
         )
 
-    # Architectural Diorama Base Plinth & Depth Scale Tick Marks
+
+def _add_diorama_plinth(bm_soil, bm_rock, width, depth, base_z):
     add_box(bm_rock, (0.0, 0.0, base_z - 0.14), (width + 0.32, depth + 0.32, 0.28))
     add_box(bm_rock, (0.0, 0.0, base_z - 0.32), (width + 0.64, depth + 0.64, 0.14))
     for tick_i in range(31):
         tx = -width / 2 + tick_i * 0.52
         if tx <= width / 2:
             add_box(bm_soil, (tx, -depth / 2 - 0.17, base_z - 0.14), (0.030, 0.045, 0.20 if tick_i % 2 == 0 else 0.11))
+
+
+def _build_cutaway_walls(root, mats, width, depth, base_z, nx, ny):
+    mesh_soil_wall = bpy.data.meshes.new("SoilCutawayMesh")
+    bm_soil = bmesh.new()
+    mesh_rock_wall = bpy.data.meshes.new("BedrockCutawayMesh")
+    bm_rock = bmesh.new()
+
+    front_edge = [(-width / 2 + (i / (nx - 1)) * width, -depth / 2) for i in range(nx)]
+    right_edge = [(width / 2, -depth / 2 + (j / (ny - 1)) * depth) for j in range(ny)]
+    back_edge = [(width / 2 - (i / (nx - 1)) * width, depth / 2) for i in range(nx)]
+    left_edge = [(-width / 2, depth / 2 - (j / (ny - 1)) * depth) for j in range(ny)]
+
+    for edge in (front_edge, right_edge, back_edge, left_edge):
+        _add_cutaway_wall_strip(bm_soil, bm_rock, edge, base_z)
+
+    _add_strata_boulders(bm_soil, bm_rock, width, depth, base_z)
+    _add_diorama_plinth(bm_soil, bm_rock, width, depth, base_z)
 
     bmesh.ops.remove_doubles(bm_soil, verts=bm_soil.verts, dist=0.001)
     bm_soil.normal_update()
@@ -373,22 +383,8 @@ def build_geological_block(root, mats):
     rock_obj.data.materials.append(mats["bedrock_strata"])
     link_obj(rock_obj, root)
 
-    # 3. Smooth Elliptical Radial Landslide Slip Surface + Fractured Unstable Wedge
-    cx, cy = -1.15, -0.30
-    rx, ry = 2.75, 2.35
-    rings, segs = 18, 52
 
-    mesh_slip = bpy.data.meshes.new("SlipSurfaceMesh")
-    bm_slip = bmesh.new()
-    mesh_wedge = bpy.data.meshes.new("UnstableWedgeMesh")
-    bm_wedge = bmesh.new()
-    wedge_col_layer = bm_wedge.loops.layers.color.new("Col")
-
-    slip_center_z = terrain_height(cx, cy) - 0.96
-    wedge_center_z = terrain_height(cx, cy) + 0.040
-    v_slip_center = bm_slip.verts.new((cx, cy, slip_center_z))
-    v_wedge_center = bm_wedge.verts.new((cx, cy, wedge_center_z))
-
+def _build_slip_rings(bm_slip, bm_wedge, cx, cy, rx, ry, rings, segs):
     slip_rings = []
     wedge_rings = []
     for r_idx in range(1, rings + 1):
@@ -408,6 +404,38 @@ def build_geological_block(root, mats):
             w_ring.append(bm_wedge.verts.new((px, py, surf_z + 0.036 * (1.0 - 0.35 * r_frac) + slump_step)))
         slip_rings.append(s_ring)
         wedge_rings.append(w_ring)
+    return slip_rings, wedge_rings
+
+
+def _paint_wedge_faces(bm_wedge, wedge_col_layer, cx):
+    for face in bm_wedge.faces:
+        for loop in face.loops:
+            vx, vy, vz = loop.vert.co
+            n_val = 0.5 + 0.5 * noise.noise(Vector((vx * 2.0, vy * 2.0, vz)))
+            crack_band = math.sin((vx - cx) * 6.5 + math.sin(vy * 1.8) * 0.8)
+            base_c = lerp_color((0.36, 0.27, 0.16, 1.0), (0.10, 0.46, 0.36, 1.0), n_val)
+            if crack_band > 0.80 and vx < cx + 1.15:
+                base_c = lerp_color(base_c, (0.92, 0.44, 0.08, 1.0), (crack_band - 0.80) / 0.20)
+            loop[wedge_col_layer] = base_c
+
+
+def _build_slip_surface_and_wedge(root, mats, depth):
+    cx, cy = -1.15, -0.30
+    rx, ry = 2.75, 2.35
+    rings, segs = 18, 52
+
+    mesh_slip = bpy.data.meshes.new("SlipSurfaceMesh")
+    bm_slip = bmesh.new()
+    mesh_wedge = bpy.data.meshes.new("UnstableWedgeMesh")
+    bm_wedge = bmesh.new()
+    wedge_col_layer = bm_wedge.loops.layers.color.new("Col")
+
+    slip_center_z = terrain_height(cx, cy) - 0.96
+    wedge_center_z = terrain_height(cx, cy) + 0.040
+    v_slip_center = bm_slip.verts.new((cx, cy, slip_center_z))
+    v_wedge_center = bm_wedge.verts.new((cx, cy, wedge_center_z))
+
+    slip_rings, wedge_rings = _build_slip_rings(bm_slip, bm_wedge, cx, cy, rx, ry, rings, segs)
 
     for s_idx in range(segs):
         nxt = (s_idx + 1) % segs
@@ -428,15 +456,7 @@ def build_geological_block(root, mats):
             )
             f_w.smooth = True
 
-    for face in bm_wedge.faces:
-        for loop in face.loops:
-            vx, vy, vz = loop.vert.co
-            n_val = 0.5 + 0.5 * noise.noise(Vector((vx * 2.0, vy * 2.0, vz)))
-            crack_band = math.sin((vx - cx) * 6.5 + math.sin(vy * 1.8) * 0.8)
-            base_c = lerp_color((0.36, 0.27, 0.16, 1.0), (0.10, 0.46, 0.36, 1.0), n_val)
-            if crack_band > 0.80 and vx < cx + 1.15:
-                base_c = lerp_color(base_c, (0.92, 0.44, 0.08, 1.0), (crack_band - 0.80) / 0.20)
-            loop[wedge_col_layer] = base_c
+    _paint_wedge_faces(bm_wedge, wedge_col_layer, cx)
 
     # Sleek Precision Crown Scarp Perimeter Ring around the unstable wedge
     for s_idx in range(segs):
@@ -477,7 +497,8 @@ def build_geological_block(root, mats):
     wedge_obj.data.materials.append(mats["unstable_wedge"])
     link_obj(wedge_obj, root)
 
-    # 4. Subsurface Groundwater Table Mesh + Front Cutaway Aquifer Band
+
+def _build_groundwater_table(root, mats, width, depth, base_z):
     mesh_water = bpy.data.meshes.new("GroundwaterTableMesh")
     bm_water = bmesh.new()
     wx_n, wy_n = 38, 30
@@ -517,6 +538,18 @@ def build_geological_block(root, mats):
     water_obj = bpy.data.objects.new("GroundwaterTable", mesh_water)
     water_obj.data.materials.append(mats["groundwater"])
     link_obj(water_obj, root)
+
+
+def build_geological_block(root, mats):
+    """Build expanded 15.6m x 10.8m sculpted mountain terrain with vertex colors, 3-layer cutaway + pedestal, slip zone, and groundwater."""
+    nx, ny = 96, 70
+    width, depth = TERRAIN_WIDTH, TERRAIN_DEPTH
+    base_z = -2.45
+
+    _build_terrain_surface(root, mats, nx, ny, width, depth)
+    _build_cutaway_walls(root, mats, width, depth, base_z, nx, ny)
+    _build_slip_surface_and_wedge(root, mats, depth)
+    _build_groundwater_table(root, mats, width, depth, base_z)
 
 
 def build_mountain_road_and_wall(root, mats):
@@ -691,6 +724,90 @@ def spawn_hw_instance(templates, key: str, inst_name: str, parent, loc=(0, 0, 0)
     return inst
 
 
+def _add_gnss_fence(bm, pad_scale):
+    fence_r = 0.36 * pad_scale
+    fence_pts = [
+        (math.cos(k * math.pi / 3.0) * fence_r, math.sin(k * math.pi / 3.0) * fence_r)
+        for k in range(6)
+    ]
+    for fx, fy in fence_pts:
+        add_cylinder(bm, (fx, fy, 0.21), 0.015, 0.015, 0.24, segs=8)
+    for k in range(6):
+        if k == 4:
+            continue
+        p0 = fence_pts[k]
+        p1 = fence_pts[(k + 1) % 6]
+        add_strut(bm, (p0[0], p0[1], 0.30), (p1[0], p1[1], 0.30), radius=0.010, segs=6)
+        add_strut(bm, (p0[0], p0[1], 0.21), (p1[0], p1[1], 0.21), radius=0.008, segs=6)
+
+
+def _add_gnss_lattice_tower(bm, mast_h, top_z):
+    tiers = 5
+    r_bot_tower = 0.095
+    r_top_tower = 0.048
+    corners = [
+        (math.cos(a) * 1.0, math.sin(a) * 1.0)
+        for a in (math.pi * 0.25, math.pi * 0.75, math.pi * 1.25, math.pi * 1.75)
+    ]
+    for cx_u, cy_u in corners:
+        p_b = (cx_u * r_bot_tower, cy_u * r_bot_tower, 0.20)
+        p_t = (cx_u * r_top_tower, cy_u * r_top_tower, top_z)
+        add_strut(bm, p_b, p_t, radius=0.013, segs=8)
+
+    for t_i in range(tiers):
+        f0 = t_i / tiers
+        f1 = (t_i + 1) / tiers
+        z0 = 0.20 + mast_h * f0
+        z1 = 0.20 + mast_h * f1
+        r0 = r_bot_tower * (1.0 - f0) + r_top_tower * f0
+        r1 = r_bot_tower * (1.0 - f1) + r_top_tower * f1
+        for c_i in range(4):
+            c_next = (c_i + 1) % 4
+            p00 = (corners[c_i][0] * r0, corners[c_i][1] * r0, z0)
+            p10 = (corners[c_next][0] * r0, corners[c_next][1] * r0, z0)
+            p01 = (corners[c_i][0] * r1, corners[c_i][1] * r1, z1)
+            p11 = (corners[c_next][0] * r1, corners[c_next][1] * r1, z1)
+            add_strut(bm, p00, p10, radius=0.008, segs=6)
+            add_strut(bm, p00, p11, radius=0.007, segs=6)
+            add_strut(bm, p10, p01, radius=0.007, segs=6)
+
+
+def _build_gnss_solar_array(name, station_grp, mats):
+    mesh_solar_frame = bpy.data.meshes.new(f"{name}_SolarFrameMesh")
+    bm_sf = bmesh.new()
+    solar_rot = (0.38, -0.32, 0.0)
+    for wing_y in (-0.19, 0.19):
+        add_box(bm_sf, (-0.16, wing_y, 0.718), (0.32, 0.24, 0.022), rot_euler=solar_rot)
+        add_strut(bm_sf, (0.0, 0.0, 0.62), (-0.16, wing_y, 0.71), radius=0.013, segs=6)
+    bm_sf.normal_update()
+    bm_sf.to_mesh(mesh_solar_frame)
+    bm_sf.free()
+    solar_frame_obj = bpy.data.objects.new(f"{name}_SolarFrame", mesh_solar_frame)
+    solar_frame_obj.data.materials.append(mats["ops_obsidian"])
+    link_obj(solar_frame_obj, station_grp)
+
+    mesh_solar = bpy.data.meshes.new(f"{name}_SolarMesh")
+    bm_s = bmesh.new()
+    solar_rot_mat = Euler(solar_rot, "XYZ").to_matrix()
+    for wing_y in (-0.19, 0.19):
+        wing_center = Vector((-0.16, wing_y, 0.718))
+        for cell_r in (-0.092, 0.0, 0.092):
+            for cell_c in (-0.056, 0.056):
+                cell_pos = wing_center + solar_rot_mat @ Vector((cell_r, cell_c, 0.009))
+                add_box(
+                    bm_s,
+                    (cell_pos.x, cell_pos.y, cell_pos.z),
+                    (0.082, 0.095, 0.012),
+                    rot_euler=solar_rot,
+                )
+    bm_s.normal_update()
+    bm_s.to_mesh(mesh_solar)
+    bm_s.free()
+    solar_obj = bpy.data.objects.new(f"{name}_Solar", mesh_solar)
+    solar_obj.data.materials.append(mats["solar_panel"])
+    link_obj(solar_obj, station_grp)
+
+
 def build_gnss_station(name: str, x: float, y: float, root, mats, is_base=False, templates=None):
     """Build an ultra-detailed industrial GNSS RTK field station with real 3D hexagonal platform, info terminal, edge-AI logger, PTZ slope camera, 4-leg steel lattice tower, dual solar wings, and multi-fin choke-ring geodetic radome."""
     z = terrain_height(x, y)
@@ -727,52 +844,8 @@ def build_gnss_station(name: str, x: float, y: float, root, mats, is_base=False,
     add_cylinder(bm, (0, 0, 0.06), 0.36 * pad_scale, 0.32 * pad_scale, 0.14, segs=12)
     add_cylinder(bm, (0, 0, 0.18), 0.18, 0.14, 0.16, segs=16)
 
-    # Hexagonal perimeter safety bollards and dual tubular guardrails
-    fence_r = 0.36 * pad_scale
-    fence_pts = [
-        (math.cos(k * math.pi / 3.0) * fence_r, math.sin(k * math.pi / 3.0) * fence_r)
-        for k in range(6)
-    ]
-    for fx, fy in fence_pts:
-        add_cylinder(bm, (fx, fy, 0.21), 0.015, 0.015, 0.24, segs=8)
-    for k in range(6):
-        if k == 4:
-            # Leave front walk-in gap on the hexagonal stair side
-            continue
-        p0 = fence_pts[k]
-        p1 = fence_pts[(k + 1) % 6]
-        add_strut(bm, (p0[0], p0[1], 0.30), (p1[0], p1[1], 0.30), radius=0.010, segs=6)
-        add_strut(bm, (p0[0], p0[1], 0.21), (p1[0], p1[1], 0.21), radius=0.008, segs=6)
-
-    # 4-Column Tapered Lattice Tower with 5 Horizontal Frame Tiers & Diagonal X-Bracing
-    tiers = 5
-    r_bot_tower = 0.095
-    r_top_tower = 0.048
-    corners = [
-        (math.cos(a) * 1.0, math.sin(a) * 1.0)
-        for a in (math.pi * 0.25, math.pi * 0.75, math.pi * 1.25, math.pi * 1.75)
-    ]
-    for cx_u, cy_u in corners:
-        p_b = (cx_u * r_bot_tower, cy_u * r_bot_tower, 0.20)
-        p_t = (cx_u * r_top_tower, cy_u * r_top_tower, top_z)
-        add_strut(bm, p_b, p_t, radius=0.013, segs=8)
-
-    for t_i in range(tiers):
-        f0 = t_i / tiers
-        f1 = (t_i + 1) / tiers
-        z0 = 0.20 + mast_h * f0
-        z1 = 0.20 + mast_h * f1
-        r0 = r_bot_tower * (1.0 - f0) + r_top_tower * f0
-        r1 = r_bot_tower * (1.0 - f1) + r_top_tower * f1
-        for c_i in range(4):
-            c_next = (c_i + 1) % 4
-            p00 = (corners[c_i][0] * r0, corners[c_i][1] * r0, z0)
-            p10 = (corners[c_next][0] * r0, corners[c_next][1] * r0, z0)
-            p01 = (corners[c_i][0] * r1, corners[c_i][1] * r1, z1)
-            p11 = (corners[c_next][0] * r1, corners[c_next][1] * r1, z1)
-            add_strut(bm, p00, p10, radius=0.008, segs=6)
-            add_strut(bm, p00, p11, radius=0.007, segs=6)
-            add_strut(bm, p10, p01, radius=0.007, segs=6)
+    _add_gnss_fence(bm, pad_scale)
+    _add_gnss_lattice_tower(bm, mast_h, top_z)
 
     # Central stainless coaxial riser tube + NEMA RTU pedestal + dual LoRa/UHF antennas + PTZ outrigger arm
     add_cylinder(bm, (0, 0, 0.20 + mast_h * 0.5), 0.022, 0.018, mast_h, segs=12)
@@ -798,40 +871,7 @@ def build_gnss_station(name: str, x: float, y: float, root, mats, is_base=False,
     link_obj(body_obj, station_grp)
 
     # 3. Dual-Wing Crystalline Photovoltaic Solar Array with Dark Obsidian Frame & Cell Grid Busbars
-    mesh_solar_frame = bpy.data.meshes.new(f"{name}_SolarFrameMesh")
-    bm_sf = bmesh.new()
-    solar_rot = (0.38, -0.32, 0.0)
-    for wing_y in (-0.19, 0.19):
-        add_box(bm_sf, (-0.16, wing_y, 0.718), (0.32, 0.24, 0.022), rot_euler=solar_rot)
-        add_strut(bm_sf, (0.0, 0.0, 0.62), (-0.16, wing_y, 0.71), radius=0.013, segs=6)
-    bm_sf.normal_update()
-    bm_sf.to_mesh(mesh_solar_frame)
-    bm_sf.free()
-    solar_frame_obj = bpy.data.objects.new(f"{name}_SolarFrame", mesh_solar_frame)
-    solar_frame_obj.data.materials.append(mats["ops_obsidian"])
-    link_obj(solar_frame_obj, station_grp)
-
-    mesh_solar = bpy.data.meshes.new(f"{name}_SolarMesh")
-    bm_s = bmesh.new()
-    solar_rot_mat = Euler(solar_rot, "XYZ").to_matrix()
-    for wing_y in (-0.19, 0.19):
-        wing_center = Vector((-0.16, wing_y, 0.718))
-        for cell_r in (-0.092, 0.0, 0.092):
-            for cell_c in (-0.056, 0.056):
-                cell_pos = wing_center + solar_rot_mat @ Vector((cell_r, cell_c, 0.009))
-                add_box(
-                    bm_s,
-                    (cell_pos.x, cell_pos.y, cell_pos.z),
-                    (0.082, 0.095, 0.012),
-                    rot_euler=solar_rot,
-                )
-    bm_s.normal_update()
-    bm_s.to_mesh(mesh_solar)
-    bm_s.free()
-
-    solar_obj = bpy.data.objects.new(f"{name}_Solar", mesh_solar)
-    solar_obj.data.materials.append(mats["solar_panel"])
-    link_obj(solar_obj, station_grp)
+    _build_gnss_solar_array(name, station_grp, mats)
 
     # 4. Multi-Fin Choke-Ring Geodetic Radome Monument
     mesh_dome = bpy.data.meshes.new(f"{name}_DomeMesh")
@@ -1231,6 +1271,42 @@ def build_rain_and_piezometer(root, mats, templates=None):
     link_obj(wflow_obj, piezo_grp)
 
 
+def _recenter_and_scale_mesh(joined, scale_xyz):
+    verts = [v.co for v in joined.data.vertices]
+    min_x = min(v.x for v in verts)
+    max_x = max(v.x for v in verts)
+    min_y = min(v.y for v in verts)
+    max_y = max(v.y for v in verts)
+    min_z = min(v.z for v in verts)
+    cx = 0.5 * (min_x + max_x)
+    cy = 0.5 * (min_y + max_y)
+    sx, sy, sz = scale_xyz
+    for v in joined.data.vertices:
+        v.co.x = (v.co.x - cx) * sx
+        v.co.y = (v.co.y - cy) * sy
+        v.co.z = (v.co.z - min_z) * sz
+    joined.data.update()
+
+
+def _apply_material_mapping(joined, mat_map):
+    if not mat_map:
+        return
+    for slot in joined.material_slots:
+        if not slot.material:
+            continue
+        mname = slot.material.name
+        for k, replacement_mat in mat_map.items():
+            if k.lower() in mname.lower():
+                slot.material = replacement_mat
+                break
+
+
+def _cleanup_imported_objects(imp_names, joined, joined_orig_name):
+    for n in tuple(imp_names):
+        if n != joined_orig_name and n in bpy.data.objects and bpy.data.objects[n] != joined:
+            bpy.data.objects.remove(bpy.data.objects[n], do_unlink=True)
+
+
 def import_single_glb_mesh(filename: str, new_name: str, scale_xyz=(1.0, 1.0, 1.0), mat_map=None, exclude_names=()):
     """Import a real 3D .glb file, join its meshes in world space, recenter base to (0,0,0), scale, and assign clean materials."""
     fpath = BLENDER_DIR / "models" / filename
@@ -1271,34 +1347,9 @@ def import_single_glb_mesh(filename: str, new_name: str, scale_xyz=(1.0, 1.0, 1.
     joined.rotation_euler = (0, 0, 0)
     joined.scale = (1, 1, 1)
 
-    verts = [v.co for v in joined.data.vertices]
-    min_x = min(v.x for v in verts)
-    max_x = max(v.x for v in verts)
-    min_y = min(v.y for v in verts)
-    max_y = max(v.y for v in verts)
-    min_z = min(v.z for v in verts)
-    cx = 0.5 * (min_x + max_x)
-    cy = 0.5 * (min_y + max_y)
-    sx, sy, sz = scale_xyz
-    for v in joined.data.vertices:
-        v.co.x = (v.co.x - cx) * sx
-        v.co.y = (v.co.y - cy) * sy
-        v.co.z = (v.co.z - min_z) * sz
-    joined.data.update()
-
-    if mat_map:
-        for slot in joined.material_slots:
-            if not slot.material:
-                continue
-            mname = slot.material.name
-            for k, replacement_mat in mat_map.items():
-                if k.lower() in mname.lower():
-                    slot.material = replacement_mat
-                    break
-
-    for n in tuple(imp_names):
-        if n != joined_orig_name and n in bpy.data.objects and bpy.data.objects[n] != joined:
-            bpy.data.objects.remove(bpy.data.objects[n], do_unlink=True)
+    _recenter_and_scale_mesh(joined, scale_xyz)
+    _apply_material_mapping(joined, mat_map)
+    _cleanup_imported_objects(imp_names, joined, joined_orig_name)
     return joined
 
 
@@ -1460,37 +1511,77 @@ def create_uv_quad_panel(bm, center, width, height, yaw_rad, u0, u1, v0=0.0, v1=
         loop[uv_layer].uv = uv
 
 
-def build_operations_hub(root, mats, templates=None):
-    """Build a Cohesive Modern Glass-and-Steel AI Data Center & Command Building with Motorized Sliding Glass Doors, Server Racks, Rooftop Helipad, and a Curved Panoramic Grafana + WebGIS Video Wall."""
-    _ = templates
-    ox, oy = 5.15, -0.55
-    oz = terrain_height(ox, oy)
-    ops_grp = bpy.data.objects.new("Operations_Command_Node", None)
-    ops_grp.location = (ox, oy, oz)
-    link_obj(ops_grp, root)
+def _build_sliding_door_panel(door_name: str, side_sign: float, ops_grp, mats, glass_curtain_mat):
+    mesh_dr = bpy.data.meshes.new(f"{door_name}Mesh")
+    bm_dr = bmesh.new()
+    cx_panel = side_sign * 0.28
+    # Slim brushed-steel door frame stiles & rails around a large glass door leaf
+    add_box(bm_dr, (side_sign * 0.025, 0.0, 0.42), (0.042, 0.042, 0.84))
+    add_box(bm_dr, (side_sign * 0.535, 0.0, 0.42), (0.042, 0.042, 0.84))
+    add_box(bm_dr, (cx_panel, 0.0, 0.81), (0.55, 0.042, 0.055))
+    add_box(bm_dr, (cx_panel, 0.0, 0.04), (0.55, 0.042, 0.065))
+    add_box(bm_dr, (cx_panel, -0.015, 0.42), (0.52, 0.048, 0.032))
+    bm_dr.normal_update()
+    bm_dr.to_mesh(mesh_dr)
+    bm_dr.free()
 
-    grafana_mat = create_grafana_wall_material()
-    glass_curtain_mat = make_material(
-        "BuildingCurtainGlassMat",
-        base_color=(0.55, 0.90, 0.98, 1.0),
-        metallic=0.25,
-        roughness=0.08,
-        emission_color=(0.18, 0.72, 0.88),
-        emission_strength=0.25,
-        alpha=0.18,
-    )
+    dr_obj = bpy.data.objects.new(door_name, mesh_dr)
+    dr_obj.location = (0.0, -1.48, 0.24)
+    dr_obj.data.materials.append(mats["steel_housing"])
+    link_obj(dr_obj, ops_grp)
 
-    # 1. Landscaped Architectural Concrete Plaza, Grand Approach Staircase & Interior Control Room Deck
+    mesh_win = bpy.data.meshes.new(f"{door_name}GlassMesh")
+    bm_w = bmesh.new()
+    add_box(bm_w, (cx_panel, 0.0, 0.42), (0.46, 0.016, 0.72))
+    bm_w.normal_update()
+    bm_w.to_mesh(mesh_win)
+    bm_w.free()
+    win_obj = bpy.data.objects.new(f"{door_name}_Glass", mesh_win)
+    win_obj.data.materials.append(glass_curtain_mat)
+    link_obj(win_obj, dr_obj)
+    return dr_obj
+
+
+def _build_parabolic_dish(dish_name: str, feed_name: str, pivot_loc, scale_d, ops_grp, mats):
+    mesh_d = bpy.data.meshes.new(f"{dish_name}Mesh")
+    bm_d = bmesh.new()
+    dish_tilt = (-0.52, -0.25, 0.0)
+    add_cylinder(bm_d, (0, 0, 0.0), 0.08 * scale_d, 0.045 * scale_d, 0.045 * scale_d, segs=16, rot_euler=dish_tilt)
+    add_cylinder(bm_d, (0, 0.022 * scale_d, 0.04 * scale_d), 0.19 * scale_d, 0.08 * scale_d, 0.055 * scale_d, segs=20, rot_euler=dish_tilt)
+    add_cylinder(bm_d, (0, 0.045 * scale_d, 0.085 * scale_d), 0.28 * scale_d, 0.19 * scale_d, 0.05 * scale_d, segs=24, rot_euler=dish_tilt)
+    focal_pt = (0.0, 0.12 * scale_d, 0.25 * scale_d)
+    for f_i in range(3):
+        ang = f_i * (math.pi * 2.0 / 3.0)
+        rim_pt = (math.cos(ang) * 0.19 * scale_d, (0.035 + math.sin(ang) * 0.16) * scale_d, 0.08 * scale_d)
+        add_strut(bm_d, rim_pt, focal_pt, radius=0.007 * scale_d, segs=6)
+    bm_d.normal_update()
+    bm_d.to_mesh(mesh_d)
+    bm_d.free()
+    d_obj = bpy.data.objects.new(dish_name, mesh_d)
+    d_obj.location = pivot_loc
+    d_obj.data.materials.append(mats["steel_housing"])
+    link_obj(d_obj, ops_grp)
+
+    mesh_fd = bpy.data.meshes.new(f"{feed_name}Mesh")
+    bm_fd = bmesh.new()
+    add_cylinder(bm_fd, focal_pt, 0.030 * scale_d, 0.018 * scale_d, 0.05 * scale_d, segs=12, rot_euler=dish_tilt)
+    bm_fd.normal_update()
+    bm_fd.to_mesh(mesh_fd)
+    bm_fd.free()
+    f_obj = bpy.data.objects.new(feed_name, mesh_fd)
+    f_obj.data.materials.append(mats["imu_glow"])
+    link_obj(f_obj, d_obj)
+    return d_obj
+
+
+def _build_ops_campus_pad(ops_grp, mats):
     mesh_pad = bpy.data.meshes.new("OpsCampusPadMesh")
     bm_pad = bmesh.new()
     add_box(bm_pad, (0.0, -0.15, 0.08), (4.20, 4.10, 0.18))
     add_box(bm_pad, (0.0, -0.10, 0.19), (3.84, 3.60, 0.09))
-    # Wide architectural approach ramp & steps leading to the front glass entrance at y = -1.48
     add_box(bm_pad, (0.0, -1.88, 0.16), (1.68, 0.68, 0.12), rot_euler=(0.12, 0.0, 0.0))
-    # Interior elevated Control Room floor slab (y = -1.38 .. +0.88, z = 0.36)
     add_box(bm_pad, (0.0, -0.22, 0.30), (3.48, 2.38, 0.14))
     add_box(bm_pad, (0.0, -1.24, 0.27), (1.36, 0.46, 0.12), rot_euler=(0.22, 0.0, 0.0))
-    # Low-profile Octagonal Hologram Table Pedestal in the center of the Control Room (y = -0.28)
     add_cylinder(bm_pad, (0.0, -0.28, 0.40), 0.28, 0.23, 0.07, segs=8)
     add_cylinder(bm_pad, (0.0, -0.28, 0.46), 0.25, 0.28, 0.04, segs=8)
     for bx in (-1.75, -1.25, -0.75, 0.75, 1.25, 1.75):
@@ -1503,29 +1594,23 @@ def build_operations_hub(root, mats, templates=None):
     pad_obj.data.materials.append(mats["concrete"])
     link_obj(pad_obj, ops_grp)
 
-    # 2. COHESIVE 2-STORY MODERN ARCHITECTURAL BUILDING ENVELOPE (Columns, Cantilevered Roof Overhang, Mullions & Rear Core)
+
+def _build_ops_envelope(ops_grp, mats, glass_curtain_mat):
     mesh_bldg = bpy.data.meshes.new("OpsEntrancePortalMesh")
     bm_bl = bmesh.new()
-    # Rear structural core wall (y = 0.98) & interior partition pilasters
     add_box(bm_bl, (0.0, 0.98, 0.92), (3.56, 0.18, 1.22))
-    # Cantilevered flat architectural roof slab (z = 1.52) + upper penthouse equipment deck (z = 1.61)
     add_box(bm_bl, (0.0, -0.22, 1.52), (3.88, 2.76, 0.08))
     add_box(bm_bl, (0.0, -0.15, 1.60), (3.44, 2.36, 0.08))
-    # Front curtain-wall structural steel columns & doorway portal pylons at y = -1.48
     for col_x in (-1.74, -1.18, -0.62, 0.62, 1.18, 1.74):
         add_box(bm_bl, (col_x, -1.48, 0.90), (0.10, 0.14, 1.20))
-    # Side structural columns along West (x = -1.74) and East (x = +1.74) facades
     for col_y in (-0.82, -0.15, 0.48, 0.98):
         add_box(bm_bl, (-1.74, col_y, 0.90), (0.12, 0.10, 1.20))
         add_box(bm_bl, (1.74, col_y, 0.90), (0.12, 0.10, 1.20))
-    # Horizontal mezzanine spandrel beam at z = 1.14 across front and sides (leaving central doorway z = 0.24..1.10 open)
     add_box(bm_bl, (0.0, -1.48, 1.14), (3.58, 0.14, 0.07))
     add_box(bm_bl, (-1.74, -0.25, 1.14), (0.12, 2.48, 0.06))
     add_box(bm_bl, (1.74, -0.25, 1.14), (0.12, 2.48, 0.06))
-    # Cantilevered entrance marquee canopy over the front sliding doors
     add_box(bm_bl, (0.0, -1.66, 1.16), (1.56, 0.36, 0.06))
-    # West-Wing Interior AI Server Racks (6 sleek server cabinets visible through the West glass curtain wall)
-    for r_idx, ry_srv in enumerate((-0.88, -0.48, -0.08, 0.32)):
+    for ry_srv in (-0.88, -0.48, -0.08, 0.32):
         add_box(bm_bl, (-1.38, ry_srv, 0.68), (0.26, 0.24, 0.62))
     bm_bl.normal_update()
     bm_bl.to_mesh(mesh_bldg)
@@ -1534,15 +1619,11 @@ def build_operations_hub(root, mats, templates=None):
     portal_obj.data.materials.append(mats["ops_obsidian"])
     link_obj(portal_obj, ops_grp)
 
-    # 2B. Floor-to-Ceiling Architectural Glass Curtain Wall (Left/Right Front Wings, Transom & Side Facades)
     mesh_cglass = bpy.data.meshes.new("OpsBuildingGlassMesh")
     bm_cg = bmesh.new()
-    # Front Left & Right glass curtain wings (leaving center x in [-0.58, +0.58] open for sliding doors!)
     add_box(bm_cg, (-1.18, -1.48, 0.90), (1.06, 0.024, 1.14))
     add_box(bm_cg, (1.18, -1.48, 0.90), (1.06, 0.024, 1.14))
-    # Upper transom glass above entrance doorway
     add_box(bm_cg, (0.0, -1.48, 1.32), (1.16, 0.024, 0.30))
-    # West & East side glass curtain walls
     add_box(bm_cg, (-1.74, -0.25, 0.90), (0.024, 2.42, 1.14))
     add_box(bm_cg, (1.74, -0.25, 0.90), (0.024, 2.42, 1.14))
     bm_cg.normal_update()
@@ -1552,20 +1633,18 @@ def build_operations_hub(root, mats, templates=None):
     cglass_obj.data.materials.append(glass_curtain_mat)
     link_obj(cglass_obj, ops_grp)
 
-    # 3. Architectural Roof Fascia LED Strip, Server Rack LED Indicators & Floor Runway Strips
+
+def _build_ops_arch_glow(ops_grp, mats):
     mesh_arch_glow = bpy.data.meshes.new("OpsEntranceArchGlowMesh")
     bm_ag = bmesh.new()
-    # Glowing cyan roof fascia perimeter strip
     add_box(bm_ag, (0.0, -1.60, 1.52), (3.90, 0.035, 0.032))
     add_box(bm_ag, (-1.94, -0.22, 1.52), (0.035, 2.76, 0.032))
     add_box(bm_ag, (1.94, -0.22, 1.52), (0.035, 2.76, 0.032))
-    # Glowing doorway portal frame & floor runway strips leading into the Control Room
     add_box(bm_ag, (-0.57, -1.54, 0.68), (0.036, 0.045, 0.86))
     add_box(bm_ag, (0.57, -1.54, 0.68), (0.036, 0.045, 0.86))
     add_box(bm_ag, (0.0, -1.54, 1.12), (1.18, 0.055, 0.042))
     for rx_strip in (-0.28, 0.28):
         add_box(bm_ag, (rx_strip, -1.10, 0.37), (0.030, 1.48, 0.014))
-    # Glowing LED strips on the West-Wing AI Server Racks
     for ry_srv in (-0.88, -0.48, -0.08, 0.32):
         for z_led in (0.48, 0.62, 0.76, 0.90):
             add_box(bm_ag, (-1.24, ry_srv, z_led), (0.018, 0.18, 0.020))
@@ -1576,41 +1655,8 @@ def build_operations_hub(root, mats, templates=None):
     arch_glow_obj.data.materials.append(mats["ops_glass_cyan"])
     link_obj(arch_glow_obj, ops_grp)
 
-    # 4. Motorized Double Sliding Glass Entrance Doors (OpsDoor_Left and OpsDoor_Right)
-    def build_sliding_door_panel(door_name: str, side_sign: float):
-        mesh_dr = bpy.data.meshes.new(f"{door_name}Mesh")
-        bm_dr = bmesh.new()
-        cx_panel = side_sign * 0.28
-        # Slim brushed-steel door frame stiles & rails around a large glass door leaf
-        add_box(bm_dr, (side_sign * 0.025, 0.0, 0.42), (0.042, 0.042, 0.84))
-        add_box(bm_dr, (side_sign * 0.535, 0.0, 0.42), (0.042, 0.042, 0.84))
-        add_box(bm_dr, (cx_panel, 0.0, 0.81), (0.55, 0.042, 0.055))
-        add_box(bm_dr, (cx_panel, 0.0, 0.04), (0.55, 0.042, 0.065))
-        add_box(bm_dr, (cx_panel, -0.015, 0.42), (0.52, 0.048, 0.032))
-        bm_dr.normal_update()
-        bm_dr.to_mesh(mesh_dr)
-        bm_dr.free()
 
-        dr_obj = bpy.data.objects.new(door_name, mesh_dr)
-        dr_obj.location = (0.0, -1.48, 0.24)
-        dr_obj.data.materials.append(mats["steel_housing"])
-        link_obj(dr_obj, ops_grp)
-
-        mesh_win = bpy.data.meshes.new(f"{door_name}GlassMesh")
-        bm_w = bmesh.new()
-        add_box(bm_w, (cx_panel, 0.0, 0.42), (0.46, 0.016, 0.72))
-        bm_w.normal_update()
-        bm_w.to_mesh(mesh_win)
-        bm_w.free()
-        win_obj = bpy.data.objects.new(f"{door_name}_Glass", mesh_win)
-        win_obj.data.materials.append(glass_curtain_mat)
-        link_obj(win_obj, dr_obj)
-        return dr_obj
-
-    build_sliding_door_panel("OpsDoor_Left", -1.0)
-    build_sliding_door_panel("OpsDoor_Right", 1.0)
-
-    # 5. INTERIOR AI COMMAND & CONTROL ROOM (3D Hologram Table + 4 Operator Consoles + Curved Grafana Video Wall)
+def _build_ops_hologram_table(ops_grp, mats):
     holo_proj = import_single_glb_mesh(
         "energy_projector.glb",
         "OpsHoloProjector",
@@ -1649,7 +1695,8 @@ def build_operations_hub(root, mats, templates=None):
     holo_slip_obj.data.materials.append(mats["imu_glow"])
     link_obj(holo_slip_obj, holo_terrain_obj)
 
-    # 5B. Operator Desks (table_futuristic.glb) & Operator Chairs (operator_seat.glb) + Widescreen Grafana Desk Monitors
+
+def _build_ops_desks_and_consoles(ops_grp, mats, grafana_mat):
     desk_tmpl = import_single_glb_mesh(
         "table_futuristic.glb",
         "Tmpl_OpsDesk",
@@ -1703,13 +1750,13 @@ def build_operations_hub(root, mats, templates=None):
         if tmpl_d and tmpl_d.name in bpy.data.objects:
             bpy.data.objects.remove(tmpl_d, do_unlink=True)
 
-    # 5C. CURVED PANORAMIC ULTRA-WIDE GRAFANA & WEBGIS COMMAND VIDEO WALL (OpsVideoWallBezel + OpsVideoWall_Screen)
+
+def _build_ops_video_wall(ops_grp, mats, grafana_mat):
     mesh_wall_bezel = bpy.data.meshes.new("OpsVideoWallBezelMesh")
     bm_wb = bmesh.new()
     add_box(bm_wb, (0.0, 0.44, 0.90), (1.36, 0.036, 0.78))
     add_box(bm_wb, (-0.94, 0.29, 0.90), (0.68, 0.036, 0.78), rot_euler=(0.0, 0.0, 0.42))
     add_box(bm_wb, (0.94, 0.29, 0.90), (0.68, 0.036, 0.78), rot_euler=(0.0, 0.0, -0.42))
-    # Support pedestals behind the curved video wall
     add_box(bm_wb, (-0.48, 0.48, 0.46), (0.08, 0.08, 0.22))
     add_box(bm_wb, (0.48, 0.48, 0.46), (0.08, 0.08, 0.22))
     bm_wb.normal_update()
@@ -1719,7 +1766,6 @@ def build_operations_hub(root, mats, templates=None):
     wall_bezel_obj.data.materials.append(mats["ops_obsidian"])
     link_obj(wall_bezel_obj, ops_grp)
 
-    # UV-Mapped Seamless Curved 3-Panel Grafana Display Surface (y = 0.418 center, y = 0.268 left/right wings)
     mesh_wall_scr = bpy.data.meshes.new("OpsVideoWallScreenMesh")
     bm_ws = bmesh.new()
     create_uv_quad_panel(bm_ws, center=(-0.93, 0.268, 0.90), width=0.64, height=0.72, yaw_rad=0.42, u0=0.0, u1=0.27)
@@ -1732,12 +1778,11 @@ def build_operations_hub(root, mats, templates=None):
     wall_scr_obj.data.materials.append(grafana_mat)
     link_obj(wall_scr_obj, ops_grp)
 
-    # 6. Rooftop Radar Lattice Tower, HVAC Units & Dual Parabolic Dish Pedestals (on top of Penthouse Roof z = 1.64)
+
+def _build_ops_roof_tech(ops_grp, mats, tx, ty, tower_top_z):
     mesh_roof = bpy.data.meshes.new("OpsRoofTechMesh")
     bm_rt = bmesh.new()
-    tx, ty = 0.0, 0.62
     tower_base_z = 1.64
-    tower_top_z = 2.38
     for leg_i in range(4):
         ang = leg_i * (math.pi / 2.0) + (math.pi / 4.0)
         p_bot = (tx + math.cos(ang) * 0.16, ty + math.sin(ang) * 0.16, tower_base_z)
@@ -1751,7 +1796,6 @@ def build_operations_hub(root, mats, templates=None):
             p1 = (tx + math.cos(ang_next) * r_cur, ty + math.sin(ang_next) * r_cur, z_br)
             add_strut(bm_rt, p0, p1, radius=0.009, segs=6)
     add_cylinder(bm_rt, (tx, ty, tower_top_z), 0.11, 0.09, 0.04, segs=14)
-    # Rooftop dish pedestals & modular HVAC chiller banks
     add_cylinder(bm_rt, (1.28, 0.62, 1.70), 0.08, 0.06, 0.14, segs=12)
     add_cylinder(bm_rt, (-1.28, 0.55, 1.70), 0.075, 0.055, 0.12, segs=12)
     for hvac_x in (-1.25, -0.85, -0.45):
@@ -1764,42 +1808,9 @@ def build_operations_hub(root, mats, templates=None):
     roof_obj.data.materials.append(mats["steel_housing"])
     link_obj(roof_obj, ops_grp)
 
-    # 7. Primary & Secondary Steerable Deep-Space Ku-Band Parabolic Satellite Dishes
-    def create_parabolic_dish(dish_name: str, feed_name: str, pivot_loc, scale_d=1.0):
-        mesh_d = bpy.data.meshes.new(f"{dish_name}Mesh")
-        bm_d = bmesh.new()
-        dish_tilt = (-0.52, -0.25, 0.0)
-        add_cylinder(bm_d, (0, 0, 0.0), 0.08 * scale_d, 0.045 * scale_d, 0.045 * scale_d, segs=16, rot_euler=dish_tilt)
-        add_cylinder(bm_d, (0, 0.022 * scale_d, 0.04 * scale_d), 0.19 * scale_d, 0.08 * scale_d, 0.055 * scale_d, segs=20, rot_euler=dish_tilt)
-        add_cylinder(bm_d, (0, 0.045 * scale_d, 0.085 * scale_d), 0.28 * scale_d, 0.19 * scale_d, 0.05 * scale_d, segs=24, rot_euler=dish_tilt)
-        focal_pt = (0.0, 0.12 * scale_d, 0.25 * scale_d)
-        for f_i in range(3):
-            ang = f_i * (math.pi * 2.0 / 3.0)
-            rim_pt = (math.cos(ang) * 0.19 * scale_d, (0.035 + math.sin(ang) * 0.16) * scale_d, 0.08 * scale_d)
-            add_strut(bm_d, rim_pt, focal_pt, radius=0.007 * scale_d, segs=6)
-        bm_d.normal_update()
-        bm_d.to_mesh(mesh_d)
-        bm_d.free()
-        d_obj = bpy.data.objects.new(dish_name, mesh_d)
-        d_obj.location = pivot_loc
-        d_obj.data.materials.append(mats["steel_housing"])
-        link_obj(d_obj, ops_grp)
+    _build_parabolic_dish("OpsTrackingDish", "OpsDishFeed", (1.28, 0.62, 1.78), 1.22, ops_grp, mats)
+    _build_parabolic_dish("OpsSecondaryDish", "OpsSecondaryDishFeed", (-1.28, 0.55, 1.76), 1.02, ops_grp, mats)
 
-        mesh_fd = bpy.data.meshes.new(f"{feed_name}Mesh")
-        bm_fd = bmesh.new()
-        add_cylinder(bm_fd, focal_pt, 0.030 * scale_d, 0.018 * scale_d, 0.05 * scale_d, segs=12, rot_euler=dish_tilt)
-        bm_fd.normal_update()
-        bm_fd.to_mesh(mesh_fd)
-        bm_fd.free()
-        f_obj = bpy.data.objects.new(feed_name, mesh_fd)
-        f_obj.data.materials.append(mats["imu_glow"])
-        link_obj(f_obj, d_obj)
-        return d_obj
-
-    create_parabolic_dish("OpsTrackingDish", "OpsDishFeed", (1.28, 0.62, 1.78), scale_d=1.22)
-    create_parabolic_dish("OpsSecondaryDish", "OpsSecondaryDishFeed", (-1.28, 0.55, 1.76), scale_d=1.02)
-
-    # 8. Rooftop Helipad "H" Emblem + Perimeter Beacon Ring on the East Roof Deck (z = 1.66)
     hx, hy, hz_mark = 1.05, -0.35, 1.66
     mesh_heli = bpy.data.meshes.new("OpsHelipadMarkingMesh")
     bm_h = bmesh.new()
@@ -1823,7 +1834,6 @@ def build_operations_hub(root, mats, templates=None):
     heli_mark_obj.data.materials.append(mats["ring_lime"])
     link_obj(heli_mark_obj, ops_grp)
 
-    # 9. Rotating Phased-Array S-Band Doppler Radar Scanner (OpsBeaconCore)
     mesh_beacon = bpy.data.meshes.new("OpsBeaconMesh")
     bm_b = bmesh.new()
     add_cylinder(bm_b, (0, 0, 0.04), 0.062, 0.062, 0.08, segs=14)
@@ -1840,7 +1850,8 @@ def build_operations_hub(root, mats, templates=None):
     beacon_obj.data.materials.append(mats["gnss_base_dome"])
     link_obj(beacon_obj, ops_grp)
 
-    # 10. Build 3D Glowing Telemetry Conduits & High-Visibility 3D Data Packet Capsules Streaming from Sensors to Data Center
+
+def _build_ops_telemetry_network(root, ox, oy, oz, mats):
     net_grp = bpy.data.objects.new("Telemetry_Network", None)
     link_obj(net_grp, root)
     link_specs = [
@@ -1870,7 +1881,6 @@ def build_operations_hub(root, mats, templates=None):
         cond_obj.data.materials.append(l_mat)
         link_obj(cond_obj, net_grp)
 
-        # Spawn 2 Large Glowing 3D Data Packet Capsules per link (DataPacket_{l_idx}_0 and DataPacket_{l_idx}_1)
         for p_sub in range(2):
             m_pkt = bpy.data.meshes.new(f"DataPacket_{l_idx}_{p_sub}Mesh")
             bm_pk = bmesh.new()
@@ -1886,7 +1896,8 @@ def build_operations_hub(root, mats, templates=None):
             pkt_obj.data.materials.append(l_mat)
             link_obj(pkt_obj, net_grp)
 
-    # 10. Import Real 3D Quadcopter Drones (drone.glb - 5,223 verts) for OpsSurveyDrone & OpsRescueDrone
+
+def _build_ops_drones_and_gate(root, ox, oy, oz, mats):
     drone_mat_map = {
         "Material.001": mats["ops_obsidian"],
         "Material.002": mats["heli_white"],
@@ -1920,7 +1931,6 @@ def build_operations_hub(root, mats, templates=None):
         drone2.location = (-1.15, 0.55, terrain_height(-1.15, 0.55) + 1.38)
         link_obj(drone2, root)
 
-    # 11. Highway Early Warning Gantry
     gx_y = -1.65
     gx = road_center_x(gx_y)
     gz = terrain_height(gx, gx_y)
@@ -1959,8 +1969,187 @@ def build_operations_hub(root, mats, templates=None):
     gate_obj.data.materials.append(mats["imu_glow"])
     gate_obj.location = (gx, gx_y, gz)
     link_obj(gate_obj, root)
+
+
+def build_operations_hub(root, mats, templates=None):
+    """Build a Cohesive Modern Glass-and-Steel AI Data Center & Command Building with Motorized Sliding Glass Doors, Server Racks, Rooftop Helipad, and a Curved Panoramic Grafana + WebGIS Video Wall."""
+    _ = templates
+    ox, oy = 5.15, -0.55
+    oz = terrain_height(ox, oy)
+    ops_grp = bpy.data.objects.new("Operations_Command_Node", None)
+    ops_grp.location = (ox, oy, oz)
+    link_obj(ops_grp, root)
+
+    grafana_mat = create_grafana_wall_material()
+    glass_curtain_mat = make_material(
+        "BuildingCurtainGlassMat",
+        base_color=(0.55, 0.90, 0.98, 1.0),
+        metallic=0.25,
+        roughness=0.08,
+        emission_color=(0.18, 0.72, 0.88),
+        emission_strength=0.25,
+        alpha=0.18,
+    )
+
+    _build_ops_campus_pad(ops_grp, mats)
+    _build_ops_envelope(ops_grp, mats, glass_curtain_mat)
+    _build_ops_arch_glow(ops_grp, mats)
+    _build_sliding_door_panel("OpsDoor_Left", -1.0, ops_grp, mats, glass_curtain_mat)
+    _build_sliding_door_panel("OpsDoor_Right", 1.0, ops_grp, mats, glass_curtain_mat)
+    _build_ops_hologram_table(ops_grp, mats)
+    _build_ops_desks_and_consoles(ops_grp, mats, grafana_mat)
+    _build_ops_video_wall(ops_grp, mats, grafana_mat)
+    _build_ops_roof_tech(ops_grp, mats, 0.0, 0.62, 2.38)
+    _build_ops_telemetry_network(root, ox, oy, oz, mats)
+    _build_ops_drones_and_gate(root, ox, oy, oz, mats)
     return ops_grp
 
+
+
+def _assign_helicopter_materials(body_m, win_m, mats):
+    body_m.data.materials.clear()
+    body_m.data.materials.append(mats["heli_red_orange"])  # 0: High-vis rescue red-orange
+    body_m.data.materials.append(mats["heli_white"])       # 1: Crisp alpine white cabin band
+    body_m.data.materials.append(mats["ops_obsidian"])     # 2: Dark carbon landing gear & exhausts
+    body_m.data.materials.append(mats["ops_glass_cyan"])   # 3: Glowing cyan rescue telemetry stripe
+    for poly in body_m.data.polygons:
+        c = poly.center
+        if c.z < -3.05:
+            poly.material_index = 2
+        elif -1.18 <= c.z <= -0.92 and -7.2 < c.y < 3.6:
+            poly.material_index = 3
+        elif -2.35 < c.z < -1.18 and -6.8 < c.y < 2.5:
+            poly.material_index = 1
+        else:
+            poly.material_index = 0
+
+    if win_m:
+        win_m.data.materials.clear()
+        win_m.data.materials.append(mats["ops_glass_cyan"])
+        for poly in win_m.data.polygons:
+            poly.material_index = 0
+        bpy.ops.object.select_all(action="DESELECT")
+        body_m.select_set(True)
+        win_m.select_set(True)
+        bpy.context.view_layer.objects.active = body_m
+        bpy.ops.object.join()
+
+
+def _setup_helicopter_rotors(body_m, main_r, tail_r, bc, s, mats, heli_name):
+    mr_verts = [v.co for v in main_r.data.vertices]
+    mr_c = Vector((
+        0.5 * (min(v.x for v in mr_verts) + max(v.x for v in mr_verts)),
+        0.5 * (min(v.y for v in mr_verts) + max(v.y for v in mr_verts)),
+        0.5 * (min(v.z for v in mr_verts) + max(v.z for v in mr_verts)),
+    ))
+    max_r_dist = max(((v.co - mr_c).xy.length for v in main_r.data.vertices), default=1.0)
+    main_r.data.materials.clear()
+    main_r.data.materials.append(mats["ops_obsidian"])
+    main_r.data.materials.append(mats["imu_glow"])
+    for poly in main_r.data.polygons:
+        r_dist = (poly.center - mr_c).xy.length
+        poly.material_index = 1 if r_dist > 0.80 * max_r_dist else 0
+    for v in main_r.data.vertices:
+        v.co = (v.co - mr_c) * s
+    main_r.data.update()
+    main_r.name = f"{heli_name}_Rotor"
+    main_r.rotation_mode = "XYZ"
+    main_r.location = (mr_c - bc) * s
+    link_obj(main_r, body_m)
+
+    tr_verts = [v.co for v in tail_r.data.vertices]
+    tr_c = Vector((
+        0.5 * (min(v.x for v in tr_verts) + max(v.x for v in tr_verts)),
+        0.5 * (min(v.y for v in tr_verts) + max(v.y for v in tr_verts)),
+        0.5 * (min(v.z for v in tr_verts) + max(v.z for v in tr_verts)),
+    ))
+    tail_r.data.materials.clear()
+    tail_r.data.materials.append(mats["imu_glow"])
+    for poly in tail_r.data.polygons:
+        poly.material_index = 0
+    for v in tail_r.data.vertices:
+        v.co = (v.co - tr_c) * s
+    tail_r.data.update()
+    tail_r.name = f"{heli_name}_TailRotor"
+    tail_r.rotation_mode = "XYZ"
+    tail_r.location = (tr_c - bc) * s
+    link_obj(tail_r, body_m)
+
+
+def _find_helicopter_meshes(imp_names):
+    meshes = {
+        bpy.data.objects[n].name: bpy.data.objects[n]
+        for n in imp_names
+        if n in bpy.data.objects and bpy.data.objects[n].type == "MESH"
+    }
+    body_m = next((m for k, m in meshes.items() if "windows" not in k and "rotor" not in k and "propellar" not in k), None)
+    win_m = next((m for k, m in meshes.items() if "windows" in k), None)
+    main_r = next((m for k, m in meshes.items() if "propellar" in k), None)
+    tail_r = next((m for k, m in meshes.items() if "backrotor" in k), None)
+    return body_m, win_m, main_r, tail_r
+
+
+def _reset_helicopter_mesh_transforms(meshes):
+    bpy.ops.object.select_all(action="DESELECT")
+    for m in meshes:
+        if not m:
+            continue
+        mw = m.matrix_world.copy()
+        m.parent = None
+        m.rotation_mode = "XYZ"
+        m.matrix_world = mw
+        m.select_set(True)
+    bpy.context.view_layer.objects.active = meshes[0]
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+
+
+def _scale_helicopter_body(body_m, target_length):
+    b_verts = [v.co for v in body_m.data.vertices]
+    min_x = min(v.x for v in b_verts)
+    max_x = max(v.x for v in b_verts)
+    min_y = min(v.y for v in b_verts)
+    max_y = max(v.y for v in b_verts)
+    min_z = min(v.z for v in b_verts)
+    max_z = max(v.z for v in b_verts)
+    bc = Vector((0.5 * (min_x + max_x), 0.5 * (min_y + max_y), 0.5 * (min_z + max_z)))
+    span_y = max(0.01, max_y - min_y)
+    s = target_length / span_y
+    for v in body_m.data.vertices:
+        v.co = (v.co - bc) * s
+    body_m.data.update()
+    return bc, s
+
+
+def build_single_helicopter(heli_name: str, loc, rot_euler, heli_glb, mats, root, target_length=1.62):
+    before_names = set(bpy.data.objects.keys())
+    bpy.ops.import_scene.gltf(filepath=str(heli_glb))
+    imp_names = set(bpy.data.objects.keys()) - before_names
+    body_m, win_m, main_r, tail_r = _find_helicopter_meshes(imp_names)
+
+    if not body_m or not main_r or not tail_r:
+        for n in tuple(imp_names):
+            if n in bpy.data.objects:
+                bpy.data.objects.remove(bpy.data.objects[n], do_unlink=True)
+        return None
+
+    _reset_helicopter_mesh_transforms((body_m, win_m, main_r, tail_r))
+    _assign_helicopter_materials(body_m, win_m, mats)
+    bc, s = _scale_helicopter_body(body_m, target_length)
+
+    body_m.name = heli_name
+    body_m.rotation_mode = "XYZ"
+    _setup_helicopter_rotors(body_m, main_r, tail_r, bc, s, mats, heli_name)
+
+    body_m.location = loc
+    body_m.rotation_euler = rot_euler
+    link_obj(body_m, root)
+
+    keep = {body_m, main_r, tail_r}
+    for n in tuple(imp_names):
+        obj = bpy.data.objects.get(n)
+        if obj and obj not in keep:
+            bpy.data.objects.remove(obj, do_unlink=True)
+    return body_m
 
 
 def import_helicopters(root, mats):
@@ -1969,143 +2158,14 @@ def import_helicopters(root, mats):
     if not heli_glb.exists():
         return
 
-    def build_single_helicopter(heli_name: str, loc, rot_euler, target_length=1.62):
-        before_names = set(bpy.data.objects.keys())
-        bpy.ops.import_scene.gltf(filepath=str(heli_glb))
-        imp_names = set(bpy.data.objects.keys()) - before_names
-
-        meshes = {
-            bpy.data.objects[n].name: bpy.data.objects[n]
-            for n in imp_names
-            if n in bpy.data.objects and bpy.data.objects[n].type == "MESH"
-        }
-        body_m = next((m for k, m in meshes.items() if "windows" not in k and "rotor" not in k and "propellar" not in k), None)
-        win_m = next((m for k, m in meshes.items() if "windows" in k), None)
-        main_r = next((m for k, m in meshes.items() if "propellar" in k), None)
-        tail_r = next((m for k, m in meshes.items() if "backrotor" in k), None)
-
-        if not body_m or not main_r or not tail_r:
-            for n in tuple(imp_names):
-                if n in bpy.data.objects:
-                    bpy.data.objects.remove(bpy.data.objects[n], do_unlink=True)
-            return None
-
-        bpy.ops.object.select_all(action="DESELECT")
-        for m in (body_m, win_m, main_r, tail_r):
-            if not m:
-                continue
-            mw = m.matrix_world.copy()
-            m.parent = None
-            m.rotation_mode = "XYZ"
-            m.matrix_world = mw
-            m.select_set(True)
-        bpy.context.view_layer.objects.active = body_m
-        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-
-        # Assign Search & Rescue Coast Guard Livery to fuselage BEFORE joining windows
-        body_m.data.materials.clear()
-        body_m.data.materials.append(mats["heli_red_orange"])  # 0: High-vis rescue red-orange
-        body_m.data.materials.append(mats["heli_white"])       # 1: Crisp alpine white cabin band
-        body_m.data.materials.append(mats["ops_obsidian"])     # 2: Dark carbon landing gear & exhausts
-        body_m.data.materials.append(mats["ops_glass_cyan"])   # 3: Glowing cyan rescue telemetry stripe
-        for poly in body_m.data.polygons:
-            c = poly.center
-            if c.z < -3.05:
-                poly.material_index = 2
-            elif -1.18 <= c.z <= -0.92 and -7.2 < c.y < 3.6:
-                poly.material_index = 3
-            elif -2.35 < c.z < -1.18 and -6.8 < c.y < 2.5:
-                poly.material_index = 1
-            else:
-                poly.material_index = 0
-
-        if win_m:
-            win_m.data.materials.clear()
-            win_m.data.materials.append(mats["ops_glass_cyan"])
-            for poly in win_m.data.polygons:
-                poly.material_index = 0
-            bpy.ops.object.select_all(action="DESELECT")
-            body_m.select_set(True)
-            win_m.select_set(True)
-            bpy.context.view_layer.objects.active = body_m
-            bpy.ops.object.join()
-
-        # Compute body center and scale factor
-        b_verts = [v.co for v in body_m.data.vertices]
-        min_x = min(v.x for v in b_verts)
-        max_x = max(v.x for v in b_verts)
-        min_y = min(v.y for v in b_verts)
-        max_y = max(v.y for v in b_verts)
-        min_z = min(v.z for v in b_verts)
-        max_z = max(v.z for v in b_verts)
-        bc = Vector((0.5 * (min_x + max_x), 0.5 * (min_y + max_y), 0.5 * (min_z + max_z)))
-        span_y = max(0.01, max_y - min_y)
-        s = target_length / span_y
-
-        for v in body_m.data.vertices:
-            v.co = (v.co - bc) * s
-        body_m.data.update()
-        body_m.name = heli_name
-        body_m.rotation_mode = "XYZ"
-
-        # Configure Main Top Rotor centered at its hub
-        mr_verts = [v.co for v in main_r.data.vertices]
-        mr_c = Vector((
-            0.5 * (min(v.x for v in mr_verts) + max(v.x for v in mr_verts)),
-            0.5 * (min(v.y for v in mr_verts) + max(v.y for v in mr_verts)),
-            0.5 * (min(v.z for v in mr_verts) + max(v.z for v in mr_verts)),
-        ))
-        max_r_dist = max(((v.co - mr_c).xy.length for v in main_r.data.vertices), default=1.0)
-        main_r.data.materials.clear()
-        main_r.data.materials.append(mats["ops_obsidian"])
-        main_r.data.materials.append(mats["imu_glow"])
-        for poly in main_r.data.polygons:
-            r_dist = (poly.center - mr_c).xy.length
-            poly.material_index = 1 if r_dist > 0.80 * max_r_dist else 0
-        for v in main_r.data.vertices:
-            v.co = (v.co - mr_c) * s
-        main_r.data.update()
-        main_r.name = f"{heli_name}_Rotor"
-        main_r.rotation_mode = "XYZ"
-        main_r.location = (mr_c - bc) * s
-        link_obj(main_r, body_m)
-
-        # Configure Tail Rotor centered at its hub
-        tr_verts = [v.co for v in tail_r.data.vertices]
-        tr_c = Vector((
-            0.5 * (min(v.x for v in tr_verts) + max(v.x for v in tr_verts)),
-            0.5 * (min(v.y for v in tr_verts) + max(v.y for v in tr_verts)),
-            0.5 * (min(v.z for v in tr_verts) + max(v.z for v in tr_verts)),
-        ))
-        tail_r.data.materials.clear()
-        tail_r.data.materials.append(mats["imu_glow"])
-        for poly in tail_r.data.polygons:
-            poly.material_index = 0
-        for v in tail_r.data.vertices:
-            v.co = (v.co - tr_c) * s
-        tail_r.data.update()
-        tail_r.name = f"{heli_name}_TailRotor"
-        tail_r.rotation_mode = "XYZ"
-        tail_r.location = (tr_c - bc) * s
-        link_obj(tail_r, body_m)
-
-        body_m.location = loc
-        body_m.rotation_euler = rot_euler
-        link_obj(body_m, root)
-
-        # Cleanup empty nodes from glTF import
-        keep = {body_m, main_r, tail_r}
-        for n in tuple(imp_names):
-            obj = bpy.data.objects.get(n)
-            if obj and obj not in keep:
-                bpy.data.objects.remove(obj, do_unlink=True)
-        return body_m
-
     # 1. Primary Rescue Helicopter patrolling over the Landslide Slip Zone & Highway Corridor
     build_single_helicopter(
         "Rescue_Helicopter_01",
         loc=(-0.55, -0.45, 2.78),
         rot_euler=(0.08, -0.05, -0.85),
+        heli_glb=heli_glb,
+        mats=mats,
+        root=root,
         target_length=1.68,
     )
     # 2. Secondary Command Helicopter hovering/banking over the Data Center Helipad & Valley
@@ -2113,8 +2173,100 @@ def import_helicopters(root, mats):
         "Rescue_Helicopter_02",
         loc=(4.65, -1.35, 2.38),
         rot_euler=(0.06, 0.04, 2.35),
+        heli_glb=heli_glb,
+        mats=mats,
+        root=root,
         target_length=1.46,
     )
+
+
+def extract_vehicle_mesh(car_name: str, target_width=0.33):
+    car_obj = bpy.data.objects.get(car_name)
+    if not car_obj or car_obj.type != "MESH":
+        return None
+    parts = [car_obj] + [ch for ch in car_obj.children_recursive if ch.type == "MESH"]
+    bpy.ops.object.select_all(action="DESELECT")
+    for p in parts:
+        p.select_set(True)
+    bpy.context.view_layer.objects.active = car_obj
+    bpy.ops.object.duplicate()
+    dup_parts = [o for o in bpy.context.selected_objects if o.type == "MESH"]
+    if not dup_parts:
+        return None
+    # CRITICAL FIX: Set rotation_mode = "XYZ" BEFORE assigning matrix_world so quaternion rotations are preserved!
+    for d in dup_parts:
+        mw = d.matrix_world.copy()
+        d.parent = None
+        d.rotation_mode = "XYZ"
+        d.matrix_world = mw
+    bpy.context.view_layer.objects.active = dup_parts[0]
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    if len(dup_parts) > 1:
+        bpy.ops.object.join()
+    joined = bpy.context.view_layer.objects.active
+    joined.rotation_mode = "XYZ"
+    joined.location = (0, 0, 0)
+    joined.rotation_euler = (0, 0, 0)
+    joined.scale = (1, 1, 1)
+
+    verts = [v.co for v in joined.data.vertices]
+    min_x = min(v.x for v in verts)
+    max_x = max(v.x for v in verts)
+    min_y = min(v.y for v in verts)
+    max_y = max(v.y for v in verts)
+    min_z = min(v.z for v in verts)
+    cx = 0.5 * (min_x + max_x)
+    cy = 0.5 * (min_y + max_y)
+    span_x = max(0.01, max_x - min_x)
+    s = target_width / span_x
+    for v in joined.data.vertices:
+        v.co.x = (v.co.x - cx) * s
+        v.co.y = (v.co.y - cy) * s
+        v.co.z = (v.co.z - min_z) * s
+    joined.data.update()
+    return joined
+
+
+def _update_vehicle_materials():
+    for mat in bpy.data.materials:
+        if "lospec" in mat.name.lower() or "material.001" in mat.name.lower():
+            mat.diffuse_color = (0.28, 0.68, 0.88, 1.0)
+            mat.metallic = 0.25
+            mat.roughness = 0.24
+            if mat.node_tree:
+                bsdf = mat.node_tree.nodes.get(PRINCIPLED_BSDF_NODE)
+                if bsdf:
+                    bsdf.inputs["Roughness"].default_value = 0.24
+                    bsdf.inputs["Metallic"].default_value = 0.25
+
+
+def _place_highway_fleet(fleet_grp, vehicle_placements):
+    for v_name, src_name, ry, lane_x, north, tw in vehicle_placements:
+        v_obj = extract_vehicle_mesh(src_name, target_width=tw)
+        if not v_obj:
+            continue
+        v_obj.name = v_name
+        v_obj.rotation_mode = "XYZ"
+        rc = road_center_x(ry)
+        vx = rc + lane_x
+        vz = terrain_height(rc, ry) + 0.030
+        dx_dy = road_dx_dy(ry)
+        yaw = math.atan2(dx_dy, -1.0) if north else math.atan2(-dx_dy, 1.0)
+        v_obj.location = (vx, ry, vz)
+        v_obj.rotation_euler = (0.0, 0.0, yaw)
+        link_obj(v_obj, fleet_grp)
+
+
+def _place_parked_fleet(fleet_grp, parked_configs):
+    for p_name, p_src, px, py, pyaw, ptw in parked_configs:
+        ops_veh = extract_vehicle_mesh(p_src, target_width=ptw)
+        if ops_veh:
+            ops_veh.name = p_name
+            ops_veh.rotation_mode = "XYZ"
+            pz = terrain_height(5.15, -0.55) + 0.24
+            ops_veh.location = (px, py, pz)
+            ops_veh.rotation_euler = (0.0, 0.0, pyaw)
+            link_obj(ops_veh, fleet_grp)
 
 
 def import_web_vehicles(root, mats):
@@ -2127,65 +2279,8 @@ def import_web_vehicles(root, mats):
     before_names = set(bpy.data.objects.keys())
     bpy.ops.import_scene.gltf(filepath=str(cars_glb))
     imported_names = set(bpy.data.objects.keys()) - before_names
+    _update_vehicle_materials()
 
-    for mat in bpy.data.materials:
-        if "lospec" in mat.name.lower() or "material.001" in mat.name.lower():
-            mat.diffuse_color = (0.28, 0.68, 0.88, 1.0)
-            mat.metallic = 0.25
-            mat.roughness = 0.24
-            if mat.node_tree:
-                bsdf = mat.node_tree.nodes.get(PRINCIPLED_BSDF_NODE)
-                if bsdf:
-                    bsdf.inputs["Roughness"].default_value = 0.24
-                    bsdf.inputs["Metallic"].default_value = 0.25
-
-    def extract_vehicle_mesh(car_name: str, target_width=0.33):
-        car_obj = bpy.data.objects.get(car_name)
-        if not car_obj or car_obj.type != "MESH":
-            return None
-        parts = [car_obj] + [ch for ch in car_obj.children_recursive if ch.type == "MESH"]
-        bpy.ops.object.select_all(action="DESELECT")
-        for p in parts:
-            p.select_set(True)
-        bpy.context.view_layer.objects.active = car_obj
-        bpy.ops.object.duplicate()
-        dup_parts = [o for o in bpy.context.selected_objects if o.type == "MESH"]
-        if not dup_parts:
-            return None
-        # CRITICAL FIX: Set rotation_mode = "XYZ" BEFORE assigning matrix_world so quaternion rotations are preserved!
-        for d in dup_parts:
-            mw = d.matrix_world.copy()
-            d.parent = None
-            d.rotation_mode = "XYZ"
-            d.matrix_world = mw
-        bpy.context.view_layer.objects.active = dup_parts[0]
-        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-        if len(dup_parts) > 1:
-            bpy.ops.object.join()
-        joined = bpy.context.view_layer.objects.active
-        joined.rotation_mode = "XYZ"
-        joined.location = (0, 0, 0)
-        joined.rotation_euler = (0, 0, 0)
-        joined.scale = (1, 1, 1)
-
-        verts = [v.co for v in joined.data.vertices]
-        min_x = min(v.x for v in verts)
-        max_x = max(v.x for v in verts)
-        min_y = min(v.y for v in verts)
-        max_y = max(v.y for v in verts)
-        min_z = min(v.z for v in verts)
-        cx = 0.5 * (min_x + max_x)
-        cy = 0.5 * (min_y + max_y)
-        span_x = max(0.01, max_x - min_x)
-        s = target_width / span_x
-        for v in joined.data.vertices:
-            v.co.x = (v.co.x - cx) * s
-            v.co.y = (v.co.y - cy) * s
-            v.co.z = (v.co.z - min_z) * s
-        joined.data.update()
-        return joined
-
-    # 12 Moving Highway Vehicles along the expanded 10.8m highway
     vehicle_placements = [
         # Northbound (+Y_blender / -Z_three, right lane +0.21)
         ("Vehicle_01_PoliceCruiser", "car_police", -4.45, 0.21, True, 0.33),
@@ -2205,37 +2300,14 @@ def import_web_vehicles(root, mats):
 
     fleet_grp = bpy.data.objects.new("Highway_Vehicle_Fleet", None)
     link_obj(fleet_grp, root)
+    _place_highway_fleet(fleet_grp, vehicle_placements)
 
-    for v_name, src_name, ry, lane_x, north, tw in vehicle_placements:
-        v_obj = extract_vehicle_mesh(src_name, target_width=tw)
-        if not v_obj:
-            continue
-        v_obj.name = v_name
-        v_obj.rotation_mode = "XYZ"
-        rc = road_center_x(ry)
-        vx = rc + lane_x
-        vz = terrain_height(rc, ry) + 0.030
-        dx_dy = road_dx_dy(ry)
-        yaw = math.atan2(dx_dy, -1.0) if north else math.atan2(-dx_dy, 1.0)
-        v_obj.location = (vx, ry, vz)
-        v_obj.rotation_euler = (0.0, 0.0, yaw)
-        link_obj(v_obj, fleet_grp)
-
-    # Place 3 command/utility vehicles parked on the Data Center Citadel forecourt flanking the entrance ramp
     parked_configs = [
         ("Vehicle_13_OpsUtilityPickup", "car_mini-pickup", 3.92, -2.32, 0.38, 0.33),
         ("Vehicle_14_OpsCommandSUV", "car_minivan", 4.38, -2.48, 0.22, 0.33),
         ("Vehicle_15_OpsPatrolUnit", "car_police", 5.95, -2.38, -0.28, 0.33),
     ]
-    for p_name, p_src, px, py, pyaw, ptw in parked_configs:
-        ops_veh = extract_vehicle_mesh(p_src, target_width=ptw)
-        if ops_veh:
-            ops_veh.name = p_name
-            ops_veh.rotation_mode = "XYZ"
-            pz = terrain_height(5.15, -0.55) + 0.24
-            ops_veh.location = (px, py, pz)
-            ops_veh.rotation_euler = (0.0, 0.0, pyaw)
-            link_obj(ops_veh, fleet_grp)
+    _place_parked_fleet(fleet_grp, parked_configs)
 
     for name in tuple(imported_names):
         obj = bpy.data.objects.get(name)
@@ -2243,85 +2315,78 @@ def import_web_vehicles(root, mats):
             bpy.data.objects.remove(obj, do_unlink=True)
 
 
-def import_nasa_satellites(sat_grp, mats):
-    """Import real NASA 3D spacecraft models (EO-1, DSCOVR, TDRS & CubeSat) and deploy a high-altitude orbital constellation."""
-    templates = {}
-    sat_files = {
-        "eo1": ("nasa_eo1.glb", 0.08, 1.55),
-        "dscovr": ("nasa_dscovr.glb", 0.09, 1.62),
-        "tdrs": ("nasa_tdrs.glb", 1.0, 1.68),
-        "cubesat": ("cubesat.glb", 1.0, 1.28),
-    }
-
-    for key, (fname, dec_ratio, target_span) in sat_files.items():
-        fpath = BLENDER_DIR / "models" / fname
-        if not fpath.exists():
+def _apply_satellite_materials(joined, mats):
+    for slot in joined.material_slots:
+        m = slot.material
+        if not m:
             continue
-        before_names = set(bpy.data.objects.keys())
-        bpy.ops.import_scene.gltf(filepath=str(fpath))
-        imp_names = set(bpy.data.objects.keys()) - before_names
-        meshes = [bpy.data.objects[n] for n in imp_names if n in bpy.data.objects and bpy.data.objects[n].type == "MESH"]
-        if not meshes:
-            continue
-        bpy.ops.object.select_all(action="DESELECT")
-        for m in meshes:
-            mw = m.matrix_world.copy()
-            m.parent = None
-            m.rotation_mode = "XYZ"
-            m.matrix_world = mw
-            m.select_set(True)
-        bpy.context.view_layer.objects.active = meshes[0]
-        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-        if len(meshes) > 1:
-            bpy.ops.object.join()
-        joined = bpy.context.view_layer.objects.active
-        joined_name = joined.name
-        joined.rotation_mode = "XYZ"
-        joined.location = (0, 0, 0)
-        joined.rotation_euler = (0, 0, 0)
-        joined.scale = (1, 1, 1)
+        mname = m.name.lower()
+        if any(k in mname for k in ("gold", "brass", "foil", "yellow", "layer10", "layer6", "cube0", "seg20")):
+            slot.material = mats["sat_gold_foil"]
+        elif any(k in mname for k in ("solar", "panel", "layer1", "shiny_panel", "tex_01", "wing", "blue")):
+            slot.material = mats["sat_solar_wing"]
+        else:
+            slot.material = mats["sat_bus_silver"]
 
-        if dec_ratio < 0.99:
-            bm_clean = bmesh.new()
-            bm_clean.from_mesh(joined.data)
-            bmesh.ops.remove_doubles(bm_clean, verts=bm_clean.verts, dist=0.02)
-            bm_clean.normal_update()
-            bm_clean.to_mesh(joined.data)
-            bm_clean.free()
 
-            mod = joined.modifiers.new("DecimateSat", "DECIMATE")
-            mod.ratio = dec_ratio
-            bpy.ops.object.modifier_apply(modifier="DecimateSat")
+def _prepare_sat_template(fname, dec_ratio, target_span, mats):
+    fpath = BLENDER_DIR / "models" / fname
+    if not fpath.exists():
+        return None
+    before_names = set(bpy.data.objects.keys())
+    bpy.ops.import_scene.gltf(filepath=str(fpath))
+    imp_names = set(bpy.data.objects.keys()) - before_names
+    meshes = [bpy.data.objects[n] for n in imp_names if n in bpy.data.objects and bpy.data.objects[n].type == "MESH"]
+    if not meshes:
+        return None
+    bpy.ops.object.select_all(action="DESELECT")
+    for m in meshes:
+        mw = m.matrix_world.copy()
+        m.parent = None
+        m.rotation_mode = "XYZ"
+        m.matrix_world = mw
+        m.select_set(True)
+    bpy.context.view_layer.objects.active = meshes[0]
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    if len(meshes) > 1:
+        bpy.ops.object.join()
+    joined = bpy.context.view_layer.objects.active
+    joined_name = joined.name
+    joined.rotation_mode = "XYZ"
+    joined.location = (0, 0, 0)
+    joined.rotation_euler = (0, 0, 0)
+    joined.scale = (1, 1, 1)
 
-        verts = [v.co for v in joined.data.vertices]
-        min_v = Vector((min(v.x for v in verts), min(v.y for v in verts), min(v.z for v in verts)))
-        max_v = Vector((max(v.x for v in verts), max(v.y for v in verts), max(v.z for v in verts)))
-        center = 0.5 * (min_v + max_v)
-        span = max(0.01, max(max_v - min_v))
-        scale_f = target_span / span
-        for v in joined.data.vertices:
-            v.co = (v.co - center) * scale_f
-        joined.data.update()
+    if dec_ratio < 0.99:
+        bm_clean = bmesh.new()
+        bm_clean.from_mesh(joined.data)
+        bmesh.ops.remove_doubles(bm_clean, verts=bm_clean.verts, dist=0.02)
+        bm_clean.normal_update()
+        bm_clean.to_mesh(joined.data)
+        bm_clean.free()
 
-        # Assign clean procedural spacecraft materials (Gold Foil, Solar Array, Spacecraft White)
-        for slot in joined.material_slots:
-            m = slot.material
-            if not m:
-                continue
-            mname = m.name.lower()
-            if any(k in mname for k in ("gold", "brass", "foil", "yellow", "layer10", "layer6", "cube0", "seg20")):
-                slot.material = mats["sat_gold_foil"]
-            elif any(k in mname for k in ("solar", "panel", "layer1", "shiny_panel", "tex_01", "wing", "blue")):
-                slot.material = mats["sat_solar_wing"]
-            else:
-                slot.material = mats["sat_bus_silver"]
+        mod = joined.modifiers.new("DecimateSat", "DECIMATE")
+        mod.ratio = dec_ratio
+        bpy.ops.object.modifier_apply(modifier="DecimateSat")
 
-        templates[key] = joined
-        for name in tuple(imp_names):
-            if name != joined_name and name in bpy.data.objects:
-                bpy.data.objects.remove(bpy.data.objects[name], do_unlink=True)
+    verts = [v.co for v in joined.data.vertices]
+    min_v = Vector((min(v.x for v in verts), min(v.y for v in verts), min(v.z for v in verts)))
+    max_v = Vector((max(v.x for v in verts), max(v.y for v in verts), max(v.z for v in verts)))
+    center = 0.5 * (min_v + max_v)
+    span = max(0.01, max(max_v - min_v))
+    scale_f = target_span / span
+    for v in joined.data.vertices:
+        v.co = (v.co - center) * scale_f
+    joined.data.update()
 
-    # Deploy 8 High-Altitude Satellites (DSCOVR, EO-1, TDRS & CubeSat) spread wide across the sky
+    _apply_satellite_materials(joined, mats)
+    for name in tuple(imp_names):
+        if name != joined_name and name in bpy.data.objects:
+            bpy.data.objects.remove(bpy.data.objects[name], do_unlink=True)
+    return joined
+
+
+def _deploy_satellite_constellation(templates, sat_grp):
     sat_configs = [
         ("GNSS_Sat_01", "dscovr", (-3.85, 0.25, 0.15), (0.32, 0.22, -0.35), 1.00),
         ("GNSS_Sat_02", "tdrs", (-1.35, 0.65, 0.38), (0.38, 0.18, 0.45), 1.06),
@@ -2347,6 +2412,28 @@ def import_nasa_satellites(sat_grp, mats):
     for tmpl in tuple(templates.values()):
         if tmpl.name in bpy.data.objects:
             bpy.data.objects.remove(tmpl, do_unlink=True)
+
+
+def import_nasa_satellites(sat_grp, mats):
+    """Import real NASA 3D spacecraft models (EO-1, DSCOVR, TDRS & CubeSat) and deploy a high-altitude orbital constellation."""
+    templates = {}
+    sat_files = {
+        "eo1": ("nasa_eo1.glb", 0.08, 1.55),
+        "dscovr": ("nasa_dscovr.glb", 0.09, 1.62),
+        "tdrs": ("nasa_tdrs.glb", 1.0, 1.68),
+        "cubesat": ("cubesat.glb", 1.0, 1.28),
+    }
+
+    for key, (fname, dec_ratio, target_span) in sat_files.items():
+        joined = _prepare_sat_template(fname, dec_ratio, target_span, mats)
+        if joined:
+            templates[key] = joined
+
+    _deploy_satellite_constellation(templates, sat_grp)
+
+
+
+
 
 
 def import_web_trees_and_forest(root, mats):
@@ -2504,6 +2591,148 @@ def setup_lighting_and_render_previews():
     return (key_obj, rim_obj, fill_obj, ctrl_light_obj, cam_obj)
 
 
+def _animate_radar_dishes(beacon, dish, dish2, drone, drone2, sat_grp, frame, ang):
+    if beacon:
+        beacon.rotation_euler = (0.0, 0.0, ang * 2.0)
+        beacon.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if dish:
+        dish.rotation_euler = (math.sin(ang) * 0.12, 0.0, math.sin(ang) * 0.45)
+        dish.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if dish2:
+        dish2.rotation_euler = (math.cos(ang) * 0.10, 0.0, -math.sin(ang) * 0.38)
+        dish2.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if drone:
+        dx = 2.15 + math.cos(ang) * 2.35
+        dy = -0.65 + math.sin(ang * 2.0) * 0.85
+        dz = terrain_height(dx, dy) + 1.18 + math.sin(ang) * 0.18
+        drone.location = (dx, dy, dz)
+        drone.rotation_euler = (math.sin(ang) * 0.08, math.cos(ang) * 0.10, ang)
+        drone.keyframe_insert(data_path="location", frame=frame)
+        drone.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if drone2:
+        dx2 = -1.35 + math.sin(ang) * 1.85
+        dy2 = 0.65 + math.cos(ang * 2.0) * 0.95
+        dz2 = terrain_height(dx2, dy2) + 1.28 + math.cos(ang) * 0.16
+        drone2.location = (dx2, dy2, dz2)
+        drone2.rotation_euler = (math.cos(ang) * 0.08, math.sin(ang) * 0.10, -ang)
+        drone2.keyframe_insert(data_path="location", frame=frame)
+        drone2.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if sat_grp:
+        sat_grp.location = (-0.15 + math.sin(ang) * 0.42, 0.25 + math.cos(ang) * 0.24, 3.88)
+        sat_grp.keyframe_insert(data_path="location", frame=frame)
+
+
+def _animate_command_doors_and_holo(door_left, door_right, holo_terrain, frame, ang):
+    door_open = 1.0 if 115 <= frame <= 165 else 0.0
+    if door_left:
+        door_left.location = (-0.58 * door_open, -1.48, 0.24)
+        door_left.keyframe_insert(data_path="location", frame=frame)
+    if door_right:
+        door_right.location = (0.58 * door_open, -1.48, 0.24)
+        door_right.keyframe_insert(data_path="location", frame=frame)
+    if holo_terrain:
+        holo_terrain.rotation_euler = (0.0, 0.0, ang * 2.0)
+        holo_terrain.location = (0.0, -0.28, 0.51 + math.sin(ang * 2.0) * 0.020)
+        holo_terrain.keyframe_insert(data_path="rotation_euler", frame=frame)
+        holo_terrain.keyframe_insert(data_path="location", frame=frame)
+
+
+def _animate_sensor_mechanisms(imu_box, imu_g_roll, imu_g_pitch, imu_g_yaw, rain_bucket, rain_drops, piezo_flow, frame, t, ang):
+    if imu_box:
+        imu_box.rotation_euler = (math.sin(ang * 3.0) * 0.15, math.cos(ang * 3.0) * 0.18, 0.0)
+        imu_box.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if imu_g_roll:
+        imu_g_roll.rotation_euler = (math.sin(ang * 3.0) * 0.32, 0.0, 0.0)
+        imu_g_roll.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if imu_g_pitch:
+        imu_g_pitch.rotation_euler = (0.0, math.cos(ang * 3.0) * 0.32, 0.0)
+        imu_g_pitch.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if imu_g_yaw:
+        imu_g_yaw.rotation_euler = (0.0, 0.0, ang * 2.0)
+        imu_g_yaw.keyframe_insert(data_path="rotation_euler", frame=frame)
+
+    if rain_bucket:
+        rain_bucket.rotation_euler = (0.0, 0.36 if math.sin(ang * 4.0) >= 0 else -0.36, 0.0)
+        rain_bucket.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if rain_drops:
+        rain_drops.location = (0.0, 0.0, -((t * 4.0) % 1.0) * 0.16)
+        rain_drops.keyframe_insert(data_path="location", frame=frame)
+
+    if piezo_flow:
+        piezo_flow.location = (((t * 3.0) % 1.0 - 0.5) * 0.28, 0.0, 0.0)
+        piezo_flow.keyframe_insert(data_path="location", frame=frame)
+
+
+def _animate_telemetry_curves(pkt_curves, frame, t):
+    for l_idx, (p0, p2, arc_h) in enumerate(pkt_curves):
+        p1 = (p0 + p2) * 0.5 + Vector((0.0, 0.0, arc_h))
+        for p_sub in range(2):
+            pkt_obj = bpy.data.objects.get(f"DataPacket_{l_idx}_{p_sub}")
+            if pkt_obj:
+                tp = (t * 2.0 + l_idx * 0.17 + p_sub * 0.5) % 1.0
+                q_pos = (1 - tp) ** 2 * p0 + 2 * (1 - tp) * tp * p1 + (tp ** 2) * p2
+                pkt_obj.location = q_pos
+                pkt_obj.keyframe_insert(data_path="location", frame=frame)
+
+
+def _animate_rescue_helicopters(heli1, heli1_rotor, heli1_tail, heli2, heli2_rotor, heli2_tail, frame, ang):
+    if heli1:
+        hx1 = -0.35 + math.cos(ang) * 1.95
+        hy1 = -0.25 + math.sin(ang * 2.0) * 1.15
+        hz1 = 2.78 + math.sin(ang) * 0.18
+        vx1 = -math.sin(ang) * 1.95
+        vy1 = math.cos(ang * 2.0) * 2.30
+        hyaw1 = math.atan2(vx1, -vy1)
+        heli1.location = (hx1, hy1, hz1)
+        heli1.rotation_euler = (0.10, math.sin(ang) * 0.12, hyaw1)
+        heli1.keyframe_insert(data_path="location", frame=frame)
+        heli1.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if heli1_rotor:
+        heli1_rotor.rotation_euler = (0.0, 0.0, ang * 18.0)
+        heli1_rotor.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if heli1_tail:
+        heli1_tail.rotation_euler = (ang * 24.0, 0.0, 0.0)
+        heli1_tail.keyframe_insert(data_path="rotation_euler", frame=frame)
+
+    if heli2:
+        hx2 = 4.65 + math.sin(ang) * 1.35
+        hy2 = -1.15 + math.cos(ang) * 1.15
+        hz2 = 2.38 + math.cos(ang * 2.0) * 0.14
+        vx2 = math.cos(ang) * 1.35
+        vy2 = -math.sin(ang) * 1.15
+        hyaw2 = math.atan2(vx2, -vy2)
+        heli2.location = (hx2, hy2, hz2)
+        heli2.rotation_euler = (0.08, -math.cos(ang) * 0.10, hyaw2)
+        heli2.keyframe_insert(data_path="location", frame=frame)
+        heli2.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if heli2_rotor:
+        heli2_rotor.rotation_euler = (0.0, 0.0, -ang * 18.0)
+        heli2_rotor.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if heli2_tail:
+        heli2_tail.rotation_euler = (-ang * 24.0, 0.0, 0.0)
+        heli2_tail.keyframe_insert(data_path="rotation_euler", frame=frame)
+
+
+def _animate_highway_vehicles(vehicle_specs, frame, t):
+    for v_name, ry0, lane_x, north, spd in vehicle_specs:
+        v_obj = bpy.data.objects.get(v_name)
+        if not v_obj:
+            continue
+        v_obj.rotation_mode = "XYZ"
+        direction = 1.0 if north else -1.0
+        span = 10.0
+        ry = ((ry0 + 5.0 + direction * t * spd * 4.2) % span) - 5.0
+        rc = road_center_x(ry)
+        vx = rc + lane_x
+        vz = terrain_height(rc, ry) + 0.030
+        dx_dy = road_dx_dy(ry)
+        yaw = math.atan2(dx_dy, -1.0) if north else math.atan2(-dx_dy, 1.0)
+        v_obj.location = (vx, ry, vz)
+        v_obj.rotation_euler = (0.0, 0.0, yaw)
+        v_obj.keyframe_insert(data_path="location", frame=frame)
+        v_obj.keyframe_insert(data_path="rotation_euler", frame=frame)
+
+
 def build_blender_animations():
     """Author 180-frame Blender keyframe animations for the 12 highway vehicles, 2 rescue helicopters + rotors, Data Center radar/dishes, Control Room sliding doors + hologram + screen scanner, 2 survey drones, and high-altitude NASA satellites."""
     scene = bpy.context.scene
@@ -2568,167 +2797,55 @@ def build_blender_animations():
         t = (frame - 1) / 179.0
         ang = t * math.pi * 2.0
 
-        if beacon:
-            beacon.rotation_euler = (0.0, 0.0, ang * 2.0)
-            beacon.keyframe_insert(data_path="rotation_euler", frame=frame)
-        if dish:
-            dish.rotation_euler = (math.sin(ang) * 0.12, 0.0, math.sin(ang) * 0.45)
-            dish.keyframe_insert(data_path="rotation_euler", frame=frame)
-        if dish2:
-            dish2.rotation_euler = (math.cos(ang) * 0.10, 0.0, -math.sin(ang) * 0.38)
-            dish2.keyframe_insert(data_path="rotation_euler", frame=frame)
-
-        # Animate Control Room Sliding Doors (closed at frame 1, slide wide open during frames 115..165)
-        door_open = 1.0 if 115 <= frame <= 165 else 0.0
-        if door_left:
-            door_left.location = (-0.58 * door_open, -1.48, 0.24)
-            door_left.keyframe_insert(data_path="location", frame=frame)
-        if door_right:
-            door_right.location = (0.58 * door_open, -1.48, 0.24)
-            door_right.keyframe_insert(data_path="location", frame=frame)
-        if holo_terrain:
-            holo_terrain.rotation_euler = (0.0, 0.0, ang * 2.0)
-            holo_terrain.location = (0.0, -0.28, 0.51 + math.sin(ang * 2.0) * 0.020)
-            holo_terrain.keyframe_insert(data_path="rotation_euler", frame=frame)
-            holo_terrain.keyframe_insert(data_path="location", frame=frame)
-
-        # Animate Surface MEMS IMU Box Tilting & 3-Axis Gyroscope Gimbal Rings
-        if imu_box:
-            imu_box.rotation_euler = (math.sin(ang * 3.0) * 0.15, math.cos(ang * 3.0) * 0.18, 0.0)
-            imu_box.keyframe_insert(data_path="rotation_euler", frame=frame)
-        if imu_g_roll:
-            imu_g_roll.rotation_euler = (math.sin(ang * 3.0) * 0.32, 0.0, 0.0)
-            imu_g_roll.keyframe_insert(data_path="rotation_euler", frame=frame)
-        if imu_g_pitch:
-            imu_g_pitch.rotation_euler = (0.0, math.cos(ang * 3.0) * 0.32, 0.0)
-            imu_g_pitch.keyframe_insert(data_path="rotation_euler", frame=frame)
-        if imu_g_yaw:
-            imu_g_yaw.rotation_euler = (0.0, 0.0, ang * 2.0)
-            imu_g_yaw.keyframe_insert(data_path="rotation_euler", frame=frame)
-
-        # Animate Tipping-Bucket Rain Gauge Seesaw & Falling Rain Streaks
-        if rain_bucket:
-            rain_bucket.rotation_euler = (0.0, 0.36 if math.sin(ang * 4.0) >= 0 else -0.36, 0.0)
-            rain_bucket.keyframe_insert(data_path="rotation_euler", frame=frame)
-        if rain_drops:
-            rain_drops.location = (0.0, 0.0, -((t * 4.0) % 1.0) * 0.16)
-            rain_drops.keyframe_insert(data_path="location", frame=frame)
-
-        # Animate Underground Groundwater Flow Particles across the Borehole Piezometer Probe
-        if piezo_flow:
-            piezo_flow.location = (((t * 3.0) % 1.0 - 0.5) * 0.28, 0.0, 0.0)
-            piezo_flow.keyframe_insert(data_path="location", frame=frame)
-
-        # Animate 3D Data Packet Capsules streaming along Telemetry Conduits into the Data Center
-        for l_idx, (p0, p2, arc_h) in enumerate(pkt_curves):
-            p1 = (p0 + p2) * 0.5 + Vector((0.0, 0.0, arc_h))
-            for p_sub in range(2):
-                pkt_obj = bpy.data.objects.get(f"DataPacket_{l_idx}_{p_sub}")
-                if pkt_obj:
-                    tp = (t * 2.0 + l_idx * 0.17 + p_sub * 0.5) % 1.0
-                    q_pos = (1 - tp) ** 2 * p0 + 2 * (1 - tp) * tp * p1 + (tp ** 2) * p2
-                    pkt_obj.location = q_pos
-                    pkt_obj.keyframe_insert(data_path="location", frame=frame)
-
-        # Animate Primary & Secondary Rescue Helicopters and high-speed spinning rotors
-        if heli1:
-            hx1 = -0.35 + math.cos(ang) * 1.95
-            hy1 = -0.25 + math.sin(ang * 2.0) * 1.15
-            hz1 = 2.78 + math.sin(ang) * 0.18
-            vx1 = -math.sin(ang) * 1.95
-            vy1 = math.cos(ang * 2.0) * 2.30
-            hyaw1 = math.atan2(vx1, -vy1)
-            heli1.location = (hx1, hy1, hz1)
-            heli1.rotation_euler = (0.10, math.sin(ang) * 0.12, hyaw1)
-            heli1.keyframe_insert(data_path="location", frame=frame)
-            heli1.keyframe_insert(data_path="rotation_euler", frame=frame)
-        if heli1_rotor:
-            heli1_rotor.rotation_euler = (0.0, 0.0, ang * 18.0)
-            heli1_rotor.keyframe_insert(data_path="rotation_euler", frame=frame)
-        if heli1_tail:
-            heli1_tail.rotation_euler = (ang * 24.0, 0.0, 0.0)
-            heli1_tail.keyframe_insert(data_path="rotation_euler", frame=frame)
-
-        if heli2:
-            hx2 = 4.65 + math.sin(ang) * 1.35
-            hy2 = -1.15 + math.cos(ang) * 1.15
-            hz2 = 2.38 + math.cos(ang * 2.0) * 0.14
-            vx2 = math.cos(ang) * 1.35
-            vy2 = -math.sin(ang) * 1.15
-            hyaw2 = math.atan2(vx2, -vy2)
-            heli2.location = (hx2, hy2, hz2)
-            heli2.rotation_euler = (0.08, -math.cos(ang) * 0.10, hyaw2)
-            heli2.keyframe_insert(data_path="location", frame=frame)
-            heli2.keyframe_insert(data_path="rotation_euler", frame=frame)
-        if heli2_rotor:
-            heli2_rotor.rotation_euler = (0.0, 0.0, -ang * 18.0)
-            heli2_rotor.keyframe_insert(data_path="rotation_euler", frame=frame)
-        if heli2_tail:
-            heli2_tail.rotation_euler = (-ang * 24.0, 0.0, 0.0)
-            heli2_tail.keyframe_insert(data_path="rotation_euler", frame=frame)
-
-        if drone:
-            dx = 2.15 + math.cos(ang) * 2.35
-            dy = -0.65 + math.sin(ang * 2.0) * 0.85
-            dz = terrain_height(dx, dy) + 1.18 + math.sin(ang) * 0.18
-            drone.location = (dx, dy, dz)
-            drone.rotation_euler = (math.sin(ang) * 0.08, math.cos(ang) * 0.10, ang)
-            drone.keyframe_insert(data_path="location", frame=frame)
-            drone.keyframe_insert(data_path="rotation_euler", frame=frame)
-        if drone2:
-            dx2 = -1.35 + math.sin(ang) * 1.85
-            dy2 = 0.65 + math.cos(ang * 2.0) * 0.95
-            dz2 = terrain_height(dx2, dy2) + 1.28 + math.cos(ang) * 0.16
-            drone2.location = (dx2, dy2, dz2)
-            drone2.rotation_euler = (math.cos(ang) * 0.08, math.sin(ang) * 0.10, -ang)
-            drone2.keyframe_insert(data_path="location", frame=frame)
-            drone2.keyframe_insert(data_path="rotation_euler", frame=frame)
-        if sat_grp:
-            sat_grp.location = (-0.15 + math.sin(ang) * 0.42, 0.25 + math.cos(ang) * 0.24, 3.88)
-            sat_grp.keyframe_insert(data_path="location", frame=frame)
-
-        for v_name, ry0, lane_x, north, spd in vehicle_specs:
-            v_obj = bpy.data.objects.get(v_name)
-            if not v_obj:
-                continue
-            v_obj.rotation_mode = "XYZ"
-            direction = 1.0 if north else -1.0
-            span = 10.0
-            ry = ((ry0 + 5.0 + direction * t * spd * 4.2) % span) - 5.0
-            rc = road_center_x(ry)
-            vx = rc + lane_x
-            vz = terrain_height(rc, ry) + 0.030
-            dx_dy = road_dx_dy(ry)
-            yaw = math.atan2(dx_dy, -1.0) if north else math.atan2(-dx_dy, 1.0)
-            v_obj.location = (vx, ry, vz)
-            v_obj.rotation_euler = (0.0, 0.0, yaw)
-            v_obj.keyframe_insert(data_path="location", frame=frame)
-            v_obj.keyframe_insert(data_path="rotation_euler", frame=frame)
+        _animate_radar_dishes(beacon, dish, dish2, drone, drone2, sat_grp, frame, ang)
+        _animate_command_doors_and_holo(door_left, door_right, holo_terrain, frame, ang)
+        _animate_sensor_mechanisms(imu_box, imu_g_roll, imu_g_pitch, imu_g_yaw, rain_bucket, rain_drops, piezo_flow, frame, t, ang)
+        _animate_telemetry_curves(pkt_curves, frame, t)
+        _animate_rescue_helicopters(heli1, heli1_rotor, heli1_tail, heli2, heli2_rotor, heli2_tail, frame, ang)
+        _animate_highway_vehicles(vehicle_specs, frame, t)
 
     scene.frame_set(1)
 
 
-def purge_unused_datablocks():
-    """Remove unused materials and heavy textures from imported GLBs so landslide_twin.glb stays compact and fast."""
+def _collect_used_materials():
     used_mats = set()
     for obj in bpy.data.objects:
         if obj.type == "MESH" and obj.data:
             for m in obj.data.materials:
                 if m:
                     used_mats.add(m)
+    return used_mats
+
+
+def _purge_unused_materials(used_mats):
     for m in tuple(bpy.data.materials):
         if m not in used_mats:
             bpy.data.materials.remove(m, do_unlink=True)
 
+
+def _collect_used_images(used_mats):
     used_imgs = set()
     for m in used_mats:
-        if m.node_tree:
-            for n in m.node_tree.nodes:
-                if n.type == "TEX_IMAGE" and n.image:
-                    used_imgs.add(n.image)
+        if not m.node_tree:
+            continue
+        for n in m.node_tree.nodes:
+            if n.type == "TEX_IMAGE" and n.image:
+                used_imgs.add(n.image)
+    return used_imgs
+
+
+def _purge_unused_images(used_imgs):
     for img in tuple(bpy.data.images):
         if img not in used_imgs:
             bpy.data.images.remove(img, do_unlink=True)
+
+
+def purge_unused_datablocks():
+    """Remove unused materials and heavy textures from imported GLBs so landslide_twin.glb stays compact and fast."""
+    used_mats = _collect_used_materials()
+    _purge_unused_materials(used_mats)
+    used_imgs = _collect_used_images(used_mats)
+    _purge_unused_images(used_imgs)
 
 
 def main():

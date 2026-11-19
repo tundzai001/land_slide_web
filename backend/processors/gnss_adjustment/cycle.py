@@ -748,7 +748,7 @@ class RoundRobinCycleMixin:
                 )
         return selected_fixed_base
 
-    def _resolve_cycle_route_config(self, cluster: dict, selected_fixed_base: dict) -> tuple[str, int, Optional[str], Optional[str]]:
+    def _resolve_cycle_route_config(self, cluster: dict) -> tuple[str, int, Optional[str], Optional[str]]:
         route_host = (
             cluster.get("round_robin_route_host")
             or cluster.get("base_stream_host")
@@ -819,7 +819,7 @@ class RoundRobinCycleMixin:
             project_id,
             f"{cluster.get('name', cluster_index + 1)}: froze temporary-BASE coordinates for {', '.join(str(rover) for rover in rovers)}.",
         )
-        route_host, route_port, configured_mountpoint, route_password = self._resolve_cycle_route_config(cluster, selected_fixed_base)
+        route_host, route_port, configured_mountpoint, route_password = self._resolve_cycle_route_config(cluster)
         uses_common_base = requires_common_base_handover(cluster)
         temporary_route_mountpoint = self._resolve_temporary_route_mountpoint(
             cluster, uses_common_base, route_host, configured_mountpoint
@@ -1011,6 +1011,27 @@ class RoundRobinCycleMixin:
             },
         }
 
+    def _quarantine_stable_window(
+        self, cluster: dict, rover_code: str, solver_start_idx: int, flag: str, diagnostic: str, project_id: int
+    ) -> None:
+        records = cluster["observations"]
+        for record in records[solver_start_idx:]:
+            if record.base_name == rover_code and record.solver_eligible:
+                record.solver_eligible = False
+                record.quality_flags = tuple(dict.fromkeys((*record.quality_flags, flag)))
+                record.source_diagnostic = diagnostic
+        self._clear_cluster_fragment_buffers(project_id, cluster)
+
+    async def _wait_rover_client_reconnect(self, rover_code: str, project_id: int) -> dict:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS
+        while loop.time() < deadline:
+            cli = await self._find_client_info(rover_code, project_id=project_id, log_missing=False)
+            if cli:
+                return cli
+            await asyncio.sleep(self.CROSS_BASE_STATUS_POLL_SECONDS)
+        raise RuntimeError(f"{rover_code}: fixed BASE returned but client did not reconnect")
+
     async def _execute_single_rotation_attempt(
         self, project_id: int, cluster_index: int, cluster: dict, rover_code: str,
         expected_cross_rovers: set[str], cluster_ctx: dict, session: dict
@@ -1034,28 +1055,21 @@ class RoundRobinCycleMixin:
             self._clear_cluster_fragment_buffers(project_id, cluster)
 
         def on_stable_started():
-            records = cluster["observations"]
-            for record in records[solver_start[0]:]:
-                if record.base_name == rover_code and record.solver_eligible:
-                    record.solver_eligible = False
-                    record.quality_flags = tuple(dict.fromkeys((*record.quality_flags, "EXCLUDE_PRE_STABLE_WINDOW")))
-                    record.source_diagnostic = "Temporary-base source was verified, but this epoch belongs to handover window."
-            solver_start[0] = len(records)
+            self._quarantine_stable_window(
+                cluster, rover_code, solver_start[0], "EXCLUDE_PRE_STABLE_WINDOW",
+                "Temporary-base source was verified, but this epoch belongs to handover window.", project_id
+            )
+            solver_start[0] = len(cluster["observations"])
             cluster["current_stable_window_index"] = stable_window_idx[0]
             stable_window_idx[0] += 1
-            self._clear_cluster_fragment_buffers(project_id, cluster)
 
         def on_stable_invalid(reason: str = "stability"):
             flag = {"drift": "EXCLUDE_STABILITY_LOST", "duration": "EXCLUDE_INSUFFICIENT_DURATION", "source": "EXCLUDE_SOURCE_NOT_CONFIRMED"}.get(reason.casefold(), "EXCLUDE_STABILITY_NOT_REACHED")
-            records = cluster["observations"]
-            for record in records[solver_start[0]:]:
-                if record.base_name == rover_code and record.solver_eligible:
-                    record.solver_eligible = False
-                    record.quality_flags = tuple(dict.fromkeys((*record.quality_flags, flag)))
-                    record.source_diagnostic = f"Solver window quarantined: {reason}"
-            solver_start[0] = len(records)
+            self._quarantine_stable_window(
+                cluster, rover_code, solver_start[0], flag, f"Solver window quarantined: {reason}", project_id
+            )
+            solver_start[0] = len(cluster["observations"])
             cluster["current_stable_window_index"] = None
-            self._clear_cluster_fragment_buffers(project_id, cluster)
 
         def coll_status():
             mon = self._filter_eligible_records_from(cluster["observations"], 0, rover_code, False)
@@ -1064,13 +1078,7 @@ class RoundRobinCycleMixin:
 
         async def wake_base():
             await self._set_cors_fixed_base_enabled(str(configured_mountpoint), enabled=True, selected_host=configured_base_host, **fixed_base_identity_kwargs)
-            loop = asyncio.get_running_loop()
-            dl = loop.time() + self.INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS
-            while loop.time() < dl:
-                cli = await self._find_client_info(rover_code, project_id=project_id, log_missing=False)
-                if cli: return cli
-                await asyncio.sleep(self.CROSS_BASE_STATUS_POLL_SECONDS)
-            raise RuntimeError(f"{rover_code}: fixed BASE returned but client did not reconnect")
+            return await self._wait_rover_client_reconnect(rover_code, project_id)
 
         async def sleep_base():
             await self._set_cors_fixed_base_enabled(str(configured_mountpoint), enabled=False, selected_host=configured_base_host, all_streams=cluster_ctx["uses_common_base"], **fixed_base_identity_kwargs)
