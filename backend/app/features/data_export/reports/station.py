@@ -3,6 +3,7 @@
 import logging
 import time
 from io import BytesIO
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -19,8 +20,8 @@ router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 @router.get("/export/station/{station_id}/pdf", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def export_station_pdf(
     station_id: int,
-    config_db: AsyncSession = Depends(get_config_db),
-    data_db: AsyncSession = Depends(get_data_db),
+    config_db: Annotated[AsyncSession, Depends(get_config_db)],
+    data_db: Annotated[AsyncSession, Depends(get_data_db)],
 ):
     """
     Generate a professional PDF report for a station.

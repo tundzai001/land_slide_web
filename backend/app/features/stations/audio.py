@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -23,8 +24,8 @@ class PlayAudioRequest(BaseModel):
 async def send_audio_command(
     station_id: int,
     payload: PlayAudioRequest,
-    db: AsyncSession = Depends(get_config_db),
-    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+    db: Annotated[AsyncSession, Depends(get_config_db)],
+    _user: Annotated[model_auth.User, Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))]
 ):
     """
     Send a 'play audio' command to the station via MQTT.

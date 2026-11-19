@@ -5,7 +5,7 @@ import logging
 import math
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -248,8 +248,8 @@ def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
 @router.get("/api/public/cors-base-stations", responses={502: {"description": "Bad Gateway"}})
 async def get_cors_base_stations(
     request: Request,
-    db_config: AsyncSession = Depends(get_config_db),
-    db_auth: AsyncSession = Depends(get_auth_db)
+    db_config: Annotated[AsyncSession, Depends(get_config_db)],
+    db_auth: Annotated[AsyncSession, Depends(get_auth_db)]
 ):
     try:
         all_cors = await asyncio.to_thread(_fetch_cors_base_stations_sync)

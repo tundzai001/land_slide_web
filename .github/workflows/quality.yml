@@ -120,7 +120,7 @@ jobs:
             -Dsonar.javascript.lcov.reportPaths=coverage-js/lcov.info
             -Dsonar.sources=.
             -Dsonar.tests=backend/tests,tests
-            -Dsonar.exclusions=coverage.xml,coverage-js/**,backend/tests/**,tests/**,frontend/dist/**,scripts/**
+            -Dsonar.exclusions=coverage.xml,coverage-js/**,backend/tests/**,tests/**,frontend/dist/**,scripts/**,backend/alembic/**
             -Dsonar.coverage.exclusions=*.py,live_base_output_probe.py,field_unit/**,scripts/**,frontend/**,backend/*,backend/*.py,backend/alembic/**,backend/static/**,backend/app/features/field/**,backend/app/mqtt/ntrip_pusher.py,**/*.html,**/*.config,**/*.mjs,**/*.cjs,**/*.yml,.github/**
             -Dsonar.issue.ignore.multicriteria=e1,e2,e3
             -Dsonar.issue.ignore.multicriteria.e1.ruleKey=githubactions:S8544

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from ... import auth, config
@@ -15,7 +16,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 @router.post("/gnss/fetch-live-origin", responses={400: {"description": "Bad Request"}, 408: {"description": "Request Timeout"}, 500: {"description": "Internal Server Error"}})
 async def fetch_live_gnss_origin(
     request_data: dict,
-    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+    _user: Annotated[model_auth.User, Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))]
 ):
     try:
         topic = request_data.get('topic')

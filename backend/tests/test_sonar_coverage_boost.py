@@ -1812,6 +1812,188 @@ class SonarCoverageBoostTests(unittest.TestCase):
         self.assertFalse(summary["has_dem"])
         self.assertEqual(summary["dems"], [])
 
+    def test_stations_query_router_coverage(self):
+        from app.features.stations.query_router import (
+            _build_all_stations_stmt,
+            _build_stations_query,
+            _compute_station_online,
+            _compute_station_status,
+            _filter_station_rows,
+            _matches_station_bbox,
+            _serialize_station_row,
+            parse_station_bbox,
+        )
+        from fastapi import HTTPException
+
+        # 1. parse_station_bbox
+        w, s, e, n = parse_station_bbox("105.0, 20.0, 106.0, 21.0")
+        self.assertEqual((w, s, e, n), (105.0, 20.0, 106.0, 21.0))
+        self.assertRaises(HTTPException, parse_station_bbox, "invalid")
+        self.assertRaises(HTTPException, parse_station_bbox, "200.0, 0, 100.0, 10")
+        self.assertRaises(HTTPException, parse_station_bbox, "100.0, 50.0, 90.0, 60.0")
+
+        # 2. _build_all_stations_stmt
+        stmt1 = _build_all_stations_stmt([1, 2], 1, "stationA", "name")
+        self.assertIsNotNone(stmt1)
+        stmt2 = _build_all_stations_stmt(None, None, "", "-created_at")
+        self.assertIsNotNone(stmt2)
+        self.assertRaises(HTTPException, _build_all_stations_stmt, None, None, "", "invalid_sort")
+
+        # 3. _build_stations_query
+        q_stmt = _build_stations_query(1, "query", "-name")
+        self.assertIsNotNone(q_stmt)
+        self.assertRaises(HTTPException, _build_stations_query, 1, None, "unsupported_field")
+
+        # 4. _compute_station_status
+        self.assertEqual(_compute_station_status(True, False), "online")
+        self.assertEqual(_compute_station_status(False, True), "stale")
+        self.assertEqual(_compute_station_status(False, False), "offline")
+
+        # 5. _matches_station_bbox
+        self.assertTrue(_matches_station_bbox({"lat": 20.5, "lon": 105.5}, 105.0, 20.0, 106.0, 21.0))
+        self.assertFalse(_matches_station_bbox({"lat": 22.0, "lon": 105.5}, 105.0, 20.0, 106.0, 21.0))
+        self.assertFalse(_matches_station_bbox({}, 105.0, 20.0, 106.0, 21.0))
+
+        # 6. _filter_station_rows
+        sample_rows = [
+            {"status": "online", "risk_level": "LOW", "location": {"lat": 20.5, "lon": 105.5}},
+            {"status": "offline", "risk_level": "CRITICAL", "location": {"lat": 10.0, "lon": 100.0}},
+        ]
+        filtered_status = _filter_station_rows(sample_rows, "online", None, None)
+        self.assertEqual(len(filtered_status), 1)
+        filtered_risk = _filter_station_rows(sample_rows, None, "CRITICAL", None)
+        self.assertEqual(len(filtered_risk), 1)
+        filtered_bbox = _filter_station_rows(sample_rows, None, None, (105.0, 20.0, 106.0, 21.0))
+        self.assertEqual(len(filtered_bbox), 1)
+        self.assertRaises(HTTPException, _filter_station_rows, sample_rows, "invalid_status", None, None)
+        self.assertRaises(HTTPException, _filter_station_rows, sample_rows, None, "INVALID_RISK", None)
+
+        # 7. _compute_station_online
+        mock_station = MagicMock(id=1, config={"offline_thresholds": {"gnss": 60}})
+        mock_dev = MagicMock(device_type="gnss")
+        now = 1000
+        self.assertTrue(_compute_station_online(mock_station, [mock_dev], {(1, "gnss"): 980}, now))
+        self.assertFalse(_compute_station_online(mock_station, [mock_dev], {(1, "gnss"): 900}, now))
+
+        # 8. _serialize_station_row
+        mock_station_row = MagicMock(id=1, station_code="STA1", name="Station 1", location={"lat": 20.0, "lon": 105.0}, status="offline", config={})
+        mock_dev_row = MagicMock(id=10, device_code="DEV1", name="Dev 1", device_type="gnss", mqtt_topic="test/topic")
+        row_runtime = _serialize_station_row(mock_station_row, [mock_dev_row], True, True)
+        self.assertEqual(row_runtime["status"], "online")
+        row_static = _serialize_station_row(mock_station_row, [mock_dev_row], False, False)
+        self.assertEqual(row_static["status"], "offline")
+
+    def test_stations_configuration_coverage(self):
+        from app.features.stations.configuration import (
+            _merge_station_config,
+            _sync_sensor_device,
+        )
+
+        mock_station = MagicMock(id=1, config=None, station_code="STA1")
+        mock_user = MagicMock(role=MagicMock(value="admin"))
+
+        # Test _merge_station_config default
+        config_data = {
+            "config": {
+                "custom_sensors": [{"code": "soil"}],
+                "vn2000_params": {"meridian": 105.0},
+                "thresholds": {"gnss": 10},
+            }
+        }
+        _merge_station_config(mock_station, config_data, mock_user)
+        self.assertIn("custom_sensors", mock_station.config)
+        self.assertIn("vn2000", mock_station.config)
+
+        # Test preserving locked gnss_origin
+        mock_station.config["gnss_origin"] = {"lat": 21.0, "lon": 105.0}
+        _merge_station_config(mock_station, {"config": {"name": "test"}}, mock_user)
+        self.assertEqual(mock_station.config["gnss_origin"]["lat"], 21.0)
+
+        # Test _sync_sensor_device
+        mock_db = AsyncMock()
+        # empty topic returns None
+        self.assertIsNone(asyncio.run(_sync_sensor_device(mock_db, mock_station, "gnss", {"topic": ""}, {})))
+
+        # existing device update
+        mock_existing_dev = MagicMock(config=None)
+        existing_devices = {"gnss": mock_existing_dev}
+        asyncio.run(_sync_sensor_device(mock_db, mock_station, "gnss", {"topic": "sta1/gnss", "mqtt": {}}, existing_devices))
+        self.assertEqual(mock_existing_dev.mqtt_topic, "sta1/gnss")
+
+    def test_gnss_processing_gngga_coverage(self):
+        from processors.gnss.processing import GNSSProcessingMixin
+
+        proc = GNSSProcessingMixin()
+        proc.state = "AWAITING_CANDIDATES"
+
+        # Not initialized
+        proc._initialization_complete = False
+        res_init = proc.process_gngga("$GNGGA,123456*00")
+        self.assertEqual(res_init["status"], "INITIALIZING")
+
+        # Initialized, no GGA match
+        proc._initialization_complete = True
+        res_nodata = proc.process_gngga("invalid line")
+        self.assertEqual(res_nodata["status"], "NO_DATA")
+
+        # Incomplete sentence
+        proc._verify_nmea_checksum = MagicMock(return_value=True)
+        res_short = proc.process_gngga("$GNGGA,1,2,3*00")
+        self.assertEqual(res_short["status"], "NO_DATA")
+
+        # Checksum failed
+        proc._verify_nmea_checksum = MagicMock(return_value=False)
+        res_csum = proc.process_gngga("$GNGGA,1,2,3,4,5,6,7,8,9,10*00")
+        self.assertEqual(res_csum["status"], "CHECKSUM_FAILED")
+
+    def test_simulation_service_coverage(self):
+        from app.features.simulation.service import (
+            _apply_sensor_overrides,
+            _download_header,
+            _extract_profile_parameters,
+            _process_sensor_snapshot,
+            _run_view,
+            _safe_name,
+        )
+
+        # 1. _safe_name & _download_header
+        self.assertEqual(_safe_name("My Simulation Run 1", "default"), "My_Simulation_Run_1")
+        self.assertEqual(_safe_name("", "default"), "default")
+        header = _download_header("report.xlsx", "report.xlsx")
+        self.assertIn("filename*=UTF-8", header)
+
+        # 2. _run_view
+        mock_run = MagicMock(
+            schema_version="1.0", engine_version="1.0", id=1, display_name="Sim 1",
+            status="completed", mode="auto", created_by_user_id=1, created_by_username="admin",
+            project_id=1, project_code="P1", project_name="Project 1",
+            station_id=1, station_code="STA1", station_name="Station 1",
+            seed=123, sim_duration_seconds=300, created_at=100, started_at=101, finished_at=102,
+            parameters={"slope": 30}, parameter_sources={"slope": "manual"},
+            sensor_snapshot={}, time_series=[], warnings=[], error=None, events=[], progress=100,
+        )
+        view_full = _run_view(mock_run, detail=True)
+        self.assertIn("parameters", view_full)
+        view_summary = _run_view(mock_run, detail=False)
+        self.assertNotIn("parameters", view_summary)
+
+        # 3. _extract_profile_parameters
+        params, sources, warnings = _extract_profile_parameters({"cohesion_kpa": 12.5})
+        self.assertEqual(params["cohesion"], 12.5)
+        self.assertEqual(sources["cohesion"], "Hồ sơ trạm")
+        self.assertTrue(len(warnings) > 0)
+
+        # 4. _process_sensor_snapshot & _apply_sensor_overrides
+        mock_sensor_row = MagicMock(sensor_type="rain", timestamp=1000, data={"intensity_mm_h": 15.0})
+        snapshot, valid_data, warnings = _process_sensor_snapshot([mock_sensor_row], {"rain": 300}, now=1050)
+        self.assertIn("rain", valid_data)
+        self.assertTrue(snapshot["rain"]["is_online"])
+
+        overrides = {}
+        override_sources = {}
+        _apply_sensor_overrides(valid_data, {}, overrides, override_sources, [])
+        self.assertEqual(overrides["rainfall"], 15.0)
+
 
 
 

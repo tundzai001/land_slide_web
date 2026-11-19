@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy import text
@@ -70,7 +70,7 @@ async def health_ready(response: Response) -> dict[str, Any]:
 
 @router.get("/api/admin/system/runtime")
 async def runtime_diagnostics(
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE)),
+    current_user: Annotated[model_auth.User, Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))],
 ) -> dict[str, Any]:
     del current_user
     try:

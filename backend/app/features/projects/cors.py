@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+from typing import Annotated
 import requests
 from fastapi import APIRouter, Depends, HTTPException
 from ... import auth
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 @router.get("/api/admin/projects/cors-stations", responses={502: {"description": "Bad Gateway"}})
 async def get_admin_cors_stations(
-    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: Annotated[model_auth.User, Depends(auth.require_permission(auth.Permission.MANAGE_USERS))]
 ):
     try:
         return await asyncio.to_thread(_fetch_cors_base_stations_sync)
@@ -28,8 +29,6 @@ async def get_admin_cors_stations(
 
 @router.get("/api/admin/projects/cors-failover-status")
 async def get_admin_cors_failover_status(
-    _user: model_auth.User = Depends(
-        auth.require_permission(auth.Permission.MANAGE_USERS)
-    ),
+    _user: Annotated[model_auth.User, Depends(auth.require_permission(auth.Permission.MANAGE_USERS))],
 ):
     return {"pairs": copy.deepcopy(cors_failover_status)}
