@@ -86,7 +86,12 @@ class SensorAlertAnalysisMixin:
             safe_steps = int(config.get("RainAlerting", {}).get("rain_safe_confirm_steps", 3))
 
             intensity = recent_data[-1]["data"].get("intensity_mm_h", 0.0)
-            current_level = "CRITICAL" if intensity >= critical else ("WARNING" if intensity >= warning else ("INFO" if intensity >= watch else "INFO"))
+            if intensity >= critical:
+                current_level = "CRITICAL"
+            elif intensity >= warning:
+                current_level = "WARNING"
+            else:
+                current_level = "INFO"
 
             counter_info = self.alert_counters[station_id]["rain"]
             _init_alert_counter(counter_info)
@@ -110,7 +115,12 @@ class SensorAlertAnalysisMixin:
             crit_steps = int(config.get("Water", {}).get("water_critical_confirm_steps", config.get("Water", {}).get("water_confirm_steps", 2)))
             safe_steps = int(config.get("Water", {}).get("water_safe_confirm_steps", 3))
 
-            current_level = "CRITICAL" if val >= crit else ("WARNING" if val >= warn else "INFO")
+            if val >= crit:
+                current_level = "CRITICAL"
+            elif val >= warn:
+                current_level = "WARNING"
+            else:
+                current_level = "INFO"
             counter_info = self.alert_counters[station_id]["water"]
             _init_alert_counter(counter_info)
 

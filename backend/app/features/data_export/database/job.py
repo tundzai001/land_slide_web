@@ -284,11 +284,11 @@ async def _process_single_adjustment(item: dict, project_codes: dict, all_statio
     return safe_project, row
 
 
-def _compute_adjustment_key(payload: dict, adjustment_key: str | None, record_timestamp: int) -> tuple:
+def _compute_adjustment_key(payload: dict, adjustment_key: str | None, record_timestamp: int) -> tuple[str, Any, Any, Any]:
     payload_project_id = int(payload.get("project_id") or 0)
     adjustment_identity = str(adjustment_key or payload.get("adjustment_key") or "").strip()
     if adjustment_identity:
-        return ("adjustment", adjustment_identity)
+        return ("adjustment", adjustment_identity, None, None)
     return (
         "legacy", payload_project_id, payload.get("cluster_index"),
         int(payload.get("computed_at") or record_timestamp or 0),

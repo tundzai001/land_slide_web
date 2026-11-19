@@ -109,7 +109,12 @@ class RainfallAnalysisMixin:
 
         correlation = float(best_corr)
         strength, assessment = self._assess_correlation_strength(correlation)
-        trigger_potential = "HIGH" if (correlation >= 0.6 and slope > 0 and r2 >= 0.3) else ("MEDIUM" if (correlation >= 0.4 and slope > 0) else "LOW")
+        if correlation >= 0.6 and slope > 0 and r2 >= 0.3:
+            trigger_potential = "HIGH"
+        elif correlation >= 0.4 and slope > 0:
+            trigger_potential = "MEDIUM"
+        else:
+            trigger_potential = "LOW"
         return slope, intercept, r2, correlation, strength, assessment, trigger_potential
 
     def _compute_cwd_events(self, common_days: list, rain_arr: np.ndarray, disp_rate_arr: np.ndarray) -> list:
@@ -174,13 +179,39 @@ class RainfallAnalysisMixin:
         return risk_messages, combined_risk_message
 
     def _build_rainfall_result(
-        self, correlation, strength, assessment, common_days, best_lag, r2, slope, intercept,
-        trigger_potential, short_half_life_days, long_half_life_days, short_weight, max_lag_days,
-        lag_scan_results, total_rain_mm, rain_arr, max_rain_idx, rain_days_count, slide_model_index,
-        total_disp_mm, disp_rate_arr, max_disp_idx, disp_during_rain, disp_during_dry,
-        rain_accel_ratio, sensitivity_mm_per_mm, top_cwd_events, top_peak_events,
-        risk_messages, combined_risk_message
+        self, model_info: dict, rain_info: dict, disp_info: dict, events_info: dict
     ) -> dict:
+        correlation = model_info["correlation"]
+        strength = model_info["strength"]
+        assessment = model_info["assessment"]
+        common_days = model_info["common_days"]
+        best_lag = model_info["best_lag"]
+        r2 = model_info["r2"]
+        slope = model_info["slope"]
+        intercept = model_info["intercept"]
+        trigger_potential = model_info["trigger_potential"]
+        slide_params = model_info["slide_params"]
+        lag_scan_results = model_info["lag_scan_results"]
+
+        rain_arr = rain_info["rain_arr"]
+        total_rain_mm = rain_info["total_rain_mm"]
+        max_rain_idx = rain_info["max_rain_idx"]
+        rain_days_count = rain_info["rain_days_count"]
+        slide_model_index = rain_info["slide_model_index"]
+
+        disp_rate_arr = disp_info["disp_rate_arr"]
+        total_disp_mm = disp_info["total_disp_mm"]
+        max_disp_idx = disp_info["max_disp_idx"]
+        disp_during_rain = disp_info["disp_during_rain"]
+        disp_during_dry = disp_info["disp_during_dry"]
+        rain_accel_ratio = disp_info["rain_accel_ratio"]
+        sensitivity_mm_per_mm = disp_info["sensitivity_mm_per_mm"]
+
+        top_cwd_events = events_info["top_cwd_events"]
+        top_peak_events = events_info["top_peak_events"]
+        risk_messages = events_info["risk_messages"]
+        combined_risk_message = events_info["combined_risk_message"]
+
         max_daily_rain = round(float(np.max(rain_arr)), 1) if len(rain_arr) > 0 else 0.0
         max_rain_day = common_days[max_rain_idx] if max_rain_idx < len(common_days) else ""
         avg_rain_rainy = round(float(np.mean(rain_arr[rain_arr > 0.2])), 1) if rain_days_count > 0 else 0.0
@@ -195,7 +226,7 @@ class RainfallAnalysisMixin:
             "assessment": assessment, "common_days": len(common_days), "lag_days": int(best_lag),
             "r_squared": round(float(r2), 4), "slope_mm_day_per_rain_index": round(float(slope), 6),
             "intercept": round(float(intercept), 4), "trigger_potential": trigger_potential,
-            "slide_model": {"short_half_life_days": short_half_life_days, "long_half_life_days": long_half_life_days, "short_weight": short_weight, "max_lag_days": max_lag_days},
+            "slide_model": slide_params,
             "lag_scan": lag_scan_results,
             "rain_stats": {
                 "total_mm": round(total_rain_mm, 1), "max_daily_mm": max_daily_rain,
@@ -244,7 +275,7 @@ class RainfallAnalysisMixin:
                 result["message"] = f"Chỉ có {len(common_days)} ngày chung giữa GNSS và mưa — cần ít nhất 3."
                 return result
 
-            cum_disp, daily_disp_inc, cum_disp_legacy = self._compute_daily_displacements(common_days, gnss_daily)
+            _, daily_disp_inc, _ = self._compute_daily_displacements(common_days, gnss_daily)
             rain_arr = np.array([float(daily_rain.get(day, 0.0)) for day in common_days], dtype=float)
             disp_rate_arr = np.array(daily_disp_inc, dtype=float)
 
@@ -277,14 +308,34 @@ class RainfallAnalysisMixin:
             max_rain_idx = int(np.argmax(rain_arr)) if len(rain_arr) > 0 else 0
             max_disp_idx = int(np.argmax(disp_rate_arr)) if len(disp_rate_arr) > 0 else 0
 
-            result.update(self._build_rainfall_result(
-                correlation, strength, assessment, common_days, best_lag, r2, slope, intercept,
-                trigger_potential, short_half_life_days, long_half_life_days, short_weight, max_lag_days,
-                lag_scan_results, total_rain_mm, rain_arr, max_rain_idx, rain_days_count, slide_model_index,
-                total_disp_mm, disp_rate_arr, max_disp_idx, disp_during_rain, disp_during_dry,
-                rain_accel_ratio, sensitivity_mm_per_mm, top_cwd_events, top_peak_events,
-                risk_messages, combined_risk_message
-            ))
+            model_info = {
+                "correlation": correlation, "strength": strength, "assessment": assessment,
+                "common_days": common_days, "best_lag": best_lag, "r2": r2, "slope": slope,
+                "intercept": intercept, "trigger_potential": trigger_potential,
+                "slide_params": {
+                    "short_half_life_days": short_half_life_days,
+                    "long_half_life_days": long_half_life_days,
+                    "short_weight": short_weight,
+                    "max_lag_days": max_lag_days,
+                },
+                "lag_scan_results": lag_scan_results,
+            }
+            rain_info = {
+                "rain_arr": rain_arr, "total_rain_mm": total_rain_mm,
+                "max_rain_idx": max_rain_idx, "rain_days_count": rain_days_count,
+                "slide_model_index": slide_model_index,
+            }
+            disp_info = {
+                "disp_rate_arr": disp_rate_arr, "total_disp_mm": total_disp_mm,
+                "max_disp_idx": max_disp_idx, "disp_during_rain": disp_during_rain,
+                "disp_during_dry": disp_during_dry, "rain_accel_ratio": rain_accel_ratio,
+                "sensitivity_mm_per_mm": sensitivity_mm_per_mm,
+            }
+            events_info = {
+                "top_cwd_events": top_cwd_events, "top_peak_events": top_peak_events,
+                "risk_messages": risk_messages, "combined_risk_message": combined_risk_message,
+            }
+            result.update(self._build_rainfall_result(model_info, rain_info, disp_info, events_info))
             return result
         except Exception as e:
             logger.exception(f"Error in analyze_rainfall_displacement_correlation: {e}")

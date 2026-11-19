@@ -173,7 +173,7 @@ class GnssPayloadMixin:
         })
         await self.round_robin_manager.start_cycle(proj_id)
 
-    async def _handle_collecting_baseline_seed(self, proj_id: int, public_project_id: int, station_id: int):
+    async def _handle_collecting_baseline_seed(self, proj_id: int):
         seed_status = self.round_robin_manager.get_seed_collection_status(proj_id)
         if seed_status["fallback_ready"]:
             seed_status = self.round_robin_manager.skip_missing_seed_stations(proj_id)
@@ -193,7 +193,7 @@ class GnssPayloadMixin:
         seed_status = None
         seed_progress_parts = []
         if phase == "COLLECTING_BASELINE":
-            seed_status, seed_progress_parts = await self._handle_collecting_baseline_seed(proj_id, public_project_id, station_id)
+            seed_status, seed_progress_parts = await self._handle_collecting_baseline_seed(proj_id)
 
         await self._broadcast_seed_diagnostic(proj_id, public_project_id, station_id, seed_status, seed_progress_parts)
         await self._broadcast_valid_baselines(valid_obs, proj_id, public_project_id, station_id)

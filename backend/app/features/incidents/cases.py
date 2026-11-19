@@ -188,13 +188,14 @@ async def _create_new_case(
     signal: str,
     title: str,
     summary: str,
-    project_id: Optional[int],
-    station_id: Optional[int],
-    project_name: Optional[str],
-    project_code: Optional[str],
-    station_name: Optional[str],
-    station_code: Optional[str],
+    scope: dict,
 ) -> tuple[model_data.IncidentCase, bool, Optional[model_data.IncidentEvent]]:
+    project_id = scope.get("project_id")
+    station_id = scope.get("station_id")
+    project_name = scope.get("project_name")
+    project_code = scope.get("project_code")
+    station_name = scope.get("station_name")
+    station_code = scope.get("station_code")
     case = model_data.IncidentCase(
         reference=incident_reference(kind, source_id, timestamp),
         source_kind=kind,
@@ -330,11 +331,14 @@ async def ensure_incident_case(
     await _lock_source_key(db, kind, source_id)
     case = await get_case_for_source(db, kind, source_id, for_update=True)
     if case is None:
+        scope = {
+            "project_id": project_id, "station_id": station_id,
+            "project_name": project_name, "project_code": project_code,
+            "station_name": station_name, "station_code": station_code,
+        }
         return await _create_new_case(
             db, kind=kind, source_id=source_id, timestamp=timestamp, severity=severity,
-            signal=signal, title=title, summary=summary, project_id=project_id,
-            station_id=station_id, project_name=project_name, project_code=project_code,
-            station_name=station_name, station_code=station_code,
+            signal=signal, title=title, summary=summary, scope=scope,
         )
 
     return await _update_existing_case(

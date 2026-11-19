@@ -201,7 +201,6 @@ def parse_agrica(
         if obs is not None:
             observations.append(obs)
     return observations
-    return observations
 
 
 class AgricaAdjustmentRuntime:
@@ -263,6 +262,18 @@ class AgricaAdjustmentRuntime:
             pass
 
     @classmethod
+    def _parse_cluster_item(
+        cls, c: Any, clusters: list[set], cluster_bases: dict, cluster_base_info: dict
+    ) -> None:
+        if isinstance(c, list):
+            clusters.append(set(c))
+        elif isinstance(c, dict):
+            stations_in_cluster = c.get("stations", [])
+            if isinstance(stations_in_cluster, list):
+                clusters.append(set(stations_in_cluster))
+                cls._extract_cluster_base_info(c, len(clusters) - 1, cluster_bases, cluster_base_info)
+
+    @classmethod
     def _prepare_clusters_and_bases(
         cls, gnss_clusters: Optional[list], observations: list[AgricaObservation]
     ) -> tuple[list[set], dict, dict]:
@@ -271,13 +282,7 @@ class AgricaAdjustmentRuntime:
         cluster_base_info = {}
         if gnss_clusters and isinstance(gnss_clusters, list):
             for c in gnss_clusters:
-                if isinstance(c, list):
-                    clusters.append(set(c))
-                elif isinstance(c, dict):
-                    stations_in_cluster = c.get("stations", [])
-                    if isinstance(stations_in_cluster, list):
-                        clusters.append(set(stations_in_cluster))
-                        cls._extract_cluster_base_info(c, len(clusters) - 1, cluster_bases, cluster_base_info)
+                cls._parse_cluster_item(c, clusters, cluster_bases, cluster_base_info)
         if not clusters:
             clusters = [{obs.station_id for obs in observations}]
         else:
@@ -352,7 +357,7 @@ class AgricaAdjustmentRuntime:
     def _adjust_single_cluster(
         self, cluster_obs: list[AgricaObservation], resolved_base_ecef: tuple, steps_list: list,
         final_adjusted_points: dict, final_adjusted_baselines: list, now_ts: int
-    ) -> None:
+    ) -> Optional[Any]:
         points = [Point("BASE", resolved_base_ecef, fixed=True)]
         baselines = []
         for obs in cluster_obs:

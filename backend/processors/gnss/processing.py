@@ -438,12 +438,27 @@ class GNSSProcessingMixin:
         )
         return ref_ts, event_aligned
 
-    def _evaluate_reacquire_shift(
-        self, candidate_positions, candidate_center, p_old, ts, dt,
-        persistent_offset, persistent_shift_duration_s, persistent_shift_duration_ok,
-        integrity_cfg, station_config, fix_quality, raw_payload, gngga_string,
-        candidate_offset_2d_m, candidate_offset_u_m, candidate_xy_spread, candidate_u_spread
-    ):
+    def _evaluate_reacquire_shift(self, shift_ctx: dict, spread_ctx: dict, cfg_ctx: dict):
+        candidate_positions = shift_ctx["candidate_positions"]
+        candidate_center = shift_ctx["candidate_center"]
+        p_old = shift_ctx["p_old"]
+        ts = shift_ctx["ts"]
+        dt = shift_ctx["dt"]
+        fix_quality = shift_ctx["fix_quality"]
+        raw_payload = shift_ctx["raw_payload"]
+        gngga_string = shift_ctx["gngga_string"]
+
+        persistent_offset = spread_ctx["persistent_offset"]
+        persistent_shift_duration_s = spread_ctx["persistent_shift_duration_s"]
+        persistent_shift_duration_ok = spread_ctx["persistent_shift_duration_ok"]
+        candidate_offset_2d_m = spread_ctx["candidate_offset_2d_m"]
+        candidate_offset_u_m = spread_ctx["candidate_offset_u_m"]
+        candidate_xy_spread = spread_ctx["candidate_xy_spread"]
+        candidate_u_spread = spread_ctx["candidate_u_spread"]
+
+        integrity_cfg = cfg_ctx["integrity_cfg"]
+        station_config = cfg_ctx["station_config"]
+
         tracking_offset = getattr(self, 'tracking_offset_enu', np.zeros(3, dtype=float))
         raw_candidates = candidate_positions + tracking_offset
         old_raw_position = p_old['pos_enu'] + tracking_offset
@@ -527,12 +542,25 @@ class GNSSProcessingMixin:
             persistent_shift_duration_s = ts - getattr(self, "_shift_started_at", ts)
             persistent_shift_duration_ok = persistent_shift_duration_s >= 60.0
 
-            res, shift_data, refusal_reasons = self._evaluate_reacquire_shift(
-                candidate_positions, candidate_center, p_old, ts, dt,
-                persistent_offset, persistent_shift_duration_s, persistent_shift_duration_ok,
-                integrity_cfg, station_config, fix_quality, raw_payload, gngga_string,
-                candidate_offset_2d_m, candidate_offset_u_m, candidate_xy_spread, candidate_u_spread
-            )
+            shift_ctx = {
+                "candidate_positions": candidate_positions, "candidate_center": candidate_center,
+                "p_old": p_old, "ts": ts, "dt": dt, "fix_quality": fix_quality,
+                "raw_payload": raw_payload, "gngga_string": gngga_string,
+            }
+            spread_ctx = {
+                "persistent_offset": persistent_offset,
+                "persistent_shift_duration_s": persistent_shift_duration_s,
+                "persistent_shift_duration_ok": persistent_shift_duration_ok,
+                "candidate_offset_2d_m": candidate_offset_2d_m,
+                "candidate_offset_u_m": candidate_offset_u_m,
+                "candidate_xy_spread": candidate_xy_spread,
+                "candidate_u_spread": candidate_u_spread,
+            }
+            cfg_ctx = {
+                "integrity_cfg": integrity_cfg,
+                "station_config": station_config,
+            }
+            res, shift_data, refusal_reasons = self._evaluate_reacquire_shift(shift_ctx, spread_ctx, cfg_ctx)
             if res is not None:
                 return res
 

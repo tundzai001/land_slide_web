@@ -80,7 +80,7 @@ def _check_existing_adjustment_session(session_id: int):
     return None
 
 
-def _resolve_online_station_ids(stations, selected_station_ids, gnss_devices, active_clusters) -> set[int]:
+def _resolve_online_station_ids(stations, gnss_devices, active_clusters) -> set[int]:
     stations_by_id = {int(station.id): station for station in stations}
     pending_device_updates = getattr(mqtt_service, "_device_update_buffer", {})
     now_ts = int(time.time())
@@ -192,7 +192,7 @@ async def _resolve_and_prepare_active_clusters(session_id: int, project, req, db
             )
         )
         gnss_devices = devices_result.scalars().all()
-        online_station_ids = _resolve_online_station_ids(stations, selected_station_ids, gnss_devices, active_clusters)
+        online_station_ids = _resolve_online_station_ids(stations, gnss_devices, active_clusters)
         active_clusters, skipped_offline_station_ids = restrict_clusters_to_online_stations(
             active_clusters, online_station_ids
         )

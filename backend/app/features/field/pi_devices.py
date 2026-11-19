@@ -318,11 +318,6 @@ async def list_pi_devices(
     except Exception as e:
         logger.exception(f"Error listing Pi devices: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"Error listing Pi devices: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/pi-devices/available", responses={500: {"description": "Internal Server Error"}})

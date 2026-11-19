@@ -439,7 +439,7 @@ class GNSSOriginMixin:
                 samples, minimum_samples, minimum_duration_s, deadline, poll_interval_s, broadcast_progress
             )
             c_lat, c_lon, c_h, spread_xy, spread_u = self._verify_relock_spread(candidates)
-            new_origin, rec_id, locked_at, prev_origin = await self._execute_relock_db_update(
+            new_origin, rec_id, locked_at, _ = await self._execute_relock_db_update(
                 c_lat, c_lon, c_h, spread_xy, spread_u, candidates, duration_s, actor, station_id
             )
 

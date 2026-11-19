@@ -1024,33 +1024,49 @@ class RoundRobinResultsMixin:
         return global_test, stochastic_model_test
 
     @staticmethod
+    def _extract_scatter_warning(averaged_edges: list) -> Optional[dict]:
+        worst_scatter_edge = max(averaged_edges, key=lambda edge: float(edge.get("scatter_scale_factor") or 1.0), default=None)
+        max_variance_inflation = float((worst_scatter_edge or {}).get("scatter_scale_factor") or 1.0)
+        if max_variance_inflation <= 1.5:
+            return None
+        max_session_separation = float((worst_scatter_edge or {}).get("max_session_mean_separation_m") or 0.0)
+        return {
+            "code": "HIGH_INTER_SESSION_SCATTER",
+            "message": "High pooled edge scatter detected (scatter scale > 1.5). Review the displayed session-mean repeatability together with multipath, physical movement, and source changes.",
+            "max_variance_inflation": max_variance_inflation,
+            "from": (worst_scatter_edge or {}).get("from"),
+            "to": (worst_scatter_edge or {}).get("to"),
+            "max_session_mean_separation_m": max_session_separation,
+        }
+
+    @staticmethod
+    def _compute_diagnostic_warnings(network_quality_passed: bool, result: Any, averaged_edges: list) -> list:
+        diagnostic_warnings = []
+        if network_quality_passed and result.max_standardized_residual is not None:
+            if float(result.max_standardized_residual) >= 2.5:
+                diagnostic_warnings.append({
+                    "code": "LOCAL_STANDARDIZED_RESIDUAL_ELEVATED",
+                    "message": (
+                        "The global network test passes, but at least one local standardized residual is >= 2.5 sigma. "
+                        "Review the affected edge; this warning alone is not authority to reject the point."
+                    ),
+                    "max_standardized_residual": float(result.max_standardized_residual),
+                })
+        scatter_warn = RoundRobinResultsMixin._extract_scatter_warning(averaged_edges)
+        if scatter_warn:
+            diagnostic_warnings.append(scatter_warn)
+        return diagnostic_warnings
+
+    @staticmethod
     def _compute_cluster_quality_gate(
         global_test: Optional[dict], result: Any, averaged_edges: list, loops: list
     ) -> tuple[bool, list, list, str, float]:
         network_quality_passed = bool(global_test and global_test.get("passed"))
         quality_gate_passed = network_quality_passed
         quality_gate_reasons = [] if network_quality_passed else ["network quality test is not PASS"]
-        diagnostic_warnings = []
-        if network_quality_passed and result.max_standardized_residual is not None and float(result.max_standardized_residual) >= 2.5:
-            diagnostic_warnings.append({
-                "code": "LOCAL_STANDARDIZED_RESIDUAL_ELEVATED",
-                "message": (
-                    "The global network test passes, but at least one local standardized residual is >= 2.5 sigma. "
-                    "Review the affected edge; this warning alone is not authority to reject the point."
-                ),
-                "max_standardized_residual": float(result.max_standardized_residual),
-            })
-        worst_scatter_edge = max(averaged_edges, key=lambda edge: float(edge.get("scatter_scale_factor") or 1.0), default=None)
-        max_variance_inflation = float((worst_scatter_edge or {}).get("scatter_scale_factor") or 1.0)
-        if max_variance_inflation > 1.5:
-            max_session_separation = float((worst_scatter_edge or {}).get("max_session_mean_separation_m") or 0.0)
-            diagnostic_warnings.append({
-                "code": "HIGH_INTER_SESSION_SCATTER",
-                "message": "High pooled edge scatter detected (scatter scale > 1.5). Review the displayed session-mean repeatability together with multipath, physical movement, and source changes.",
-                "max_variance_inflation": max_variance_inflation,
-                "from": (worst_scatter_edge or {}).get("from"), "to": (worst_scatter_edge or {}).get("to"),
-                "max_session_mean_separation_m": max_session_separation,
-            })
+        diagnostic_warnings = RoundRobinResultsMixin._compute_diagnostic_warnings(
+            network_quality_passed, result, averaged_edges
+        )
         if not quality_gate_passed:
             interpretation_status = "FAILED_QUALITY_GATE"
         elif diagnostic_warnings:
@@ -1061,19 +1077,40 @@ class RoundRobinResultsMixin:
         return quality_gate_passed, quality_gate_reasons, diagnostic_warnings, interpretation_status, max_observed_closure
 
     def _build_cluster_quality_dict(
-        self, accepted_raw: list, averaged_edges: list, observation_sessions: list,
-        raw_rows: list, baseline_std_repeatability_fallback_edges: list,
-        quality_gate_passed: bool, interpretation_status: str, diagnostic_warnings: list,
-        vector_outlier_diagnostics: list, mixed_position_type_edges: list,
-        position_type_filter_diagnostics: list, temporal_scaling_applied: bool,
-        global_test: Optional[dict], stochastic_model_test: Optional[dict],
-        independent_global_test: Optional[dict], trusted_raw: list,
-        result: Any, cycle_space_dimension: int, loops: list, cycle_basis_rank: int,
-        std_warning_threshold: float, raw_ecef_tolerance: float,
-        vector_outlier_min_samples: int, vector_outlier_absolute_floor_m: float,
-        vector_outlier_sigma_multiplier: float, high_std_fallback_min_samples: int,
-        high_std_fallback_max_repeatability_m: float, max_observed_closure: float
+        self, raw_data: dict, gate_results: dict, network_stats: dict, thresholds: dict
     ) -> dict:
+        accepted_raw = raw_data["accepted_raw"]
+        averaged_edges = raw_data["averaged_edges"]
+        observation_sessions = raw_data["observation_sessions"]
+        raw_rows = raw_data["raw_rows"]
+        baseline_std_repeatability_fallback_edges = raw_data["fallback_edges"]
+        trusted_raw = raw_data["trusted_raw"]
+
+        quality_gate_passed = gate_results["quality_gate_passed"]
+        interpretation_status = gate_results["interp_status"]
+        diagnostic_warnings = gate_results["diagnostic_warnings"]
+        vector_outlier_diagnostics = gate_results["outlier_diags"]
+        mixed_position_type_edges = gate_results["mixed_position_type_edges"]
+        position_type_filter_diagnostics = gate_results["pos_diags"]
+        temporal_scaling_applied = gate_results["temporal_scaling_applied"]
+
+        global_test = network_stats["global_test"]
+        stochastic_model_test = network_stats["stochastic_model_test"]
+        independent_global_test = network_stats["indep_global_test"]
+        result = network_stats["result"]
+        cycle_space_dimension = network_stats["cycle_space_dim"]
+        loops = network_stats["loops"]
+        cycle_basis_rank = network_stats["cycle_basis_rank"]
+        max_observed_closure = network_stats["max_observed_closure"]
+
+        std_warning_threshold = thresholds["std_warning_threshold"]
+        raw_ecef_tolerance = thresholds["raw_ecef_tolerance"]
+        vector_outlier_min_samples = thresholds["vector_outlier_min_samples"]
+        vector_outlier_absolute_floor_m = thresholds["vector_outlier_absolute_floor_m"]
+        vector_outlier_sigma_multiplier = thresholds["vector_outlier_sigma_multiplier"]
+        high_std_fallback_min_samples = thresholds["high_std_fallback_min_samples"]
+        high_std_fallback_max_repeatability_m = thresholds["high_std_fallback_max_repeatability_m"]
+
         return {
             "observation_baseline_count": len(accepted_raw),
             "averaged_baseline_count": len(averaged_edges),
@@ -1220,7 +1257,7 @@ class RoundRobinResultsMixin:
             absolute_floor_m=vector_outlier_absolute_floor_m, sigma_multiplier=vector_outlier_sigma_multiplier,
         )
 
-        points, seed_edges = self._prepare_cluster_seed_edges(
+        points, _ = self._prepare_cluster_seed_edges(
             records, station_names, fixed_base_llh, fixed_base_ecef, cluster_index,
             std_warning_threshold, filter_vector_outliers
         )
@@ -1318,15 +1355,44 @@ class RoundRobinResultsMixin:
             self._compute_cluster_quality_gate(global_test, result, averaged_edges, loops)
         )
 
+        raw_data = {
+            "accepted_raw": accepted_raw,
+            "averaged_edges": averaged_edges,
+            "observation_sessions": observation_sessions,
+            "raw_rows": raw_rows,
+            "fallback_edges": fallback_edges,
+            "trusted_raw": trusted_raw,
+        }
+        gate_results = {
+            "quality_gate_passed": quality_gate_passed,
+            "interp_status": interp_status,
+            "diagnostic_warnings": diagnostic_warnings,
+            "outlier_diags": outlier_diags,
+            "mixed_position_type_edges": mixed_position_type_edges,
+            "pos_diags": pos_diags,
+            "temporal_scaling_applied": temporal_scaling_applied,
+        }
+        network_stats = {
+            "global_test": global_test,
+            "stochastic_model_test": stochastic_model_test,
+            "indep_global_test": indep_global_test,
+            "result": result,
+            "cycle_space_dim": cycle_space_dim,
+            "loops": loops,
+            "cycle_basis_rank": cycle_basis_rank,
+            "max_observed_closure": max_observed_closure,
+        }
+        thresholds = {
+            "std_warning_threshold": std_warning_threshold,
+            "raw_ecef_tolerance": raw_ecef_tolerance,
+            "vector_outlier_min_samples": vector_outlier_min_samples,
+            "vector_outlier_absolute_floor_m": vector_outlier_absolute_floor_m,
+            "vector_outlier_sigma_multiplier": vector_outlier_sigma_multiplier,
+            "high_std_fallback_min_samples": high_std_fallback_min_samples,
+            "high_std_fallback_max_repeatability_m": high_std_fallback_max_repeatability_m,
+        }
         quality_dict = self._build_cluster_quality_dict(
-            accepted_raw, averaged_edges, observation_sessions, raw_rows, fallback_edges,
-            quality_gate_passed, interp_status, diagnostic_warnings, outlier_diags,
-            mixed_position_type_edges, pos_diags, temporal_scaling_applied,
-            global_test, stochastic_model_test, indep_global_test, trusted_raw,
-            result, cycle_space_dim, loops, cycle_basis_rank,
-            std_warning_threshold, raw_ecef_tolerance, vector_outlier_min_samples,
-            vector_outlier_absolute_floor_m, vector_outlier_sigma_multiplier,
-            high_std_fallback_min_samples, high_std_fallback_max_repeatability_m, max_observed_closure
+            raw_data, gate_results, network_stats, thresholds
         )
 
         return {

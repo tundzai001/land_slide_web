@@ -6,7 +6,7 @@ import logging
 import math
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import and_, func, select
@@ -125,9 +125,6 @@ async def _calculate_station_risk_assessment(
     except Exception as e:
         logger.exception(f"Error calculating risk: {e}")
         return {"overall_risk": "UNKNOWN", "active_alerts": []}
-    except Exception as e:
-        logger.exception(f"Error calculating risk: {e}")
-        return {"overall_risk": "UNKNOWN", "active_alerts": []}
 
 
 def _is_gnss_analysis_point(data: dict) -> bool:
@@ -233,9 +230,27 @@ def _build_imu_time_series(imu_analysis: dict, days: float) -> None:
 
 
 def _determine_daily_risk_and_message(rows, classification, velocity_reliable, reliability_message) -> tuple[str, str]:
-    risk_level, warning_message = _determine_daily_risk_and_message(
-        rows, classification, velocity_reliable, reliability_message
-    )
+    derived_risk = map_gnss_daily_risk(classification)
+    max_row_risk = "LOW"
+    for r in rows:
+        row_risk = str(r.risk_level or "LOW").upper()
+        if _severity(row_risk) > _severity(max_row_risk):
+            max_row_risk = row_risk
+    risk_level = max_row_risk if _severity(max_row_risk) >= _severity(derived_risk) else derived_risk
+
+    if risk_level in ("CRITICAL", "EXTREME"):
+        warning_message = f"🚨 Cảnh báo cao từ GNSS daily summary ({classification})."
+    elif risk_level == "HIGH":
+        warning_message = f"⚠️ Cảnh báo: vận tốc có xu hướng tăng ({classification})."
+    elif risk_level == "MEDIUM":
+        warning_message = f"Cần theo dõi: GNSS có chuyển dịch mức trung bình ({classification})."
+    else:
+        warning_message = f"An toàn tương đối theo GNSS daily summary ({classification})."
+
+    if not velocity_reliable:
+        warning_message = reliability_message
+        risk_level = "INFO"
+
     return risk_level, warning_message
 
 
@@ -501,7 +516,6 @@ async def _fetch_analysis_data(db_data: AsyncSession, station_id: int, cutoff_ti
     return gnss_data, daily_gnss_full, imu_data, rain_data
 
 
-@router.get("/api/stations/{station_id}/long-term-analysis", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}, 422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 def _prepare_historical_points(gnss_data, imu_data, daily_gnss_full, cutoff_requested, days):
     daily_gnss_requested = [d for d in daily_gnss_full if int(d.day_start_ts or 0) >= _utc_day_start(cutoff_requested)]
     historical_gnss_full = [{"timestamp": d.timestamp, "data": d.data} for d in gnss_data if _is_gnss_analysis_point(d.data)]
@@ -518,13 +532,14 @@ def _prepare_historical_points(gnss_data, imu_data, daily_gnss_full, cutoff_requ
     return daily_gnss_requested, historical_gnss_full, historical_gnss_requested, historical_imu_requested
 
 
+@router.get("/api/stations/{station_id}/long-term-analysis", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}, 422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def get_long_term_analysis(
     station_id: int,
     days: float = 30.0,
     include_correlation: bool = False,
     correlation_model: str = "slide_model",
-    db_config: AsyncSession = Depends(get_config_db),
-    db_data: AsyncSession = Depends(get_data_db)
+    db_config: Annotated[AsyncSession, Depends(get_config_db)] = None,
+    db_data: Annotated[AsyncSession, Depends(get_data_db)] = None
 ):
     """Phân tích dài hạn cho GNSS displacement + IMU tilt."""
     try:
@@ -611,7 +626,7 @@ async def get_long_term_analysis(
 async def get_gnss_daily_summary(
     station_id: int,
     limit: int = 30,
-    db_data: AsyncSession = Depends(get_data_db)
+    db_data: Annotated[AsyncSession, Depends(get_data_db)] = None
 ):
     """Lấy summary GNSS theo ngày (đã rollup)."""
     try:
@@ -654,7 +669,7 @@ async def get_gnss_daily_summary(
 async def get_gnss_weekly_summary(
     station_id: int,
     limit: int = 12,
-    db_data: AsyncSession = Depends(get_data_db)
+    db_data: Annotated[AsyncSession, Depends(get_data_db)] = None
 ):
     """Lấy summary GNSS theo tuần (từ 7 daily summaries liên tiếp)."""
     try:

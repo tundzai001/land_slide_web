@@ -50,10 +50,9 @@ def _compute_trend_agreement(gnss_ok: bool, imu_ok: bool, t1: str, t2: str) -> O
     i_tr = t2 or "stable"
     if g_tr == i_tr:
         return "full"
-    pair = {g_tr, i_tr}
-    if pair == {"accelerating", "stable"}:
+    if (g_tr == "accelerating" and i_tr == "stable") or (g_tr == "stable" and i_tr == "accelerating"):
         return "partial"
-    if pair == {"accelerating", "decelerating"}:
+    if (g_tr == "accelerating" and i_tr == "decelerating") or (g_tr == "decelerating" and i_tr == "accelerating"):
         return "conflict"
     return "full"
 
