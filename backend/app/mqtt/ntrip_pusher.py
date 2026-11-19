@@ -216,8 +216,9 @@ class NtripPusher:
         self.is_running = True
         self.task = asyncio.create_task(self._push_loop())
         try:
-            await asyncio.wait_for(self._ready.wait(), timeout=timeout)
-        except asyncio.TimeoutError as exc:
+            async with asyncio.timeout(timeout):
+                await self._ready.wait()
+        except (TimeoutError, asyncio.TimeoutError) as exc:
             await self.stop()
             raise TimeoutError(
                 f"NTRIP SOURCE handshake timed out for {self.host}:{self.port}/{self.mountpoint}"
@@ -232,8 +233,9 @@ class NtripPusher:
 
     async def wait_for_rtcm(self, timeout: float = 10.0) -> None:
         try:
-            await asyncio.wait_for(self._first_rtcm_sent.wait(), timeout=timeout)
-        except asyncio.TimeoutError as exc:
+            async with asyncio.timeout(timeout):
+                await self._first_rtcm_sent.wait()
+        except (TimeoutError, asyncio.TimeoutError) as exc:
             diagnostics = self.diagnostics()
             raise TimeoutError(
                 f"No valid RTCM3 frame was forwarded for station {self.station_code} "
@@ -338,7 +340,8 @@ class NtripPusherManager:
         pushers = cls._instances.get(station_code)
         if not pushers:
             raise RuntimeError(f"NTRIP pusher is not running for station {station_code}")
-        await asyncio.gather(*(pusher.wait_for_rtcm(timeout=timeout) for pusher in pushers))
+        async with asyncio.timeout(timeout):
+            await asyncio.gather(*(pusher.wait_for_rtcm(timeout=timeout) for pusher in pushers))
 
     @classmethod
     def feed_data(cls, station_code: str, data: bytes):

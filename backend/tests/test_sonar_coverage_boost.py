@@ -2286,6 +2286,139 @@ NODATA_value -9999
         alerts._get_station_active_alert_summary = AsyncMock(return_value={'degraded': True})
         self.assertFalse(asyncio.run(alerts._auto_resolve_sensor_alerts(1, 'rain', {}, 1)))
 
+    def test_gnss_processing_and_origin_deep(self):
+        from processors.gnss_processor import GNSSVelocityProcessor
+
+        p = GNSSVelocityProcessor(1, MagicMock)
+        # initialization incomplete
+        p._initialization_complete = False
+        res1 = p.process_gngga('payload')
+        self.assertEqual(res1['status'], 'INITIALIZING')
+        p._initialization_complete = True
+
+        # empty coords
+        res3 = p.process_gngga('$GNGGA,123519,,N,,E,1,08,0.9,545.4,M,46.9,M,,')
+        self.assertEqual(res3['status'], 'NO_DATA')
+
+        # origin relock in progress
+        def nmea_chk(s):
+            c = 0
+            for ch in s: c ^= ord(ch)
+            return f"{c:02X}"
+
+        sentence_body = "GNGGA,123519,4807.038,N,01131.000,E,4,08,0.9,545.4,M,46.9,M,,"
+        sentence = f"${sentence_body}*{nmea_chk(sentence_body)}"
+        p._origin_relock_in_progress = True
+        p._origin_relock_samples = []
+        p.stats = {'low_quality_rejected': 0}
+        self.assertIsNone(p.process_gngga(sentence))
+
+        # origin apply and preserve
+        rec = MagicMock(
+            rotation_matrix=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            ecef_origin=[100.0, 200.0, 300.0],
+            lat=21.0, lon=105.0, h=10.0,
+            tracking_offset=None, locked_at=100, id=1
+        )
+        p._apply_origin_record(rec, None)
+        self.assertEqual(p.state, 'ORIGIN_LOCKED')
+        self.assertEqual(p.origin['lat'], 21.0)
+        p._preserve_existing_origin(rec)
+        self.assertEqual(p.origin['lat'], 21.0)
+
+    def test_project_dem_save_and_update_lifecycle(self):
+        from app.shared.project_dem import save_project_dem, update_project_dem_metadata, delete_project_dems
+
+        grid = b"""ncols 2
+nrows 2
+xllcorner 500000
+yllcorner 2000000
+cellsize 10
+NODATA_value -9999
+10.5 12.0
+15.0 -9999
+"""
+        res = save_project_dem(999, 'Test DEM Lifecycle', grid)
+        dem_id = res['dem_id']
+        self.assertEqual(len(dem_id), 16)
+
+        updated = update_project_dem_metadata(999, dem_id, 500010.0, 2000010.0, 'Updated DEM', existing_models=res['models'])
+        self.assertEqual(updated['dem']['name'], 'Updated DEM')
+        delete_project_dems(999)
+
+    def test_cors_stations_deep_parsing(self):
+        from app.features.projects.cors_stations import _extract_cors_fallback_streams, _parse_cors_station_item
+
+        fallback = _extract_cors_fallback_streams({'serverhost1': 'h1', 'mountpoint1': 'm1', 'serverhost2': 'h2', 'mountpoint2': 'm2'})
+        self.assertEqual(len(fallback), 2)
+
+        st_item = _parse_cors_station_item({
+            'name': 'CORS 1', 'lat': 21.03, 'lon': 105.85, 'alt': 10.0,
+            'status': 'online',
+            'service_config': {'serverhost1': 'h1', 'mountpoint1': 'm1'}
+        })
+        self.assertIsNotNone(st_item)
+        self.assertEqual(st_item['name'], 'CORS 1')
+        self.assertTrue(st_item['is_online'])
+
+        self.assertIsNone(_parse_cors_station_item('invalid'))
+        self.assertIsNone(_parse_cors_station_item({'name': 'bad', 'lat': 'bad'}))
+
+    def test_projects_admin_validation(self):
+        from app.features.projects.admin import validate_project_fields
+
+        d = {'project_code': ' P1 ', 'name': ' Project 1 ', 'description': 'desc'}
+        validate_project_fields(d, creating=True)
+        self.assertEqual(d['project_code'], 'P1')
+        self.assertEqual(d['name'], 'Project 1')
+
+        with self.assertRaises(HTTPException):
+            validate_project_fields({'project_code': 'P1', 'name': '   '}, creating=True)
+
+        with self.assertRaises(HTTPException):
+            validate_project_fields({'project_code': 'X' * 51, 'name': 'OK'}, creating=True)
+
+    def test_simulation_water_and_imu_overrides(self):
+        from app.features.simulation.service import _apply_sensor_overrides
+
+        params = {}
+        sources = {}
+        warnings = []
+        valid_data = {
+            'water': {'water_level': 5.0},
+            'imu': {'ax': 1.0, 'ay': 1.5}
+        }
+        profile = {'water_level_dry_m': 2.0, 'water_level_saturated_m': 10.0}
+
+        _apply_sensor_overrides(valid_data, profile, params, sources, warnings)
+        self.assertIn('pore_pressure_ratio', params)
+        self.assertEqual(sources['pore_pressure_ratio'], 'Cảm biến mực nước + calibration trạm')
+        self.assertIn('seismic_coeff', params)
+        self.assertEqual(sources['seismic_coeff'], 'Gia tốc ngang IMU')
+
+    def test_gnss_adjustment_router_error_branches(self):
+        from app.features.gnss_adjustment.router import start_gnss_adjustment
+        from app.features.gnss_adjustment.schemas import GnssAdjustmentStartRequest
+
+        db = AsyncMock()
+        # 1. Project not found -> 404
+        db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+        req = GnssAdjustmentStartRequest(project_id=999)
+        with self.assertRaises(HTTPException):
+            asyncio.run(start_gnss_adjustment(req, db=db, current_user=MagicMock(role='admin', is_admin=True)))
+
+        # 2. Forbidden run_id for non-system -> 403
+        proj = MagicMock(id=1, gnss_clusters=[])
+        db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=proj)))
+        req_run = GnssAdjustmentStartRequest(project_id=1, run_id=10)
+        with self.assertRaises(HTTPException):
+            asyncio.run(start_gnss_adjustment(req_run, db=db, current_user=MagicMock(role='admin', is_admin=True, assigned_projects=[1])))
+
+        # 3. No valid cluster -> 422
+        with self.assertRaises(HTTPException):
+            asyncio.run(start_gnss_adjustment(req, db=db, current_user=MagicMock(role='admin', is_admin=True, assigned_projects=[1])))
+
+
 
 
 

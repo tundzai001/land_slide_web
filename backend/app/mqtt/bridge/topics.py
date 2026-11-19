@@ -135,7 +135,7 @@ class MQTTTopicMixin:
         return True
 
     def _stop_unused_mqtt_clients(self, new_client_topics):
-        for b_key in [k for k in self._sub_clients]:
+        for b_key in tuple(self._sub_clients):
             if b_key not in new_client_topics:
                 logger.info(f"🔌 [DYNAMIC MQTT] Stopping client for {b_key[0]}:{b_key[1]} (no active topics)")
                 client = self._sub_clients[b_key]

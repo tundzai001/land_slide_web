@@ -330,7 +330,7 @@ class RoundRobinReceiverMixin:
                             password=target_route_password,
                         )
                         route_started = True
-                    await self._wait_for_ntrip_route(rover_code, timeout=25.0)
+                    await self._wait_for_ntrip_route(rover_code)
                     break
                 except Exception as route_exc:
                     is_missing_rtcm = "no valid rtcm3 frame" in str(route_exc).casefold()
@@ -841,11 +841,10 @@ class RoundRobinReceiverMixin:
     async def _wait_for_ntrip_route(
         self,
         station_code: str,
-        timeout: float = 25.0,
     ) -> None:
         if not self.route_wait_callback:
             return
-        result = self.route_wait_callback(station_code, timeout)
+        result = self.route_wait_callback(station_code, 25.0)
         if inspect.isawaitable(result):
             await result
 

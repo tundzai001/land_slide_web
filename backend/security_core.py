@@ -51,12 +51,12 @@ class SecurityState:
 
     def clean_old_records(self):
         now = time.time()
-        for ip in [k for k in self.ip_records]:
+        for ip in tuple(self.ip_records):
             self.ip_records[ip] = [ts for ts in self.ip_records[ip] if now - ts < self.RATE_LIMIT_WINDOW]
             if not self.ip_records[ip]:
                 del self.ip_records[ip]
                 
-        for ip in [k for k in self.blocked_ips]:
+        for ip in tuple(self.blocked_ips):
             if now > self.blocked_ips[ip]:
                 del self.blocked_ips[ip]
                 self.add_event("UNBAN", ip, "Ban duration expired.")
