@@ -2110,6 +2110,22 @@ class SonarCoverageBoostTests(unittest.TestCase):
         res4 = analyzer.analyze_long_term_velocity(1, pts_acc, {})
         self.assertEqual(res4['status'], 'success')
 
+        # 4. alert counter helpers in alerts.py
+        from processors.landslide.alerts import _init_alert_counter, _step_alert_counter, _handle_safe_deassertion
+
+        counter = {'count': 0, 'last_level': None}
+        _init_alert_counter(counter)
+        self.assertIsNone(counter['latched_level'])
+        self.assertEqual(counter['safe_count'], 0)
+
+        self.assertFalse(_step_alert_counter(counter, 'WARNING', 2))
+        self.assertTrue(_step_alert_counter(counter, 'WARNING', 2))
+        self.assertEqual(counter['latched_level'], 'WARNING')
+
+        self.assertEqual(_handle_safe_deassertion(counter, 2, 1, 'TEST'), {'level': 'PENDING'})
+        self.assertIsNone(_handle_safe_deassertion(counter, 2, 1, 'TEST'))
+        self.assertIsNone(counter['latched_level'])
+
     def test_simulation_runs_endpoints_extended(self):
         from app.features.simulation.runs import stop_run, rerun
 
@@ -2162,6 +2178,114 @@ class SonarCoverageBoostTests(unittest.TestCase):
         db.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
         res_empty = asyncio.run(_calculate_station_risk_assessment(db, 1, {'alerting': {'enabled': True}}))
         self.assertEqual(res_empty['overall_risk'], 'LOW')
+
+    def test_station_configuration_updates_and_sync(self):
+        from app.features.stations.configuration import _sync_station_devices, update_station_config
+
+        db = AsyncMock()
+        st = MagicMock(id=1, project_id=1, config={})
+
+        with self.assertRaises(HTTPException):
+            asyncio.run(_sync_station_devices(db, st, {'rain': 'not_dict'}))
+
+        with self.assertRaises(HTTPException):
+            asyncio.run(_sync_station_devices(db, st, {'rain': {'topic': 'dup/t'}, 'imu': {'topic': 'dup/t'}}))
+
+        # update_station_config not found -> 404
+        db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+        with self.assertRaises(HTTPException):
+            asyncio.run(update_station_config(999, {'name': 'n'}, db=db, current_user=MagicMock()))
+
+        # update_station_config empty data -> 400
+        db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=st)))
+        with self.assertRaises(HTTPException):
+            asyncio.run(update_station_config(1, {}, db=db, current_user=MagicMock()))
+
+        # update_station_config success -> 200
+        res = asyncio.run(update_station_config(
+            1,
+            {'station_code': 'UPDATED_CODE', 'name': 'Updated Station', 'config': {'alerting': {'enabled': True}}},
+            db=db,
+            current_user=MagicMock()
+        ))
+        self.assertEqual(res['status'], 'success')
+        self.assertEqual(st.station_code, 'UPDATED_CODE')
+
+    def test_project_dem_extended_inspection(self):
+        from app.shared.project_dem import inspect_ascii_grid
+
+        grid_content = b"""ncols 2
+nrows 2
+xllcorner 500000
+yllcorner 2000000
+cellsize 10
+NODATA_value -9999
+10.5 12.0
+15.0 -9999
+"""
+        meta = inspect_ascii_grid(grid_content)
+        self.assertEqual(meta['ncols'], 2)
+        self.assertEqual(meta['nrows'], 2)
+        self.assertEqual(meta['elevation_min'], 10.5)
+        self.assertEqual(meta['elevation_max'], 15.0)
+
+    def test_gnss_origin_and_processing_extended(self):
+        from processors.gnss.origin import _query_origin_record, _sync_station_origin_config
+        from processors.gnss_processor import GNSSVelocityProcessor
+
+        db = AsyncMock()
+        # 1. _query_origin_record normal
+        db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=MagicMock(id=10))))
+        rec1 = asyncio.run(_query_origin_record(db, 1))
+        self.assertEqual(rec1.id, 10)
+
+        # 2. _query_origin_record column select fallback
+        db.execute.side_effect = [Exception('col err'), MagicMock(first=MagicMock(return_value=(21.0, 105.0, 10.0, None, None, 100, 10)))]
+        rec2 = asyncio.run(_query_origin_record(db, 1))
+        self.assertEqual(rec2.lat, 21.0)
+
+        # 3. _sync_station_origin_config
+        st = MagicMock(config={})
+        _sync_station_origin_config(st, {'lat': 21.0, 'lon': 105.0, 'h': 10.0})
+        self.assertEqual(st.config['gnss_origin']['lat'], 21.0)
+
+        # 4. GNSSVelocityProcessor process_gngga
+        proc = GNSSVelocityProcessor(1, MagicMock)
+        res_nodata = proc.process_gngga('garbage payload')
+        self.assertEqual(res_nodata['status'], 'NO_DATA')
+
+        gga_sentence = '$GNGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47'
+        res_gga = proc.process_gngga(gga_sentence)
+        self.assertIn('status', res_gga)
+
+    def test_mqtt_persistence_and_alerts_extended(self):
+        from app.mqtt.persistence.alerts import _resolve_suppression_incidents
+        from app.mqtt.persistence.ingest import SensorIngestPersistenceMixin
+        from app.mqtt.bridge.sensor_pipeline.alerts import SensorAlertMixin
+
+        # 1. _resolve_suppression_incidents empty
+        db = AsyncMock()
+        self.assertEqual(asyncio.run(_resolve_suppression_incidents(db, [])), [])
+
+        # 2. SensorIngestPersistenceMixin metrics and id
+        class FakeIngest(SensorIngestPersistenceMixin):
+            pass
+
+        ingest = FakeIngest()
+        metrics = ingest._ensure_ingest_metrics()
+        self.assertEqual(metrics['inserted'], 0)
+        ing_id = ingest._make_ingest_id(1, 1, 'rain', 1000, {'val': 1.5})
+        self.assertTrue(isinstance(ing_id, str) and len(ing_id) > 10)
+
+        # 3. SensorAlertMixin _auto_resolve_sensor_alerts
+        class FakeAlerts(SensorAlertMixin):
+            pass
+
+        alerts = FakeAlerts()
+        self.assertFalse(asyncio.run(alerts._auto_resolve_sensor_alerts(1, 'unknown_sensor', {}, 1)))
+        alerts._get_station_active_alert_summary = AsyncMock(return_value={'degraded': True})
+        self.assertFalse(asyncio.run(alerts._auto_resolve_sensor_alerts(1, 'rain', {}, 1)))
+
 
 
 
