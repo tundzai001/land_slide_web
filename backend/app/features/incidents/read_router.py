@@ -40,36 +40,11 @@ class IncidentQueryFilter:
         self.q = q
 
 
-@router.get("/api/incidents", responses={422: {"description": "Unprocessable Entity"}})
-async def list_incidents(
-    response: Response,
-    filters: IncidentQueryFilter = Depends(),
-    cursor: Optional[str] = None,
-    limit: int = Query(50, ge=1, le=100),
-    sort: str = Query("-updated_at"),
-    db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.VIEW_INCIDENTS)),
-):
+def _build_incident_conditions(filters: IncidentQueryFilter):
     status_filter = filters.status_filter
     priority = filters.priority
-    source_severity = filters.source_severity
-    signal_state = filters.signal_state
-    source_kind = filters.source_kind
-    project_id = filters.project_id
-    station_id = filters.station_id
-    assigned_to = filters.assigned_to
     q = filters.q
-    _private_headers(response)
-    if sort not in {"attention", "-updated_at", "updated_at", "opened_at"}:
-        raise HTTPException(status_code=422, detail={"code": "INVALID_SORT", "message": "Sort không được hỗ trợ"})
-    scope_hash = _scope_hash(current_user)
-    filter_payload = {
-        "status": status_filter, "priority": priority, "source_severity": source_severity,
-        "signal_state": signal_state, "source_kind": source_kind, "project_id": project_id,
-        "station_id": station_id, "assigned_to": assigned_to, "q": q, "sort": sort,
-    }
-    filter_hash = _canonical_filter_hash(filter_payload)
-    stmt = _base_scope_stmt(current_user)
+
     conditions = []
     if status_filter:
         if status_filter not in VALID_STATUSES:
@@ -79,18 +54,18 @@ async def list_incidents(
         if priority.upper() not in VALID_PRIORITIES:
             raise HTTPException(status_code=422, detail={"code": "INVALID_PRIORITY", "message": "Priority không hợp lệ"})
         conditions.append(model_data.IncidentCase.priority == priority.upper())
-    if source_severity:
-        conditions.append(model_data.IncidentCase.source_severity == str(source_severity).upper())
-    if signal_state:
-        conditions.append(model_data.IncidentCase.signal_state == str(signal_state).upper())
-    if source_kind:
-        conditions.append(model_data.IncidentCase.source_kind == str(source_kind).upper())
-    if project_id is not None:
-        conditions.append(model_data.IncidentCase.project_id == project_id)
-    if station_id is not None:
-        conditions.append(model_data.IncidentCase.station_id == station_id)
-    if assigned_to is not None:
-        conditions.append(model_data.IncidentCase.assigned_to_user_id == assigned_to)
+    if filters.source_severity:
+        conditions.append(model_data.IncidentCase.source_severity == str(filters.source_severity).upper())
+    if filters.signal_state:
+        conditions.append(model_data.IncidentCase.signal_state == str(filters.signal_state).upper())
+    if filters.source_kind:
+        conditions.append(model_data.IncidentCase.source_kind == str(filters.source_kind).upper())
+    if filters.project_id is not None:
+        conditions.append(model_data.IncidentCase.project_id == filters.project_id)
+    if filters.station_id is not None:
+        conditions.append(model_data.IncidentCase.station_id == filters.station_id)
+    if filters.assigned_to is not None:
+        conditions.append(model_data.IncidentCase.assigned_to_user_id == filters.assigned_to)
     if q and q.strip():
         pattern = f"%{q.strip()[:100]}%"
         conditions.append(or_(
@@ -101,8 +76,76 @@ async def list_incidents(
             model_data.IncidentCase.station_name_snapshot.ilike(pattern),
             model_data.IncidentCase.station_code_snapshot.ilike(pattern),
         ))
+    return conditions
+
+
+def _apply_incident_cursor(stmt, cursor: str, scope_hash: str, filter_hash: str, sort: str, attention_rank):
+    payload = _decode_cursor(cursor, scope_hash=scope_hash, filter_hash=filter_hash, sort=sort)
+    cursor_id = int(payload.get("id"))
+    if sort == "attention":
+        cursor_rank = int(payload.get("rank"))
+        cursor_updated_at = int(payload.get("updated_at"))
+        return stmt.where(or_(
+            attention_rank < cursor_rank,
+            and_(attention_rank == cursor_rank, model_data.IncidentCase.updated_at < cursor_updated_at),
+            and_(attention_rank == cursor_rank, model_data.IncidentCase.updated_at == cursor_updated_at, model_data.IncidentCase.id < cursor_id),
+        ))
+    cursor_value = int(payload.get("value"))
+    field = model_data.IncidentCase.opened_at if sort == "opened_at" else model_data.IncidentCase.updated_at
+    if sort in {"-updated_at", "opened_at"}:
+        return stmt.where(or_(field < cursor_value, and_(field == cursor_value, model_data.IncidentCase.id < cursor_id)))
+    return stmt.where(or_(field > cursor_value, and_(field == cursor_value, model_data.IncidentCase.id > cursor_id)))
+
+
+def _apply_incident_ordering(stmt, sort: str, attention_rank):
+    field = model_data.IncidentCase.opened_at if sort == "opened_at" else model_data.IncidentCase.updated_at
+    if sort == "attention":
+        return stmt.order_by(attention_rank.desc(), model_data.IncidentCase.updated_at.desc(), model_data.IncidentCase.id.desc())
+    if sort == "updated_at":
+        return stmt.order_by(field.asc(), model_data.IncidentCase.id.asc())
+    return stmt.order_by(field.desc(), model_data.IncidentCase.id.desc())
+
+
+def _build_next_cursor(rows, limit, scope_hash, filter_hash, sort) -> Optional[str]:
+    if len(rows) <= limit or not rows:
+        return None
+    last = rows[limit - 1]
+    cursor_payload = {
+        "v": 1, "scope_hash": scope_hash, "filter_hash": filter_hash, "sort": sort,
+        "id": int(last.id),
+    }
+    if sort == "attention":
+        cursor_payload.update({"rank": _attention_rank(last), "updated_at": int(last.updated_at)})
+    else:
+        cursor_payload["value"] = int(last.opened_at if sort == "opened_at" else last.updated_at)
+    return _sign_cursor(cursor_payload)
+
+
+@router.get("/api/incidents", responses={422: {"description": "Unprocessable Entity"}})
+async def list_incidents(
+    response: Response,
+    filters: IncidentQueryFilter = Depends(),
+    cursor: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=100),
+    sort: str = Query("-updated_at"),
+    db: AsyncSession = Depends(get_data_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.VIEW_INCIDENTS)),
+):
+    _private_headers(response)
+    if sort not in {"attention", "-updated_at", "updated_at", "opened_at"}:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_SORT", "message": "Sort không được hỗ trợ"})
+    scope_hash = _scope_hash(current_user)
+    filter_payload = {
+        "status": filters.status_filter, "priority": filters.priority, "source_severity": filters.source_severity,
+        "signal_state": filters.signal_state, "source_kind": filters.source_kind, "project_id": filters.project_id,
+        "station_id": filters.station_id, "assigned_to": filters.assigned_to, "q": filters.q, "sort": sort,
+    }
+    filter_hash = _canonical_filter_hash(filter_payload)
+    stmt = _base_scope_stmt(current_user)
+    conditions = _build_incident_conditions(filters)
     if conditions:
         stmt = stmt.where(and_(*conditions))
+
     attention_status = case(
         *[(model_data.IncidentCase.status == value, rank) for value, rank in _STATUS_ATTENTION_ORDER.items()],
         else_=0,
@@ -112,48 +155,16 @@ async def list_incidents(
         else_=0,
     )
     attention_rank = attention_status * 10 + attention_priority
+
     if cursor:
-        payload = _decode_cursor(cursor, scope_hash=scope_hash, filter_hash=filter_hash, sort=sort)
-        cursor_id = int(payload.get("id"))
-        if sort == "attention":
-            cursor_rank = int(payload.get("rank"))
-            cursor_updated_at = int(payload.get("updated_at"))
-            stmt = stmt.where(or_(
-                attention_rank < cursor_rank,
-                and_(attention_rank == cursor_rank, model_data.IncidentCase.updated_at < cursor_updated_at),
-                and_(attention_rank == cursor_rank, model_data.IncidentCase.updated_at == cursor_updated_at, model_data.IncidentCase.id < cursor_id),
-            ))
-        else:
-            cursor_value = int(payload.get("value"))
-            field = model_data.IncidentCase.opened_at if sort == "opened_at" else model_data.IncidentCase.updated_at
-            if sort in {"-updated_at", "opened_at"}:
-                stmt = stmt.where(or_(field < cursor_value, and_(field == cursor_value, model_data.IncidentCase.id < cursor_id)))
-            else:
-                stmt = stmt.where(or_(field > cursor_value, and_(field == cursor_value, model_data.IncidentCase.id > cursor_id)))
-    field = model_data.IncidentCase.opened_at if sort == "opened_at" else model_data.IncidentCase.updated_at
-    if sort == "attention":
-        stmt = stmt.order_by(attention_rank.desc(), model_data.IncidentCase.updated_at.desc(), model_data.IncidentCase.id.desc())
-    elif sort == "updated_at":
-        stmt = stmt.order_by(field.asc(), model_data.IncidentCase.id.asc())
-    else:
-        stmt = stmt.order_by(field.desc(), model_data.IncidentCase.id.desc())
+        stmt = _apply_incident_cursor(stmt, cursor, scope_hash, filter_hash, sort, attention_rank)
+
+    stmt = _apply_incident_ordering(stmt, sort, attention_rank)
     count_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
     total = int((await db.execute(count_stmt)).scalar_one() or 0)
-    rows = (await db.execute(stmt.limit(limit + 1))).scalars().all()
-    has_more = len(rows) > limit
-    rows = rows[:limit]
-    next_cursor = None
-    if has_more and rows:
-        last = rows[-1]
-        cursor_payload = {
-            "v": 1, "scope_hash": scope_hash, "filter_hash": filter_hash, "sort": sort,
-            "id": int(last.id),
-        }
-        if sort == "attention":
-            cursor_payload.update({"rank": _attention_rank(last), "updated_at": int(last.updated_at)})
-        else:
-            cursor_payload["value"] = int(last.opened_at if sort == "opened_at" else last.updated_at)
-        next_cursor = _sign_cursor(cursor_payload)
+    raw_rows = (await db.execute(stmt.limit(limit + 1))).scalars().all()
+    next_cursor = _build_next_cursor(raw_rows, limit, scope_hash, filter_hash, sort)
+    rows = raw_rows[:limit]
     event_watermark = int((await db.execute(select(func.max(model_data.IncidentEvent.id)))).scalar_one() or 0)
     return {
         "items": [serialize_case(row, include_private=_is_manager(current_user)) for row in rows],

@@ -114,6 +114,89 @@ def _terrain_profile(params: dict[str, float | int]) -> list[dict[str, float]]:
     return result
 
 
+def _step_hydrology(params: dict[str, Any], dt: float, wetting_depth: float, cumulative_rain: float) -> tuple[float, float, float, float]:
+    rain_m_s = float(params[PARAM_RAINFALL]) / 1000.0 / 3600.0
+    ks = float(params["ks"])
+    porosity = float(params[PARAM_POROSITY])
+    if rain_m_s > 0:
+        cumulative_rain += rain_m_s * dt
+        if rain_m_s <= ks:
+            infiltration = rain_m_s
+        else:
+            infiltration = min(rain_m_s, ks * (1.0 + 0.3 / max(0.01, wetting_depth)))
+        wetting_depth += infiltration * dt / porosity
+    else:
+        wetting_depth = max(0.0, wetting_depth - ks * 0.1 * dt / porosity)
+
+    infiltration_ru = 0.0
+    if wetting_depth > float(params[PARAM_SLIP_DEPTH]) * 0.3:
+        water_head = wetting_depth - float(params[PARAM_SLIP_DEPTH]) * 0.3
+        infiltration_ru = min(0.6, water_head / float(params[PARAM_SLIP_DEPTH]) * 0.5)
+    effective_ru = min(0.6, float(params[PARAM_PORE_PRESSURE_RATIO]) + infiltration_ru)
+    fos = calculate_fos(params, effective_ru)
+    return wetting_depth, cumulative_rain, effective_ru, fos
+
+
+def _step_state_transition(state: str, critical_seconds: float, fos: float, params: dict[str, Any], dt: float, elapsed: float, slide_start: float | None) -> tuple[str, float, float | None]:
+    if state in {STATE_SLIDING, STATE_DEPOSITED}:
+        return state, critical_seconds, slide_start
+    if fos >= float(params[PARAM_FOS_WARNING]):
+        return "STABLE", 0.0, slide_start
+    if fos >= float(params[PARAM_FOS_CRITICAL]):
+        return "WARNING", 0.0, slide_start
+    critical_seconds += dt
+    if critical_seconds >= 120.0:
+        return STATE_SLIDING, critical_seconds, elapsed
+    return "CRITICAL", critical_seconds, slide_start
+
+
+def _step_sliding_dynamics(
+    state: str, slide_start: float | None, elapsed: float, dt: float, params: dict[str, Any],
+    effective_ru: float, position: float, velocity: float, acceleration: float, volume: float, mass: float
+) -> tuple[str, float, float, float, float, float]:
+    if state != STATE_SLIDING:
+        return state, position, velocity, acceleration, volume, mass
+    slope = max(0.0, math.radians(float(params[PARAM_SLOPE_ANGLE])) - position * 0.006)
+    mu = math.tan(math.radians(float(params[PARAM_FRICTION_ANGLE]) - 10.0))
+    xi = 300.0
+    if effective_ru > 0.3:
+        mu, xi = max(0.05, mu * (1.0 - effective_ru)), 500.0
+    height = max(0.5, float(params[PARAM_SLIP_DEPTH]) * max(0.25, 1.0 - position / 5000.0))
+    acceleration = 9.81 * math.sin(slope) - mu * 9.81 * math.cos(slope) - 9.81 * velocity * velocity / (xi * height)
+    if velocity <= 0.01 and acceleration < 0:
+        acceleration = velocity = 0.0
+    velocity = max(0.0, velocity + acceleration * dt)
+    position += velocity * dt
+    if velocity > 1.0:
+        added = 0.8 * velocity * dt
+        volume += added
+        mass += added * float(params[PARAM_UNIT_WEIGHT]) * 100.0
+    if (slide_start is not None and elapsed - slide_start >= 300.0) or (elapsed > (slide_start or 0) + dt and velocity < 0.1):
+        state, velocity, acceleration = STATE_DEPOSITED, 0.0, 0.0
+    return state, position, velocity, acceleration, volume, mass
+
+
+def _summarize_simulation(params: dict, min_fos: float, events: list, series: list, max_velocity: float, max_acceleration: float, peak_energy: float, sample_every: int) -> dict[str, Any]:
+    final = series[-1]
+    if any(event[KEY_STATE] == STATE_SLIDING for event in events):
+        classification = "Đã xảy ra trượt mô phỏng"
+    elif min_fos >= float(params[PARAM_FOS_WARNING]):
+        classification = "Ổn định"
+    elif min_fos >= float(params[PARAM_FOS_CRITICAL]):
+        classification = "Cảnh báo"
+    else:
+        classification = "Mất ổn định"
+
+    return {
+        "classification": classification, "initial_fos": round(series[0]["fos"], 4), "minimum_fos": round(min_fos, 4),
+        "slide_start_time_s": next((event[KEY_TIME_S] for event in events if event[KEY_STATE] == STATE_SLIDING), None),
+        "max_velocity_m_s": round(max_velocity, 4), "max_acceleration_m_s2": round(max_acceleration, 4),
+        KEY_RUNOUT_M: final[KEY_RUNOUT_M], "final_volume_m3": final["volume_m3"], "peak_kinetic_energy_j": round(peak_energy, 2),
+        KEY_HOUSES_AFFECTED: final[KEY_HOUSES_AFFECTED], KEY_TREES_AFFECTED: final[KEY_TREES_AFFECTED], "final_state": final[KEY_STATE],
+        "sample_interval_s": sample_every, "sample_count": len(series),
+    }
+
+
 def run_simulation(parameters: dict[str, Any] | None, duration_seconds: int, seed: int) -> dict[str, Any]:
     if not 3600 <= duration_seconds <= 604800:
         raise ValueError("Thời lượng mô phỏng phải từ 1 đến 168 giờ")
@@ -137,67 +220,27 @@ def run_simulation(parameters: dict[str, Any] | None, duration_seconds: int, see
     peak_energy = 0.0
 
     elapsed = 0.0
+    event_labels = {"WARNING": "FoS vào vùng cảnh báo", "CRITICAL": "FoS dưới ngưỡng nguy hiểm", STATE_SLIDING: "Bắt đầu trượt", STATE_DEPOSITED: "Khối trượt dừng"}
     while elapsed <= duration_seconds:
-        rain_m_s = float(params[PARAM_RAINFALL]) / 1000.0 / 3600.0
-        ks = float(params["ks"])
-        porosity = float(params[PARAM_POROSITY])
-        if rain_m_s > 0:
-            cumulative_rain += rain_m_s * dt
-            if rain_m_s <= ks:
-                infiltration = rain_m_s
-            else:
-                infiltration = min(rain_m_s, ks * (1.0 + 0.3 / max(0.01, wetting_depth)))
-            wetting_depth += infiltration * dt / porosity
-        else:
-            # Drain rather than adding water (the browser engine had the sign wrong).
-            wetting_depth = max(0.0, wetting_depth - ks * 0.1 * dt / porosity)
-        infiltration_ru = 0.0
-        if wetting_depth > float(params[PARAM_SLIP_DEPTH]) * 0.3:
-            water_head = wetting_depth - float(params[PARAM_SLIP_DEPTH]) * 0.3
-            infiltration_ru = min(0.6, water_head / float(params[PARAM_SLIP_DEPTH]) * 0.5)
-        effective_ru = min(0.6, float(params[PARAM_PORE_PRESSURE_RATIO]) + infiltration_ru)
-        fos = calculate_fos(params, effective_ru)
+        wetting_depth, cumulative_rain, effective_ru, fos = _step_hydrology(params, dt, wetting_depth, cumulative_rain)
         min_fos = min(min_fos, fos)
 
         previous_state = state
-        if state not in {STATE_SLIDING, STATE_DEPOSITED}:
-            if fos >= float(params[PARAM_FOS_WARNING]):
-                state, critical_seconds = "STABLE", 0.0
-            elif fos >= float(params[PARAM_FOS_CRITICAL]):
-                state, critical_seconds = "WARNING", 0.0
-            else:
-                state, critical_seconds = "CRITICAL", critical_seconds + dt
-                if critical_seconds >= 120.0:
-                    state, slide_start = STATE_SLIDING, elapsed
+        state, critical_seconds, slide_start = _step_state_transition(state, critical_seconds, fos, params, dt, elapsed, slide_start)
 
-        if state == STATE_SLIDING:
-            slope = max(0.0, math.radians(float(params[PARAM_SLOPE_ANGLE])) - position * 0.006)
-            mu = math.tan(math.radians(float(params[PARAM_FRICTION_ANGLE]) - 10.0))
-            xi = 300.0
-            if effective_ru > 0.3:
-                mu, xi = max(0.05, mu * (1.0 - effective_ru)), 500.0
-            height = max(0.5, float(params[PARAM_SLIP_DEPTH]) * max(0.25, 1.0 - position / 5000.0))
-            acceleration = 9.81 * math.sin(slope) - mu * 9.81 * math.cos(slope) - 9.81 * velocity * velocity / (xi * height)
-            if velocity <= 0.01 and acceleration < 0:
-                acceleration = velocity = 0.0
-            velocity = max(0.0, velocity + acceleration * dt)
-            position += velocity * dt
-            if velocity > 1.0:
-                added = 0.8 * velocity * dt
-                volume += added
-                mass += added * float(params[PARAM_UNIT_WEIGHT]) * 100.0
-            max_velocity = max(max_velocity, velocity)
-            max_acceleration = max(max_acceleration, acceleration)
-            peak_energy = max(peak_energy, 0.5 * mass * velocity * velocity)
-            if (slide_start is not None and elapsed - slide_start >= 300.0) or (elapsed > (slide_start or 0) + dt and velocity < 0.1):
-                state, velocity, acceleration = STATE_DEPOSITED, 0.0, 0.0
+        state, position, velocity, acceleration, volume, mass = _step_sliding_dynamics(
+            state, slide_start, elapsed, dt, params, effective_ru, position, velocity, acceleration, volume, mass
+        )
+        max_velocity = max(max_velocity, velocity)
+        max_acceleration = max(max_acceleration, acceleration)
+        peak_energy = max(peak_energy, 0.5 * mass * velocity * velocity)
 
         if state != previous_state:
-            events.append({KEY_TIME_S: round(elapsed), KEY_STATE: state, "label": {"WARNING": "FoS vào vùng cảnh báo", "CRITICAL": "FoS dưới ngưỡng nguy hiểm", STATE_SLIDING: "Bắt đầu trượt", STATE_DEPOSITED: "Khối trượt dừng"}.get(state, "Trở lại ổn định")})
+            events.append({KEY_TIME_S: round(elapsed), KEY_STATE: state, "label": event_labels.get(state, "Trở lại ổn định")})
 
         if elapsed >= next_sample or elapsed >= duration_seconds:
-            houses = sum(value <= position for value in house_thresholds)
-            trees = sum(value <= position for value in tree_thresholds)
+            houses = sum(val <= position for val in house_thresholds)
+            trees = sum(val <= position for val in tree_thresholds)
             series.append({
                 KEY_TIME_S: round(min(elapsed, duration_seconds)), KEY_STATE: state,
                 "rainfall_mm_h": round(float(params[PARAM_RAINFALL]), 4),
@@ -210,21 +253,5 @@ def run_simulation(parameters: dict[str, Any] | None, duration_seconds: int, see
             next_sample += sample_every
         elapsed += dt
 
-    final = series[-1]
-    if min_fos >= float(params[PARAM_FOS_WARNING]):
-        classification = "Ổn định"
-    elif min_fos >= float(params[PARAM_FOS_CRITICAL]):
-        classification = "Cảnh báo"
-    else:
-        classification = "Mất ổn định"
-    if any(event[KEY_STATE] == STATE_SLIDING for event in events):
-        classification = "Đã xảy ra trượt mô phỏng"
-    summary = {
-        "classification": classification, "initial_fos": round(series[0]["fos"], 4), "minimum_fos": round(min_fos, 4),
-        "slide_start_time_s": next((event[KEY_TIME_S] for event in events if event[KEY_STATE] == STATE_SLIDING), None),
-        "max_velocity_m_s": round(max_velocity, 4), "max_acceleration_m_s2": round(max_acceleration, 4),
-        KEY_RUNOUT_M: final[KEY_RUNOUT_M], "final_volume_m3": final["volume_m3"], "peak_kinetic_energy_j": round(peak_energy, 2),
-        KEY_HOUSES_AFFECTED: final[KEY_HOUSES_AFFECTED], KEY_TREES_AFFECTED: final[KEY_TREES_AFFECTED], "final_state": final[KEY_STATE],
-        "sample_interval_s": sample_every, "sample_count": len(series),
-    }
+    summary = _summarize_simulation(params, min_fos, events, series, max_velocity, max_acceleration, peak_energy, sample_every)
     return {"parameters": params, "time_series": series, "events": events, "summary": summary, "terrain_profile": _terrain_profile(params)}

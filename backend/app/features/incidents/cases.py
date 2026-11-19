@@ -170,6 +170,131 @@ async def _lock_source_key(db: AsyncSession, source_kind: str, source_id: int) -
         return
 
 
+def _determine_scope_state(project_id: Optional[int], kind: str) -> str:
+    if project_id is not None:
+        return "SCOPED"
+    if kind == "RESCUE_REQUEST":
+        return "UNSCOPED"
+    return "LOOKUP_PENDING"
+
+
+async def _create_new_case(
+    db: AsyncSession,
+    *,
+    kind: str,
+    source_id: int,
+    timestamp: int,
+    severity: str,
+    signal: str,
+    title: str,
+    summary: str,
+    project_id: Optional[int],
+    station_id: Optional[int],
+    project_name: Optional[str],
+    project_code: Optional[str],
+    station_name: Optional[str],
+    station_code: Optional[str],
+) -> tuple[model_data.IncidentCase, bool, Optional[model_data.IncidentEvent]]:
+    case = model_data.IncidentCase(
+        reference=incident_reference(kind, source_id, timestamp),
+        source_kind=kind,
+        source_id=int(source_id),
+        project_id=project_id,
+        station_id=station_id,
+        scope_state=_determine_scope_state(project_id, kind),
+        project_name_snapshot=_text(project_name, 255) or None,
+        project_code_snapshot=_text(project_code, 100) or None,
+        station_name_snapshot=_text(station_name, 255) or None,
+        station_code_snapshot=_text(station_code, 100) or None,
+        title=_text(title, 255, "Sự cố vận hành"),
+        summary=_text(summary, 4000),
+        source_severity=severity,
+        signal_state=signal,
+        priority=priority_for_severity(severity),
+        status="new",
+        opened_at=timestamp,
+        last_signal_at=timestamp,
+        updated_at=timestamp,
+        version=1,
+        revision=0,
+        last_event_sequence=0,
+    )
+    db.add(case)
+    await db.flush()
+    event = await append_event(
+        db,
+        case,
+        "opened",
+        payload={
+            "source_kind": kind,
+            "source_id": int(source_id),
+            "source_severity": severity,
+            "signal_state": signal,
+            "priority": case.priority,
+        },
+        now=timestamp,
+    )
+    return case, True, event
+
+
+async def _update_existing_case(
+    db: AsyncSession,
+    case: model_data.IncidentCase,
+    *,
+    severity: str,
+    signal: str,
+    title: str,
+    summary: str,
+    timestamp: int,
+    project_id: Optional[int],
+    station_id: Optional[int],
+    project_name: Optional[str],
+    project_code: Optional[str],
+    station_name: Optional[str],
+    station_code: Optional[str],
+) -> tuple[model_data.IncidentCase, bool, Optional[model_data.IncidentEvent]]:
+    old_severity = normalize_severity(case.source_severity)
+    old_signal = str(case.signal_state or "UNKNOWN").upper()
+    case.last_signal_at = timestamp
+    case.updated_at = timestamp
+    case.title = _text(title, 255, case.title)
+    case.summary = _text(summary, 4000)
+    if project_id is not None:
+        case.project_id = int(project_id)
+        case.scope_state = "SCOPED"
+    if station_id is not None:
+        case.station_id = int(station_id)
+    for field, value, limit in (
+        ("project_name_snapshot", project_name, 255),
+        ("project_code_snapshot", project_code, 100),
+        ("station_name_snapshot", station_name, 255),
+        ("station_code_snapshot", station_code, 100),
+    ):
+        if value:
+            setattr(case, field, _text(value, limit))
+    case.source_severity = severity if SOURCE_SEVERITY_ORDER[severity] >= SOURCE_SEVERITY_ORDER[old_severity] else old_severity
+    case.signal_state = signal
+
+    event = None
+    if old_severity != case.source_severity:
+        event = await append_event(
+            db,
+            case,
+            "source_severity_changed",
+            payload={"source_severity": case.source_severity},
+            now=timestamp,
+        )
+    elif old_signal != signal:
+        event = await append_event(
+            db,
+            case,
+            "signal_returned" if signal == "RETURNED" else "signal_updated",
+            payload={"signal_state": signal},
+            now=timestamp,
+        )
+    return case, False, event
+
+
 async def ensure_incident_case(
     db: AsyncSession,
     *,
@@ -205,92 +330,19 @@ async def ensure_incident_case(
     await _lock_source_key(db, kind, source_id)
     case = await get_case_for_source(db, kind, source_id, for_update=True)
     if case is None:
-        if project_id is not None:
-            scope_state = "SCOPED"
-        elif kind == "RESCUE_REQUEST":
-            scope_state = "UNSCOPED"
-        else:
-            scope_state = "LOOKUP_PENDING"
-        case = model_data.IncidentCase(
-            reference=incident_reference(kind, source_id, timestamp),
-            source_kind=kind,
-            source_id=int(source_id),
-            project_id=project_id,
-            station_id=station_id,
-            scope_state=scope_state,
-            project_name_snapshot=_text(project_name, 255) or None,
-            project_code_snapshot=_text(project_code, 100) or None,
-            station_name_snapshot=_text(station_name, 255) or None,
-            station_code_snapshot=_text(station_code, 100) or None,
-            title=_text(title, 255, "Sự cố vận hành"),
-            summary=_text(summary, 4000),
-            source_severity=severity,
-            signal_state=signal,
-            priority=priority_for_severity(severity),
-            status="new",
-            opened_at=timestamp,
-            last_signal_at=timestamp,
-            updated_at=timestamp,
-            version=1,
-            revision=0,
-            last_event_sequence=0,
+        return await _create_new_case(
+            db, kind=kind, source_id=source_id, timestamp=timestamp, severity=severity,
+            signal=signal, title=title, summary=summary, project_id=project_id,
+            station_id=station_id, project_name=project_name, project_code=project_code,
+            station_name=station_name, station_code=station_code,
         )
-        db.add(case)
-        await db.flush()
-        event = await append_event(
-            db,
-            case,
-            "opened",
-            payload={
-                "source_kind": kind,
-                "source_id": int(source_id),
-                "source_severity": severity,
-                "signal_state": signal,
-                "priority": case.priority,
-            },
-            now=timestamp,
-        )
-        return case, True, event
 
-    old_severity = normalize_severity(case.source_severity)
-    old_signal = str(case.signal_state or "UNKNOWN").upper()
-    case.last_signal_at = timestamp
-    case.updated_at = timestamp
-    case.title = _text(title, 255, case.title)
-    case.summary = _text(summary, 4000)
-    if project_id is not None:
-        case.project_id = int(project_id)
-        case.scope_state = "SCOPED"
-    if station_id is not None:
-        case.station_id = int(station_id)
-    for field, value, limit in (
-        ("project_name_snapshot", project_name, 255),
-        ("project_code_snapshot", project_code, 100),
-        ("station_name_snapshot", station_name, 255),
-        ("station_code_snapshot", station_code, 100),
-    ):
-        if value:
-            setattr(case, field, _text(value, limit))
-    case.source_severity = severity if SOURCE_SEVERITY_ORDER[severity] >= SOURCE_SEVERITY_ORDER[old_severity] else old_severity
-    case.signal_state = signal
-    event = None
-    if old_severity != case.source_severity:
-        event = await append_event(
-            db,
-            case,
-            "source_severity_changed",
-            payload={"source_severity": case.source_severity},
-            now=timestamp,
-        )
-    elif old_signal != signal:
-        event = await append_event(
-            db,
-            case,
-            "signal_returned" if signal == "RETURNED" else "signal_updated",
-            payload={"signal_state": signal},
-            now=timestamp,
-        )
-    return case, False, event
+    return await _update_existing_case(
+        db, case, severity=severity, signal=signal, title=title, summary=summary,
+        timestamp=timestamp, project_id=project_id, station_id=station_id,
+        project_name=project_name, project_code=project_code,
+        station_name=station_name, station_code=station_code,
+    )
 
 
 def serialize_case(case: model_data.IncidentCase, *, include_private: bool = False) -> dict[str, Any]:

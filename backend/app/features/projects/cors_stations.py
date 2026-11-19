@@ -245,6 +245,44 @@ def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
         return copy.deepcopy(stations)
 
 
+def _extract_used_bases_from_projects(projects) -> set[str]:
+    used_bases = set()
+    for p in projects:
+        clusters = p.gnss_clusters or []
+        if isinstance(clusters, list):
+            for c in clusters:
+                if isinstance(c, dict):
+                    used_bases.update(str(c[key]) for key in (
+                        "base_station", "backup_base_station", "base_serial", "backup_base_serial"
+                    ) if c.get(key))
+    return used_bases
+
+
+def _enrich_station_failover(station: dict, failover_pairs: list) -> None:
+    station["station_online"] = bool(station.get("is_online"))
+    station["mountpoint_connected"] = bool(station.get("ntrip_connected"))
+    station["failover_active"] = bool(not station["station_online"] and station["mountpoint_connected"])
+    station["correction_source"] = "Nguồn dự phòng khác" if station["failover_active"] else f"{station.get('name')}/S1"
+
+    station_name = str(station.get("name") or "").strip().casefold()
+    station_mountpoint = str(station.get("mountpoint") or "").strip().casefold()
+    pair = next(
+        (
+            item for item in failover_pairs
+            if str(item.get("primary_station") or "").strip().casefold() == station_name
+            or (station_mountpoint and str(item.get("mountpoint") or "").strip().casefold() == station_mountpoint)
+        ),
+        None,
+    )
+    if pair:
+        station["failover_state"] = pair.get("state")
+        station["failover_active"] = pair.get("state") == "BACKUP_ACTIVE"
+        if station["failover_active"]:
+            station["correction_source"] = f"{pair.get('backup_station')}/S{pair.get('backup_server_id')}"
+        else:
+            station["correction_source"] = f"{pair.get('primary_station')}/S{pair.get('primary_server_id')}"
+
+
 @router.get("/api/public/cors-base-stations", responses={502: {"description": "Bad Gateway"}})
 async def get_cors_base_stations(
     request: Request,
@@ -268,16 +306,7 @@ async def get_cors_base_stations(
 
         result = await db_config.execute(stmt)
         projects = result.scalars().all()
-
-        used_bases = set()
-        for p in projects:
-            clusters = p.gnss_clusters or []
-            if isinstance(clusters, list):
-                for c in clusters:
-                    if isinstance(c, dict):
-                        used_bases.update(str(c[key]) for key in (
-                            "base_station", "backup_base_station", "base_serial", "backup_base_serial"
-                        ) if c.get(key))
+        used_bases = _extract_used_bases_from_projects(projects)
 
         filtered_cors = [
             st for st in all_cors
@@ -285,58 +314,9 @@ async def get_cors_base_stations(
             or st.get("code") in used_bases or str(st.get("serial") or "") in used_bases
         ]
 
-        # Physical receiver state and mountpoint availability are different.
-        # A primary receiver may be offline while another station's S2 keeps
-        # its mountpoint connected.  Never let that backup source make the
-        # offline physical station appear online on the public map.
         failover_pairs = copy.deepcopy(cors_failover_status)
         for station in filtered_cors:
-            station["station_online"] = bool(station.get("is_online"))
-            station["mountpoint_connected"] = bool(
-                station.get("ntrip_connected")
-            )
-            station["failover_active"] = bool(
-                not station["station_online"]
-                and station["mountpoint_connected"]
-            )
-            station["correction_source"] = (
-                "Nguồn dự phòng khác"
-                if station["failover_active"]
-                else f"{station.get('name')}/S1"
-            )
-            station_name = str(station.get("name") or "").strip().casefold()
-            station_mountpoint = str(
-                station.get("mountpoint") or ""
-            ).strip().casefold()
-            pair = next(
-                (
-                    item
-                    for item in failover_pairs
-                    if str(item.get("primary_station") or "").strip().casefold()
-                    == station_name
-                    or (
-                        station_mountpoint
-                        and str(item.get("mountpoint") or "").strip().casefold()
-                        == station_mountpoint
-                    )
-                ),
-                None,
-            )
-            if pair:
-                station["failover_state"] = pair.get("state")
-                station["failover_active"] = pair.get("state") == "BACKUP_ACTIVE"
-                if station["failover_active"]:
-                    station["correction_source"] = (
-                        f"{pair.get('backup_station')}/S"
-                        f"{pair.get('backup_server_id')}"
-                    )
-                else:
-                    station["correction_source"] = (
-                        f"{pair.get('primary_station')}/S"
-                        f"{pair.get('primary_server_id')}"
-                    )
-
-        for station in filtered_cors:
+            _enrich_station_failover(station, failover_pairs)
             station.pop("service_config", None)
         return filtered_cors
     except requests.RequestException as e:
