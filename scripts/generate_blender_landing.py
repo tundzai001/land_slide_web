@@ -34,6 +34,8 @@ PRINCIPLED_BSDF_NODE = "Principled BSDF"
 BSDF_BASE_COLOR = "Base Color"
 BSDF_EMISSION_COLOR = "Emission Color"
 BSDF_EMISSION_STRENGTH = "Emission Strength"
+GRAFANA_TEX_WIDTH = 1024
+GRAFANA_TEX_HEIGHT = 384
 
 
 def clear_scene():
@@ -1358,24 +1360,24 @@ def import_single_glb_mesh(filename: str, new_name: str, scale_xyz=(1.0, 1.0, 1.
     return joined
 
 
-def _fill_grafana_rect(img_arr, W, H, x0, y0, x1, y1, col):
-    img_arr[max(0, y0):min(H, y1), max(0, x0):min(W, x1)] = col
+def _fill_grafana_rect(img_arr, x0, y0, x1, y1, col):
+    img_arr[max(0, y0):min(GRAFANA_TEX_HEIGHT, y1), max(0, x0):min(GRAFANA_TEX_WIDTH, x1)] = col
 
 
-def _draw_grafana_panel(img_arr, W, H, x0, y0, x1, y1, accent_col):
-    _fill_grafana_rect(img_arr, W, H, x0, y0, x1, y1, (0.12, 0.22, 0.34, 1.0))
-    _fill_grafana_rect(img_arr, W, H, x0 + 2, y0 + 2, x1 - 2, y1 - 2, (0.055, 0.095, 0.165, 1.0))
-    _fill_grafana_rect(img_arr, W, H, x0 + 2, y1 - 22, x1 - 2, y1 - 2, (0.08, 0.14, 0.24, 1.0))
-    _fill_grafana_rect(img_arr, W, H, x0 + 10, y1 - 15, x0 + 68, y1 - 8, accent_col)
-    _fill_grafana_rect(img_arr, W, H, x1 - 38, y1 - 15, x1 - 12, y1 - 8, (0.22, 0.92, 0.65, 1.0))
+def _draw_grafana_panel(img_arr, x0, y0, x1, y1, accent_col):
+    _fill_grafana_rect(img_arr, x0, y0, x1, y1, (0.12, 0.22, 0.34, 1.0))
+    _fill_grafana_rect(img_arr, x0 + 2, y0 + 2, x1 - 2, y1 - 2, (0.055, 0.095, 0.165, 1.0))
+    _fill_grafana_rect(img_arr, x0 + 2, y1 - 22, x1 - 2, y1 - 2, (0.08, 0.14, 0.24, 1.0))
+    _fill_grafana_rect(img_arr, x0 + 10, y1 - 15, x0 + 68, y1 - 8, accent_col)
+    _fill_grafana_rect(img_arr, x1 - 38, y1 - 15, x1 - 12, y1 - 8, (0.22, 0.92, 0.65, 1.0))
     for gy in range(y0 + 24, y1 - 26, 26):
-        _fill_grafana_rect(img_arr, W, H, x0 + 8, gy, x1 - 8, gy + 1, (0.09, 0.16, 0.26, 1.0))
+        _fill_grafana_rect(img_arr, x0 + 8, gy, x1 - 8, gy + 1, (0.09, 0.16, 0.26, 1.0))
     for gx in range(x0 + 36, x1 - 12, 42):
-        _fill_grafana_rect(img_arr, W, H, gx, y0 + 10, gx + 1, y1 - 24, (0.08, 0.14, 0.23, 1.0))
+        _fill_grafana_rect(img_arr, gx, y0 + 10, gx + 1, y1 - 24, (0.08, 0.14, 0.23, 1.0))
 
 
-def _draw_grafana_left_panels(img_arr, np, H, W):
-    _draw_grafana_panel(img_arr, W, H, 14, 188, 276, 346, (0.22, 0.92, 0.84, 1.0))
+def _draw_grafana_left_panels(img_arr, np):
+    _draw_grafana_panel(img_arr, 14, 188, 276, 346, (0.22, 0.92, 0.84, 1.0))
     xs_l = np.arange(24, 266)
     t_l = (xs_l - 24) / 242.0
     ys_s1 = (218 + 42 * t_l + 14 * np.sin(t_l * 10.0) + 6 * np.cos(t_l * 23.0)).astype(np.int32)
@@ -1387,7 +1389,7 @@ def _draw_grafana_left_panels(img_arr, np, H, W):
         img_arr[max(196, y2_v - 2):min(322, y2_v + 2), xi] = (1.0, 0.65, 0.12, 1.0)
         img_arr[max(196, y3_v - 2):min(322, y3_v + 2), xi] = (0.52, 0.96, 0.36, 1.0)
 
-    _draw_grafana_panel(img_arr, W, H, 14, 16, 276, 176, (1.0, 0.62, 0.14, 1.0))
+    _draw_grafana_panel(img_arr, 14, 16, 276, 176, (1.0, 0.62, 0.14, 1.0))
     ys_imu_r = (82 + 28 * np.sin(t_l * 28.0) * (0.4 + 0.6 * t_l) + 10 * np.cos(t_l * 65.0)).astype(np.int32)
     ys_imu_p = (64 + 18 * np.cos(t_l * 22.0) + 14 * t_l).astype(np.int32)
     for xi, yr, yp in zip(xs_l, ys_imu_r, ys_imu_p):
@@ -1395,8 +1397,8 @@ def _draw_grafana_left_panels(img_arr, np, H, W):
         img_arr[max(24, yp - 2):min(150, yp + 2), xi] = (0.24, 0.86, 0.98, 1.0)
 
 
-def _draw_grafana_center_panels(img_arr, np, H, W, xx, yy):
-    _draw_grafana_panel(img_arr, W, H, 290, 188, 508, 346, (0.52, 0.96, 0.36, 1.0))
+def _draw_grafana_center_panels(img_arr, np, xx, yy):
+    _draw_grafana_panel(img_arr, 290, 188, 508, 346, (0.52, 0.96, 0.36, 1.0))
     for g_cx, g_cy, g_col in ((348, 256, (0.98, 0.62, 0.12, 1.0)), (450, 256, (0.22, 0.86, 0.98, 1.0))):
         dist = np.sqrt((xx - g_cx) ** 2 + (yy - g_cy) ** 2)
         ring_mask = (dist >= 30) & (dist <= 42) & (yy >= g_cy - 18)
@@ -1404,7 +1406,7 @@ def _draw_grafana_center_panels(img_arr, np, H, W, xx, yy):
         core_mask = dist <= 18
         img_arr[core_mask] = (0.12, 0.24, 0.36, 1.0)
 
-    _draw_grafana_panel(img_arr, W, H, 518, 188, 736, 346, (0.22, 0.88, 0.96, 1.0))
+    _draw_grafana_panel(img_arr, 518, 188, 736, 346, (0.22, 0.88, 0.96, 1.0))
     h_cx, h_cy = 626, 258
     h_dist = np.sqrt(((xx - h_cx) / 1.35) ** 2 + ((yy - h_cy) / 0.85) ** 2)
     img_arr[(h_dist < 58) & (yy > 196) & (yy < 322)] = (0.08, 0.36, 0.34, 1.0)
@@ -1412,11 +1414,11 @@ def _draw_grafana_center_panels(img_arr, np, H, W, xx, yy):
     img_arr[(h_dist < 26) & (yy > 196) & (yy < 322)] = (0.92, 0.52, 0.12, 1.0)
     img_arr[(h_dist < 13) & (yy > 196) & (yy < 322)] = (0.98, 0.26, 0.12, 1.0)
     for nx_p, ny_p in ((575, 285), (618, 262), (665, 244), (595, 232), (648, 282)):
-        _fill_grafana_rect(img_arr, W, H, nx_p - 4, ny_p - 4, nx_p + 4, ny_p + 4, (0.85, 1.0, 0.45, 1.0))
+        _fill_grafana_rect(img_arr, nx_p - 4, ny_p - 4, nx_p + 4, ny_p + 4, (0.85, 1.0, 0.45, 1.0))
 
-    _draw_grafana_panel(img_arr, W, H, 290, 16, 736, 176, (0.22, 0.92, 0.84, 1.0))
+    _draw_grafana_panel(img_arr, 290, 16, 736, 176, (0.22, 0.92, 0.84, 1.0))
     for tx_d in range(302, 724, 14):
-        _fill_grafana_rect(img_arr, W, H, tx_d, 126, tx_d + 8, 128, (0.98, 0.28, 0.22, 1.0))
+        _fill_grafana_rect(img_arr, tx_d, 126, tx_d + 8, 128, (0.98, 0.28, 0.22, 1.0))
     xs_c = np.arange(302, 724)
     t_c = (xs_c - 302) / 422.0
     ys_f1 = (38 + 76 * (t_c ** 1.4) + 10 * np.sin(t_c * 18.0)).astype(np.int32)
@@ -1427,15 +1429,15 @@ def _draw_grafana_center_panels(img_arr, np, H, W, xx, yy):
         img_arr[max(22, yf2 - 2):min(148, yf2 + 2), xi] = (1.0, 0.68, 0.14, 1.0)
 
 
-def _draw_grafana_right_panels(img_arr, np, H, W):
-    _draw_grafana_panel(img_arr, W, H, 748, 188, 1010, 346, (0.28, 0.78, 0.98, 1.0))
+def _draw_grafana_right_panels(img_arr, np):
+    _draw_grafana_panel(img_arr, 748, 188, 1010, 346, (0.28, 0.78, 0.98, 1.0))
     for b_idx in range(16):
         bx0 = 762 + b_idx * 15
         bh = int(22 + 78 * (0.35 + 0.65 * abs(math.sin(b_idx * 0.65 + 0.4))))
-        _fill_grafana_rect(img_arr, W, H, bx0, 196, bx0 + 10, 196 + bh, (0.18, 0.68, 0.96, 1.0))
-        _fill_grafana_rect(img_arr, W, H, bx0, 196 + bh - 4, bx0 + 10, 196 + bh, (0.65, 0.96, 1.0, 1.0))
+        _fill_grafana_rect(img_arr, bx0, 196, bx0 + 10, 196 + bh, (0.18, 0.68, 0.96, 1.0))
+        _fill_grafana_rect(img_arr, bx0, 196 + bh - 4, bx0 + 10, 196 + bh, (0.65, 0.96, 1.0, 1.0))
 
-    _draw_grafana_panel(img_arr, W, H, 748, 16, 1010, 176, (0.22, 0.74, 0.98, 1.0))
+    _draw_grafana_panel(img_arr, 748, 16, 1010, 176, (0.22, 0.74, 0.98, 1.0))
     xs_r = np.arange(758, 1000)
     t_r = (xs_r - 758) / 242.0
     ys_pz = (36 + 74 * (t_r ** 1.15) + 8 * np.sin(t_r * 12.0)).astype(np.int32)
@@ -1469,8 +1471,7 @@ def create_grafana_wall_material():
     """Procedurally generate a crisp 1024x384 Dark-Mode Grafana & WebGIS Command Center Dashboard texture and return an emissive Blender material."""
     import numpy as np
 
-    W, H = 1024, 384
-    img_arr = np.zeros((H, W, 4), dtype=np.float32)
+    img_arr = np.zeros((GRAFANA_TEX_HEIGHT, GRAFANA_TEX_WIDTH, 4), dtype=np.float32)
     # Deep Grafana dark-slate background (#09101d)
     img_arr[:, :, 0] = 0.035
     img_arr[:, :, 1] = 0.062
@@ -1478,17 +1479,17 @@ def create_grafana_wall_material():
     img_arr[:, :, 3] = 1.0
 
     # Top Grafana Global Navbar (y = 354..380)
-    _fill_grafana_rect(img_arr, W, H, 0, 354, W, 382, (0.07, 0.13, 0.22, 1.0))
-    _fill_grafana_rect(img_arr, W, H, 16, 362, 180, 374, (0.22, 0.88, 0.96, 1.0))
-    _fill_grafana_rect(img_arr, W, H, 200, 362, 310, 374, (0.20, 0.92, 0.58, 1.0))
-    _fill_grafana_rect(img_arr, W, H, W - 190, 360, W - 18, 376, (0.98, 0.52, 0.12, 1.0))
+    _fill_grafana_rect(img_arr, 0, 354, GRAFANA_TEX_WIDTH, 382, (0.07, 0.13, 0.22, 1.0))
+    _fill_grafana_rect(img_arr, 16, 362, 180, 374, (0.22, 0.88, 0.96, 1.0))
+    _fill_grafana_rect(img_arr, 200, 362, 310, 374, (0.20, 0.92, 0.58, 1.0))
+    _fill_grafana_rect(img_arr, GRAFANA_TEX_WIDTH - 190, 360, GRAFANA_TEX_WIDTH - 18, 376, (0.98, 0.52, 0.12, 1.0))
 
-    yy, xx = np.ogrid[:H, :W]
-    _draw_grafana_left_panels(img_arr, np, H, W)
-    _draw_grafana_center_panels(img_arr, np, H, W, xx, yy)
-    _draw_grafana_right_panels(img_arr, np, H, W)
+    yy, xx = np.ogrid[:GRAFANA_TEX_HEIGHT, :GRAFANA_TEX_WIDTH]
+    _draw_grafana_left_panels(img_arr, np)
+    _draw_grafana_center_panels(img_arr, np, xx, yy)
+    _draw_grafana_right_panels(img_arr, np)
 
-    img = bpy.data.images.new("GrafanaDashboardTex", width=W, height=H, alpha=True)
+    img = bpy.data.images.new("GrafanaDashboardTex", width=GRAFANA_TEX_WIDTH, height=GRAFANA_TEX_HEIGHT, alpha=True)
     img.pixels.foreach_set(img_arr.ravel())
     grafana_png = BLENDER_DIR / "grafana_dashboard.png"
     img.filepath_raw = str(grafana_png)
