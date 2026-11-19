@@ -685,5 +685,264 @@ class TestStationAnalysisAndRuntimeCoverage:
         )
         mixin._upsert_latest_sensor_cache.assert_called()
 
+    def test_analysis_router_helpers(self):
+        from app.features.stations.analysis_router import (
+            _resolve_alert_ttls, _calculate_overall_risk,
+            _is_gnss_analysis_point, _trend_from_velocity_series, _severity,
+        )
+        ttls = _resolve_alert_ttls({"alert_ttl_seconds": {"rainfall": 300}})
+        assert ttls["rainfall"] == 300
+        assert "gnss_velocity" in ttls
+
+        mock_alert1 = MagicMock(level="WARNING", category="tilt")
+        mock_alert2 = MagicMock(level="HIGH", category="rainfall")
+        risk = _calculate_overall_risk([(mock_alert1, False, 10), (mock_alert2, False, 20)])
+        assert risk == "CRITICAL"
+
+        assert _is_gnss_analysis_point({"pos_e": 1.0, "pos_n": 2.0, "pos_u": 3.0}) is True
+        assert _is_gnss_analysis_point({"pos_e": 1.0}) is False
+        assert _is_gnss_analysis_point(None) is False
+
+        assert _trend_from_velocity_series([]) == "stable"
+        assert _trend_from_velocity_series([1.0, 1.02]) == "stable"
+        assert _trend_from_velocity_series([1.0, 2.0]) == "accelerating"
+        assert _trend_from_velocity_series([2.0, 1.0]) == "decelerating"
+        assert _trend_from_velocity_series([0.0, 0.0]) == "stable"
+        assert _trend_from_velocity_series([0.0, 1.5]) == "accelerating"
+
+        assert _severity("CRITICAL") == 4
+        assert _severity("LOW") == 1
+        assert _severity("UNKNOWN") == 0
+
+    def test_analysis_router_time_series_and_summaries(self):
+        from app.features.stations.analysis_router import (
+            _build_gnss_time_series, _build_imu_time_series, _determine_daily_risk_and_message,
+            _build_gnss_analysis_from_daily_summaries, _validate_analysis_params,
+        )
+        now = time.time()
+        gnss_points = [
+            {"timestamp": now + i * 3600, "data": {"pos_e": 0.001 * i, "pos_n": 0.002 * i, "pos_u": 0.003 * i, "displacement_mm": i}}
+            for i in range(5)
+        ]
+        ts1 = _build_gnss_time_series(gnss_points, 0.03)
+        assert len(ts1["labels"]) > 0
+        ts2 = _build_gnss_time_series(gnss_points, 0.5)
+        assert len(ts2["labels"]) > 0
+        ts3 = _build_gnss_time_series(gnss_points, 5.0)
+        assert len(ts3["labels"]) > 0
+        ts4 = _build_gnss_time_series(gnss_points, 15.0)
+        assert len(ts4["labels"]) > 0
+
+        imu_analysis = {
+            "status": "success",
+            "time_series": {
+                "raw_timestamps": [now, now + 100],
+                "rolls": [0.1, 0.2],
+                "pitches": [0.3, 0.4],
+            }
+        }
+        _build_imu_time_series(imu_analysis, 0.5)
+        assert "labels" in imu_analysis["time_series"]
+
+        mock_row = MagicMock(risk_level="HIGH", net_displacement_mm=2.5, duration_seconds=86400, sample_count=100, velocity_mm_day=2.5, day_start_ts=now)
+        risk_level, msg = _determine_daily_risk_and_message([mock_row], "Extremely Fast", True, "ok")
+        assert risk_level in ("HIGH", "CRITICAL", "EXTREME")
+        assert "Cảnh báo" in msg
+
+        risk_level_unreliable, msg_unreliable = _determine_daily_risk_and_message([mock_row], "Fast", False, "Sơ bộ")
+        assert risk_level_unreliable == "INFO"
+        assert msg_unreliable == "Sơ bộ"
+
+        assert _build_gnss_analysis_from_daily_summaries([], {})["status"] == "insufficient_data"
+        res_summary = _build_gnss_analysis_from_daily_summaries([mock_row], {})
+        assert res_summary["status"] == "success"
+
+        days, model = _validate_analysis_params(30.0, "slide_model", True)
+        assert days == 30.0
+        assert model == "slide_model"
+
+        with pytest.raises(HTTPException):
+            _validate_analysis_params("invalid", "slide_model", True)
+        with pytest.raises(HTTPException):
+            _validate_analysis_params(500.0, "slide_model", True)
+        with pytest.raises(HTTPException):
+            _validate_analysis_params(30.0, "other_model", True)
+
+    @pytest.mark.anyio
+    async def test_analysis_router_async_functions(self):
+        from app.features.stations.analysis_router import (
+            _calculate_station_risk_assessment, _run_imu_step, _run_rainfall_correlation_step,
+            get_long_term_analysis, get_gnss_daily_summary, get_gnss_weekly_summary,
+        )
+        db_data = AsyncMock()
+        mock_scalar = MagicMock()
+        mock_scalar.all.return_value = []
+        mock_exec = MagicMock()
+        mock_exec.scalars.return_value = mock_scalar
+        db_data.execute.return_value = mock_exec
+
+        risk_data = await _calculate_station_risk_assessment(db_data, 1, {"alerting": {"enabled": False}})
+        assert risk_data["overall_risk"] == "LOW"
+
+        risk_data_enabled = await _calculate_station_risk_assessment(db_data, 1, {"alerting": {"enabled": True}})
+        assert risk_data_enabled["overall_risk"] == "LOW"
+
+        imu_res = await _run_imu_step(1, [], 10.0)
+        assert imu_res["status"] == "insufficient_data"
+
+        rain_res = await _run_rainfall_correlation_step(False, "slide_model", [], [], [], 10.0, MagicMock())
+        assert rain_res["available"] is False
+
+        # Endpoint tests
+        db_config = AsyncMock()
+        mock_st_res = MagicMock()
+        mock_st_res.scalar_one_or_none.return_value = MagicMock(id=1, config={})
+        db_config.execute.return_value = mock_st_res
+
+        res = await get_long_term_analysis(
+            station_id=1, days=30.0, include_correlation=False, correlation_model="slide_model",
+            db_config=db_config, db_data=db_data
+        )
+        assert res["station_id"] == 1
+        assert "gnss" in res
+
+        daily_res = await get_gnss_daily_summary(station_id=1, limit=10, db_data=db_data)
+        assert daily_res["station_id"] == 1
+        assert daily_res["count"] == 0
+
+        weekly_res = await get_gnss_weekly_summary(station_id=1, limit=5, db_data=db_data)
+        assert weekly_res["station_id"] == 1
+        assert weekly_res["count"] == 0
+
+    @pytest.mark.anyio
+    async def test_data_export_queries_and_adjustments(self):
+        from app.features.data_export.database.job import (
+            _build_and_count_queries, _compute_adjustment_key,
+            _stream_unique_adjustments, _process_single_adjustment, EXPORT_TASKS,
+        )
+        request = MagicMock(start_date="2024-01-01", end_date="2024-01-02", cluster_indices=[0])
+        task_id = "task-test-job-456"
+        EXPORT_TASKS[task_id] = {}
+
+        db_data = AsyncMock()
+        db_data.scalar = AsyncMock(return_value=10)
+
+        q1, q2, q3, q4, total = await _build_and_count_queries(
+            request, ["sensor_data", "gnss_adjustments", "alerts", "simulations"],
+            [1, 2], [1], [1], ["gnss"], db_data, task_id
+        )
+        assert total >= 0
+
+        key1 = _compute_adjustment_key({"project_id": 1, "cluster_index": 0}, "adj_123", 1700000000)
+        assert key1 == ("adjustment", "adj_123", None, None)
+
+        key2 = _compute_adjustment_key({"project_id": 1, "cluster_index": 0}, None, 1700000000)
+        assert key2[0] == "legacy"
+
+        # Stream unique adjustments
+        async def mock_stream():
+            yield (1, 1700000000, {"project_id": 1, "cluster_index": 0}, "adj_1")
+            yield (2, 1700000000, {"project_id": 1, "cluster_index": 1}, "adj_2")
+
+        unique, count = await _stream_unique_adjustments(mock_stream(), {0}, 10, task_id, 0)
+        assert len(unique) == 1
+        assert count == 2
+
+        # Process single adjustment
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            item = {
+                "payload": {
+                    "project_id": 1,
+                    "cluster_index": 0,
+                    "cluster_name": "Cluster0",
+                    "computed_at": 1700000000,
+                    "points": {"pt1": {"station_id": 10}},
+                    "quality": {"observation_baseline_count": 5},
+                    "global_test": {"passed": True},
+                    "base": {"name": "Base1", "lat": 21.0, "lon": 105.0, "h": 50.0},
+                },
+                "timestamp": 1700000000,
+                "record_ids": [101, 102],
+            }
+            db = AsyncMock()
+            proj_dir, row = await _process_single_adjustment(item, {1: "PROJ1"}, {10: {"station_code": "S10"}}, zf, db)
+            assert "PROJ1" in proj_dir
+            assert len(row) > 10
+
+    @pytest.mark.anyio
+    async def test_gnss_origin_and_incidents(self):
+        from processors.gnss.origin import _query_origin_record, _sync_station_origin_config, GNSSOriginMixin
+        from app.features.incidents.common import _mutation_key_or_error, _fingerprint, _is_admin, _is_manager
+        from app.features.incidents.write_router import _mutate_case
+
+        db = AsyncMock()
+        res_mock = MagicMock()
+        res_mock.scalar_one_or_none.return_value = MagicMock(id=1, lat=21.0, lon=105.0, h=10.0)
+        db.execute.return_value = res_mock
+        record = await _query_origin_record(db, 10)
+        assert record.lat == 21.0
+
+        station = MagicMock(config={})
+        _sync_station_origin_config(station, {"lat": 21.0, "lon": 105.0, "h": 50.0})
+        assert "gnss_origin" in station.config
+        assert station.config["gnss_origin"]["lat"] == 21.0
+
+        mixin = GNSSOriginMixin()
+        mixin.device_id = 100
+        mock_rec = MagicMock(
+            lat=21.0, lon=105.0, h=50.0,
+            rotation_matrix=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            ecef_origin=[100.0, 200.0, 300.0],
+            locked_at=1700000000, id=1, tracking_offset=None
+        )
+        mixin._restore_runtime_state = MagicMock(return_value=False)
+        mixin._log_prefix = MagicMock(return_value="dev_100")
+        mixin._apply_origin_record(mock_rec, {})
+        assert mixin.state == "ORIGIN_LOCKED"
+        assert mixin.origin["lat"] == 21.0
+
+        # Incidents common
+        key = _mutation_key_or_error("unique-key-123")
+        assert key == "unique-key-123"
+
+        with pytest.raises(HTTPException):
+            _mutation_key_or_error("")
+
+        fp = _fingerprint("action_test", {"param": 1})
+        assert isinstance(fp, str)
+        assert len(fp) == 64
+
+        admin_user = MagicMock(role="admin")
+        normal_user = MagicMock(role="viewer")
+        assert _is_admin(admin_user) is True
+        assert _is_admin(normal_user) is False
+        assert _is_manager(admin_user) is True
+
+        # Incidents mutate
+        db_mut = AsyncMock()
+        db_mut.add = MagicMock()
+        mock_case = MagicMock(id=1, version=1, revision=1, status="new", assigned_to_user_id=None)
+        mock_existing = MagicMock(changed=True)
+        with patch("app.features.incidents.write_router._load_case", AsyncMock(return_value=mock_case)), \
+             patch("app.features.incidents.write_router._existing_mutation", AsyncMock(return_value=mock_existing)):
+            user = MagicMock(id=10, role="admin", username="admin")
+            res = await _mutate_case(
+                db_mut, user, 1, "test_action", {}, "idemp-key-1", lambda c: (True, "event", None, {})
+            )
+            assert res["idempotent_replay"] is True
+
+        with patch("app.features.incidents.write_router._load_case", AsyncMock(return_value=mock_case)), \
+             patch("app.features.incidents.write_router._existing_mutation", AsyncMock(return_value=None)), \
+             patch("app.features.incidents.write_router.append_event", AsyncMock(return_value=MagicMock(sequence=1, id=10, event_type="ack", created_at=1700000000))), \
+             patch("app.features.incidents.write_router._broadcast_case", AsyncMock()):
+            user = MagicMock(id=10, role="admin", username="admin")
+            res2 = await _mutate_case(
+                db_mut, user, 1, "ack", {}, "idemp-key-2", lambda c: (True, "ack", "note", {})
+            )
+            assert res2["idempotent_replay"] is False
+            assert res2["changed"] is True
+
+
 
 

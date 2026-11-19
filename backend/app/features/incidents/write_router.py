@@ -56,7 +56,7 @@ async def _mutate_case(
     try:
         await db.flush()
         for event in events:
-            event.mutation_request_id = int(ledger.id)
+            event.mutation_request_id = int(ledger.id) if ledger.id is not None else None
         await db.commit()
     except IntegrityError:
         await db.rollback()
