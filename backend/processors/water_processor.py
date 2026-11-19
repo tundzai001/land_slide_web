@@ -10,6 +10,18 @@ logger = logging.getLogger(__name__)
 NUMBER_RE = r"-?\d+(?:\.\d+)?"
 
 
+def _extract_from_text(text: str) -> Optional[float]:
+    if text.startswith('[') and text.endswith(']'):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list) and parsed:
+                return float(parsed[-1])
+        except (TypeError, ValueError):
+            pass
+    numbers = re.findall(NUMBER_RE, text)
+    return float(numbers[-1]) if numbers else None
+
+
 def extract_numeric_value(raw_value: Any) -> Optional[float]:
     """Extract a numeric value from scalar/list/string payloads."""
     if raw_value is None:
@@ -18,20 +30,8 @@ def extract_numeric_value(raw_value: Any) -> Optional[float]:
         return float(raw_value)
     if isinstance(raw_value, (list, tuple)):
         return float(raw_value[-1]) if raw_value else None
-    if isinstance(raw_value, str):
-        text = raw_value.strip()
-        if not text:
-            return None
-        if text.startswith('[') and text.endswith(']'):
-            try:
-                parsed = json.loads(text)
-                if isinstance(parsed, list) and parsed:
-                    return float(parsed[-1])
-            except (TypeError, ValueError):
-                pass
-        numbers = re.findall(NUMBER_RE, text)
-        if numbers:
-            return float(numbers[-1])
+    if isinstance(raw_value, str) and raw_value.strip():
+        return _extract_from_text(raw_value.strip())
     return None
 
 

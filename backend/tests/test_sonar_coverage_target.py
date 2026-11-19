@@ -2,11 +2,20 @@
 
 import io
 import math
+import sys
 import time
 import zipfile
 from collections import deque
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
+
+if sys.version_info >= (3, 14):
+    for mod in ("scipy.stats", "scipy.stats._new_distributions"):
+        if mod not in sys.modules:
+            try:
+                __import__(mod)
+            except Exception:
+                sys.modules[mod] = MagicMock()
 
 import numpy as np
 import pytest
@@ -435,4 +444,175 @@ class TestProjectsAdminAndJobHelpers:
         assert len(p_rows) == 1
         assert len(s_rows) == 1
         assert 10 in scope_ids
+
+
+class TestStationAnalysisAndRuntimeCoverage:
+    def test_analysis_router_helpers(self):
+        from app.features.stations.analysis_router import (
+            _resolve_alert_ttls,
+            _calculate_overall_risk,
+            _is_gnss_analysis_point,
+            _trend_from_velocity_series,
+            _severity,
+            _build_gnss_time_series,
+        )
+
+        # ttls
+        ttls_default = _resolve_alert_ttls({})
+        assert "gnss_velocity" in ttls_default
+        ttls_custom = _resolve_alert_ttls({"alert_ttl_seconds": {"gnss_velocity": 300}})
+        assert ttls_custom["gnss_velocity"] == 300
+
+        # overall risk
+        a_crit = MagicMock(level="CRITICAL", category="gnss_velocity")
+        a_tilt = MagicMock(level="WARNING", category="tilt_warning")
+        a_low = MagicMock(level="LOW", category="rainfall")
+        assert _calculate_overall_risk([(a_crit, False, 10)]) == "CRITICAL"
+        assert _calculate_overall_risk([(a_tilt, False, 10)]) == "CRITICAL"
+        assert _calculate_overall_risk([(a_low, False, 10)]) == "LOW"
+        assert _calculate_overall_risk([]) == "LOW"
+
+        # gnss analysis point
+        assert _is_gnss_analysis_point({"pos_e": 0, "pos_n": 0, "pos_u": 0}) is True
+        assert _is_gnss_analysis_point({"pos_e": 0}) is False
+        assert _is_gnss_analysis_point(None) is False
+
+        # trend
+        assert _trend_from_velocity_series([1.0]) == "stable"
+        assert _trend_from_velocity_series([0.0, 0.0]) == "stable"
+        assert _trend_from_velocity_series([0.0, 5.0]) == "accelerating"
+        assert _trend_from_velocity_series([10.0, 20.0]) == "accelerating"
+        assert _trend_from_velocity_series([20.0, 10.0]) == "decelerating"
+        assert _trend_from_velocity_series([10.0, 10.2]) == "stable"
+
+        # severity
+        assert _severity("EXTREME") == 5
+        assert _severity("CRITICAL") == 4
+        assert _severity("INFO") == 0
+        assert _severity("unknown") == 0
+
+        # gnss time series
+        ts_res = _build_gnss_time_series([
+            {"timestamp": time.time(), "data": {"pos_e": 0.01, "pos_n": 0.02, "pos_u": 0.005, "total_displacement_mm": 5.0}}
+        ], 1.0)
+        assert len(ts_res["labels"]) == 1
+
+    @pytest.mark.anyio
+    async def test_calculate_station_risk_assessment(self):
+        from app.features.stations.analysis_router import _calculate_station_risk_assessment
+        mock_db = AsyncMock()
+        mock_alert = MagicMock(level="HIGH", category="gnss_velocity", message="High vel", timestamp=time.time())
+        exec_res = MagicMock()
+        exec_res.scalars.return_value.all.return_value = [mock_alert]
+        mock_db.execute.return_value = exec_res
+
+        res = await _calculate_station_risk_assessment(mock_db, 1, {"alerting": {"enabled": True}})
+        assert res["overall_risk"] == "HIGH"
+        assert len(res["active_alerts"]) == 1
+
+        # disabled alerting
+        res_dis = await _calculate_station_risk_assessment(mock_db, 1, {"alerting": {"enabled": False}})
+        assert res_dis["overall_risk"] == "LOW"
+
+    def test_rain_engine_processing(self):
+        from processors.water_processor import RainEngine
+        reng = RainEngine()
+
+        # rsb
+        r1, i1 = reng._process_rsb({"value": "15.5"}, time.time())
+        assert i1 == 15.5
+        assert reng._process_rsb({"value": None}, time.time()) is None
+
+        # standard rain
+        r2, i2 = reng._process_standard_rain({"rainfall_mm": 20.0, "intensity_mm_h": 5.0}, time.time())
+        assert r2 == 20.0
+        assert i2 == 5.0
+        assert reng._process_standard_rain({}, time.time()) is None
+
+        # process
+        p_res = reng.process({"rainfall_mm": 25.0, "intensity_mm_h": 6.0}, time.time())
+        assert p_res["is_fallback"] is False
+
+    def test_agrica_runtime_parsing(self):
+        from processors.gnss_adjustment.runtime import (
+            _safe_float,
+            _safe_int,
+            _positive_std,
+            extract_agrica_sentences,
+            _parse_agrica_epoch,
+            _parse_agrica_positions,
+            _parse_agrica_stds,
+        )
+
+        assert _safe_float(" 3.14 ") == 3.14
+        assert _safe_float(None) is None
+        assert _safe_float("invalid") is None
+        assert _safe_float("nan") is None
+
+        assert _safe_int(" 42 ") == 42
+        assert _safe_int(None) is None
+        assert _safe_int("invalid") is None
+
+        assert _positive_std(0.05) == 0.05
+        assert _positive_std(-1.0) == 0.02
+        assert _positive_std(None) == 0.02
+
+        assert extract_agrica_sentences("") == []
+        sentences = extract_agrica_sentences("#AGRICA;GNSS,1,2024,1,1,0,0,0*FF")
+        assert len(sentences) == 1
+
+        parts = [""] * 50
+        parts[2], parts[3], parts[4], parts[5], parts[6], parts[7] = "2024", "5", "10", "12", "30", "0.0"
+        epoch = _parse_agrica_epoch(parts, None)
+        assert epoch > 0
+
+        parts[29], parts[30], parts[31] = "21.0", "105.0", "100.0"
+        parts[32], parts[33], parts[34] = "1000.0", "2000.0", "3000.0"
+        parts[41], parts[42], parts[43] = "21.1", "105.1", "101.0"
+        r_llh, r_ecef, b_llh = _parse_agrica_positions(parts)
+        assert r_llh == (21.0, 105.0, 100.0)
+        assert r_ecef == (1000.0, 2000.0, 3000.0)
+        assert b_llh == (21.1, 105.1, 101.0)
+
+        parts[38], parts[39], parts[40] = "0.01", "0.02", "0.03"
+        parts[16], parts[17], parts[18] = "0.005", "0.005", "0.01"
+        r_std_raw, r_std, std_neu_raw = _parse_agrica_stds(parts)
+        assert r_std_raw == (0.01, 0.02, 0.03)
+
+    def test_incident_cases_domain(self):
+        from app.features.incidents.cases import (
+            normalize_severity,
+            normalize_source_kind,
+            priority_for_severity,
+            normalize_episode_category,
+            incident_reference,
+            _text,
+            _event_payload,
+        )
+
+        assert normalize_severity("critical") == "CRITICAL"
+        assert normalize_severity("invalid") == "UNKNOWN"
+
+        assert normalize_source_kind("SENSOR_ALERT") == "SENSOR_ALERT"
+        assert normalize_source_kind("RESCUE_REQUEST") == "RESCUE_REQUEST"
+        with pytest.raises(ValueError):
+            normalize_source_kind("INVALID_KIND")
+
+        assert priority_for_severity("CRITICAL") == "URGENT"
+        assert priority_for_severity("MEDIUM") == "HIGH"
+        assert priority_for_severity("LOW") == "NORMAL"
+        assert priority_for_severity("UNKNOWN") == "UNTRIAGED"
+
+        assert normalize_episode_category("tilt_warning") == "tilt"
+        assert normalize_episode_category("gnss_velocity_critical") == "gnss_velocity"
+        assert normalize_episode_category("custom_cat") == "custom_cat"
+
+        ref = incident_reference("SENSOR_ALERT", 123, 1700000000)
+        assert "INC-" in ref and "A123" in ref
+
+        assert _text("hello world", 5) == "hello"
+        assert _event_payload({"priority": "HIGH", "secret": "123"}) == {"priority": "HIGH"}
+        assert _event_payload(None) == {}
+
+
 
