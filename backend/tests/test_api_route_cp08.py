@@ -1,9 +1,10 @@
+import os
 import requests
 import time
 
-BASE_URL = "http://aitogy.click:8001/api"
-USERNAME = "admin" # Thay đổi thành tài khoản admin của bạn nếu cần
-PASSWORD = "" # Thay đổi thành mật khẩu admin của bạn nếu cần
+BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api")
+USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 
 STATION_CODE = "CP08"
 
