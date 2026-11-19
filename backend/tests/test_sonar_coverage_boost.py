@@ -2630,6 +2630,54 @@ NODATA_value -9999
         self.assertEqual(proc.state, "ORIGIN_LOCKED")
         self.assertEqual(proc.origin['lat'], 21.0)
 
+    def test_station_create_endpoint_and_bbox_parsing(self):
+        from app.features.stations.query_router import (
+            create_station_in_project,
+            parse_station_bbox,
+            _build_all_stations_stmt,
+        )
+        import app.schemas as schemas
+
+        # 1. parse_station_bbox valid and invalid
+        bbox = parse_station_bbox("100.0, 10.0, 105.0, 20.0")
+        self.assertEqual(bbox, (100.0, 10.0, 105.0, 20.0))
+        with self.assertRaises(HTTPException) as ctx:
+            parse_station_bbox("invalid,bbox")
+        self.assertEqual(ctx.exception.status_code, 422)
+
+        # 2. _build_all_stations_stmt
+        stmt1 = _build_all_stations_stmt(project_filter_ids=[1, 2], project_id=1, q="ST01", sort="name")
+        self.assertIsNotNone(stmt1)
+
+        # 3. create_station_in_project success
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None), scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+        db.flush = AsyncMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+
+        user = MagicMock(is_admin=True, role="admin", assigned_projects=[1])
+        st_data = schemas.StationCreate(
+            station_code="ST_UNIT_99",
+            name="Station Unit 99",
+            location={"lat": 21.0, "lon": 105.0},
+            sensors={"gnss": {"topic": "t/gnss/99", "mqtt": {}}},
+            config={}
+        )
+        res = asyncio.run(create_station_in_project(project_id=1, station_data=st_data, db=db, current_user=user))
+        self.assertEqual(res.station_code, "ST_UNIT_99")
+        db.commit.assert_called()
+
+        # 4. create_station_in_project exception rollback
+        db_err = AsyncMock()
+        db_err.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None), scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+        db_err.flush = AsyncMock(side_effect=RuntimeError("flush failed"))
+        db_err.rollback = AsyncMock()
+        with self.assertRaises(HTTPException) as ctx_err:
+            asyncio.run(create_station_in_project(project_id=1, station_data=st_data, db=db_err, current_user=user))
+        self.assertEqual(ctx_err.exception.status_code, 500)
+        db_err.rollback.assert_called()
+
 
 
 
