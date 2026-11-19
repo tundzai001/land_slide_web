@@ -246,6 +246,17 @@ class MQTTAdjustmentMixin:
             adjustment, adjustment_key, public_project_id, cluster_index, current_timestamp
         )
 
+        await manager.broadcast({
+            "type": "gnss_adjustment_progress",
+            "project_id": public_project_id,
+            "run_id": run_id,
+            "cluster_name": cluster_name,
+            "phase": phase,
+            "message": f"{cluster_name}: {completed_message}",
+            "timestamp": current_timestamp,
+            "data": summary,
+        })
+
     async def _persist_single_point(self, point: dict, rep_pending: bool, adjustment: dict, adj_key: str, pub_id: int, c_idx: int, ts: int) -> bool:
         station_id = point.get("station_id")
         if not station_id:
@@ -283,19 +294,6 @@ class MQTTAdjustmentMixin:
         rep_pending = True
         for point in adjustment.get("points", {}).values():
             rep_pending = await self._persist_single_point(point, rep_pending, adjustment, adj_key, pub_id, c_idx, ts)
-
-        await manager.broadcast({
-            "type": "gnss_adjustment_progress",
-            "project_id": public_project_id,
-            "run_id": run_id,
-            "cluster_name": cluster_name,
-            "phase": phase,
-            "message": f"{cluster_name}: {completed_message}",
-            "timestamp": current_timestamp,
-            # The UI may not currently be viewing one of the adjusted stations,
-            # so publish the downloadable result on the project-level event too.
-            "data": summary,
-        })
 
     async def _handle_round_robin_adjustment_error(self, project_id: int, message: str):
         run_id = int(project_id)

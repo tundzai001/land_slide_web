@@ -1,12 +1,6 @@
-async def _count_selected_query(query, selected: List[str], key: str, data_db) -> int:
-    if key in selected:
-        return await data_db.scalar(select(func.count()).select_from(query.subquery())) or 0
-    return 0
-
-
+from __future__ import annotations
 """Database export job implementation."""
 
-from __future__ import annotations
 import asyncio
 import csv
 import io
@@ -38,6 +32,12 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 EXPORT_TASKS: Dict[str, dict] = {}
 EXPORT_LOCK = asyncio.Lock()
+
+
+async def _count_selected_query(query, selected: List[str], key: str, data_db) -> int:
+    if key in selected:
+        return await data_db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    return 0
 
 
 def add_csv_to_zip(archive: zipfile.ZipFile, filename_in_zip: str, headers: List[str], rows: List[List[Any]]) -> int:
