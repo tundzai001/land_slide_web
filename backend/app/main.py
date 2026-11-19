@@ -159,8 +159,8 @@ async def run_cors_fixed_base_failover_daemon():
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     config.settings.validate_security()
-    if config.settings.MQTT_BROKER and config.settings.MQTT_PASSWORD == "":
-        logger.warning("MQTT broker uses a credential present in source history; rotate the broker account and MQTT_PASSWORD together")
+    if config.settings.MQTT_BROKER and not config.settings.MQTT_PASSWORD:
+        logger.warning("MQTT_PASSWORD is unset; broker connection will attempt anonymous authentication")
     logger.info("🚀 Landslide Monitoring System starting...")
     if not config.settings.BACKUP_SIGNING_KEY:
         logger.warning("BACKUP_SIGNING_KEY is unset; backup manifests use SECRET_KEY")

@@ -7,7 +7,7 @@ from app.config import Settings
 def test_production_allows_broker_credential_transition_but_rejects_default_signing_key():
     values = dict(
         _env_file=None, ENVIRONMENT="production", CORS_ORIGINS="https://monitoring.example",
-        MQTT_BROKER="broker.example", MQTT_PASSWORD="",
+        MQTT_BROKER="broker.example", MQTT_PASSWORD="custom_secure_password_123",
     )
     Settings(**values, SECRET_KEY="a" * 48).validate_security()
 
