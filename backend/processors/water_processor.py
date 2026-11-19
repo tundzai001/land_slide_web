@@ -18,45 +18,7 @@ class WaterEngine:
         logger.info(f"WaterEngine init: Range [{self.valid_min}m - {self.valid_max}m]")
 
     def _extract_numeric_value(self, raw_value: Any) -> Optional[float]:
-        """Extract a numeric value from scalar/list/string payloads."""
-        if raw_value is None:
-            return None
-
-        if isinstance(raw_value, (int, float)):
-            return float(raw_value)
-
-        if isinstance(raw_value, (list, tuple)):
-            if not raw_value:
-                return None
-            try:
-                return float(raw_value[-1])
-            except (TypeError, ValueError):
-                return None
-
-        if isinstance(raw_value, str):
-            text = raw_value.strip()
-            if not text:
-                return None
-
-            # Common incoming format: "[0, 121]" -> use the latest channel value.
-            if text.startswith('[') and text.endswith(']'):
-                try:
-                    parsed = json.loads(text)
-                    if isinstance(parsed, list) and parsed:
-                        return float(parsed[-1])
-                except (TypeError, ValueError):
-                    numbers = re.findall(NUMBER_RE, text)
-                    if numbers:
-                        return float(numbers[-1])
-
-            try:
-                return float(text)
-            except ValueError:
-                numbers = re.findall(NUMBER_RE, text)
-                if numbers:
-                    return float(numbers[-1])
-
-        return None
+        return extract_numeric_value(raw_value)
 
     def _to_meters(self, payload: Dict[str, Any], parsed_value: float) -> float:
         """Normalize raw sensor values to meters for internal processing."""
@@ -157,113 +119,56 @@ class RainEngine:
         logger.info(f"RainEngine init: History size {history_size}")
 
     def _extract_numeric_value(self, raw_value: Any) -> Optional[float]:
-        if raw_value is None:
+        return extract_numeric_value(raw_value)
+
+    def _process_rsb(self, payload: Dict[str, Any], timestamp: float):
+        raw_intensity = payload.get("value")
+        parsed_intensity = self._extract_numeric_value(raw_intensity)
+        if parsed_intensity is None:
             return None
+        intensity_mm_h = max(0.0, float(parsed_intensity))
+        if len(self.history) > 0:
+            prev_time, prev_rainfall = self.history[-1]
+            time_diff_sec = timestamp - prev_time
+            if 0 < time_diff_sec < 3600:
+                rainfall_mm = prev_rainfall + (intensity_mm_h * time_diff_sec / 3600.0)
+            else:
+                rainfall_mm = prev_rainfall
+        else:
+            rainfall_mm = self.last_valid_rainfall
+        return rainfall_mm, intensity_mm_h
 
-        if isinstance(raw_value, (int, float)):
-            return float(raw_value)
-
-        if isinstance(raw_value, (list, tuple)):
-            if not raw_value:
-                return None
-            try:
-                return float(raw_value[-1])
-            except (TypeError, ValueError):
-                return None
-
-        if isinstance(raw_value, str):
-            text = raw_value.strip()
-            if not text:
-                return None
-            if text.startswith('[') and text.endswith(']'):
-                try:
-                    parsed = json.loads(text)
-                    if isinstance(parsed, list) and parsed:
-                        return float(parsed[-1])
-                except (TypeError, ValueError):
-                    numbers = re.findall(NUMBER_RE, text)
-                    if numbers:
-                        return float(numbers[-1])
-            try:
-                return float(text)
-            except ValueError:
-                numbers = re.findall(NUMBER_RE, text)
-                if numbers:
-                    return float(numbers[-1])
-
-        return None
+    def _process_standard_rain(self, payload: Dict[str, Any], timestamp: float):
+        val = payload.get("rainfall_mm")
+        if val is None:
+            return None
+        rainfall_mm = float(val)
+        intensity_input = payload.get("intensity_mm_h")
+        if intensity_input is not None:
+            intensity_mm_h = float(intensity_input)
+        elif len(self.history) > 0:
+            prev_time, prev_rainfall = self.history[-1]
+            time_diff_sec = timestamp - prev_time
+            rainfall_diff_mm = rainfall_mm - prev_rainfall
+            intensity_mm_h = (rainfall_diff_mm / time_diff_sec) * 3600 if 0 < time_diff_sec < 3600 and rainfall_diff_mm >= 0 else 0.0
+        else:
+            intensity_mm_h = 0.0
+        return rainfall_mm, intensity_mm_h
 
     def process(self, payload: Dict[str, Any], timestamp: float) -> Optional[Dict[str, Any]]:
         try:
             sensor_type = str(payload.get("sensortype", "")).upper()
             sensor_name = str(payload.get("sensorname", "")).upper()
+            is_rsb = sensor_type == "RSB" or sensor_name == "ATG_RSB"
+            res = self._process_rsb(payload, timestamp) if is_rsb else self._process_standard_rain(payload, timestamp)
+            if res is None:
+                return {"rainfall_mm": round(self.last_valid_rainfall, 2), "intensity_mm_h": round(self.last_valid_intensity, 2), "is_fallback": True}
 
-            intensity_mm_h = 0.0
-            rainfall_mm = self.last_valid_rainfall
-
-            # ATG_RSB/RSB gửi intensity trực tiếp qua field value.
-            if sensor_type == "RSB" or sensor_name == "ATG_RSB":
-                raw_intensity = payload.get("value")
-                parsed_intensity = self._extract_numeric_value(raw_intensity)
-                if parsed_intensity is None:
-                    return {
-                        "rainfall_mm": round(self.last_valid_rainfall, 2),
-                        "intensity_mm_h": round(self.last_valid_intensity, 2),
-                        "is_fallback": True
-                    }
-
-                intensity_mm_h = max(0.0, float(parsed_intensity))
-
-                # Ước lượng rainfall tích lũy từ intensity để vẫn hỗ trợ biểu đồ/history.
-                if len(self.history) > 0:
-                    prev_time, prev_rainfall = self.history[-1]
-                    time_diff_sec = timestamp - prev_time
-                    if 0 < time_diff_sec < 3600:
-                        rainfall_mm = prev_rainfall + (intensity_mm_h * time_diff_sec / 3600.0)
-                    else:
-                        rainfall_mm = prev_rainfall
-                else:
-                    rainfall_mm = self.last_valid_rainfall
-            else:
-                val = payload.get("rainfall_mm")
-                if val is None:
-                    return {
-                        "rainfall_mm": round(self.last_valid_rainfall, 2),
-                        "intensity_mm_h": round(self.last_valid_intensity, 2),
-                        "is_fallback": True
-                    }
-
-                rainfall_mm = float(val)
-
-                # 1. Ưu tiên intensity từ thiết bị
-                intensity_input = payload.get("intensity_mm_h")
-                if intensity_input is not None:
-                    intensity_mm_h = float(intensity_input)
-
-                # 2. Tính toán intensity nếu thiết bị không gửi
-                elif len(self.history) > 0:
-                    prev_time, prev_rainfall = self.history[-1]
-                    time_diff_sec = timestamp - prev_time
-                    rainfall_diff_mm = rainfall_mm - prev_rainfall
-
-                    if 0 < time_diff_sec < 3600 and rainfall_diff_mm >= 0:
-                        intensity_mm_h = (rainfall_diff_mm / time_diff_sec) * 3600
-
-            # Lưu giá trị hợp lệ
+            rainfall_mm, intensity_mm_h = res
             self.last_valid_rainfall = rainfall_mm
             self.last_valid_intensity = intensity_mm_h
             self.history.append((timestamp, rainfall_mm))
-
-            return {
-                "rainfall_mm": round(rainfall_mm, 2),
-                "intensity_mm_h": round(intensity_mm_h, 2),
-                "is_fallback": False
-            }
-
+            return {"rainfall_mm": round(rainfall_mm, 2), "intensity_mm_h": round(intensity_mm_h, 2), "is_fallback": False}
         except (ValueError, TypeError) as e:
             logger.exception(f"Error processing rain data: {e}")
-            return {
-                "rainfall_mm": round(self.last_valid_rainfall, 2),
-                "intensity_mm_h": round(self.last_valid_intensity, 2),
-                "is_fallback": True
-            }
+            return {"rainfall_mm": round(self.last_valid_rainfall, 2), "intensity_mm_h": round(self.last_valid_intensity, 2), "is_fallback": True}

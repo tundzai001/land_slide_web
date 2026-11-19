@@ -113,43 +113,43 @@ def on_connect(client, userdata, flags, rc):
 # Biến toàn cục để ghép chuỗi đứt đoạn
 agrica_buffer = ""
 
+def _handle_agrica_fragment(sentence: str):
+    global agrica_buffer
+    if "AGRICA" in sentence:
+        agrica_buffer = sentence
+        if re.search(r'\*[0-9a-fA-F]{8}', agrica_buffer):
+            parse_agrica(agrica_buffer)
+            agrica_buffer = ""
+    elif agrica_buffer:
+        agrica_buffer += sentence
+        if re.search(r'\*[0-9a-fA-F]{8}', agrica_buffer):
+            print(f"\n  => [ĐÃ GHÉP CHUỖI] Độ dài tổng: {len(agrica_buffer)} ký tự")
+            parse_agrica(agrica_buffer)
+            agrica_buffer = ""
+
+
+def _process_single_sentence(sentence: str):
+    global agrica_buffer
+    sentence = sentence.strip()
+    if not sentence:
+        return
+    if "GNGGA" in sentence:
+        parse_gngga(sentence)
+        agrica_buffer = ""
+    elif "GNGST" in sentence:
+        parse_gngst(sentence)
+        agrica_buffer = ""
+    else:
+        _handle_agrica_fragment(sentence)
+
+
 # Callback khi nhận được tin nhắn
 def on_message(client, userdata, msg):
-    global agrica_buffer
     try:
-        # Giải mã chuỗi nhận được
         payload = msg.payload.decode('utf-8').strip()
         print(f"\n[{msg.topic}] Payload thô: {payload}")
-        
-        # Nếu thiết bị gửi nhiều câu NMEA trên cùng 1 payload (tách bằng \n hoặc \r\n)
-        sentences = payload.replace('\r', '').split('\n')
-        
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-                
-            # Phân loại chuỗi và xử lý ghép chuỗi
-            if "GNGGA" in sentence:
-                parse_gngga(sentence)
-                agrica_buffer = "" # Xóa buffer nếu có bản tin khác xen ngang
-            elif "GNGST" in sentence:
-                parse_gngst(sentence)
-                agrica_buffer = ""
-            elif "AGRICA" in sentence:
-                agrica_buffer = sentence
-                # Nếu chuỗi AGRICA này đã đầy đủ (có dấu * và 8 ký tự hex sau *) thì xử lý luôn
-                if re.search(r'\*[0-9a-fA-F]{8}', agrica_buffer):
-                    parse_agrica(agrica_buffer)
-                    agrica_buffer = ""
-            elif agrica_buffer:
-                # Nếu buffer đang có dữ liệu dang dở, nối trực tiếp phần vừa nhận vào
-                agrica_buffer += sentence
-                # Kiểm tra xem đã nhận được ký tự kết thúc (*) và 8 mã hex chưa
-                if re.search(r'\*[0-9a-fA-F]{8}', agrica_buffer):
-                    print(f"\n  => [ĐÃ GHÉP CHUỖI] Độ dài tổng: {len(agrica_buffer)} ký tự")
-                    parse_agrica(agrica_buffer)
-                    agrica_buffer = ""
+        for sentence in payload.replace('\r', '').split('\n'):
+            _process_single_sentence(sentence)
     except Exception as e:
         print(f"Lỗi khi xử lý tin nhắn: {e}")
 

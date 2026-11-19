@@ -117,6 +117,45 @@ async def get_database_stats(
         return {"stations": 0, "devices": 0, "sensor_data": 0, "gnss_adjustments": 0, "alerts": 0}
 
 
+def _build_stations_query(q: Optional[str], project_id: Optional[int], sort: Optional[str]):
+    query = select(model_config.Station)
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        query = query.where(or_(model_config.Station.name.ilike(pattern), model_config.Station.station_code.ilike(pattern)))
+    if project_id is not None:
+        query = query.where(model_config.Station.project_id == project_id)
+    sort_fields = {"id": model_config.Station.id, "name": model_config.Station.name, "station_code": model_config.Station.station_code, "created_at": model_config.Station.created_at}
+    if sort:
+        field = sort.lstrip("-")
+        if field not in sort_fields:
+            raise HTTPException(status_code=422, detail=UNSUPPORTED_SORT_FIELD)
+        column = sort_fields[field]
+        query = query.order_by(column.desc() if sort.startswith("-") else column.asc())
+    return query
+
+
+def _build_station_admin_row(s, active_devices, now_ts):
+    runtime_states = [_device_runtime_state(device, s, now_ts) for device in active_devices]
+    latest_data_time = max([int(device.last_data_time or 0) for device in active_devices] + [int(s.last_update or 0)])
+    effective_status = "online" if any(state["effective_status"] == "online" for state in runtime_states) else "offline"
+    return {
+        "id": s.id,
+        "station_code": s.station_code,
+        "name": s.name,
+        "project_id": s.project_id,
+        "location": s.location,
+        "status": effective_status,
+        "stored_status": s.status,
+        "last_update": latest_data_time,
+        "age_seconds": max(0, now_ts - latest_data_time) if latest_data_time else None,
+        "online_device_count": sum(state["effective_status"] == "online" for state in runtime_states),
+        "active_device_count": len(active_devices),
+        "config": s.config,
+        "created_at": s.created_at,
+        "updated_at": s.updated_at
+    }, effective_status
+
+
 @router.get("/api/admin/db/stations", responses={422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def admin_get_all_stations(
     response: Response,
@@ -132,30 +171,13 @@ async def admin_get_all_stations(
 ):
     """Lấy tất cả stations từ DB"""
     try:
-        query = select(model_config.Station)
-        if q and q.strip():
-            pattern = f"%{q.strip()}%"
-            query = query.where(or_(model_config.Station.name.ilike(pattern), model_config.Station.station_code.ilike(pattern)))
-        if project_id is not None:
-            query = query.where(model_config.Station.project_id == project_id)
-        sort_fields = {"id": model_config.Station.id, "name": model_config.Station.name, "station_code": model_config.Station.station_code, "created_at": model_config.Station.created_at}
-        if sort:
-            field = sort.lstrip("-")
-            if field not in sort_fields:
-                raise HTTPException(status_code=422, detail=UNSUPPORTED_SORT_FIELD)
-            column = sort_fields[field]
-            query = query.order_by(column.desc() if sort.startswith("-") else column.asc())
+        query = _build_stations_query(q, project_id, sort)
         result = await db.execute(query)
         stations = result.scalars().all()
         if summary_only:
             rows = [
-                {
-                    "id": station.id,
-                    "station_code": station.station_code,
-                    "name": station.name,
-                    "project_id": station.project_id,
-                }
-                for station in stations
+                {"id": s.id, "station_code": s.station_code, "name": s.name, "project_id": s.project_id}
+                for s in stations
             ]
             page_offset, page_limit = normalize_page(offset, limit)
             set_pagination_headers(response, total=len(rows), offset=page_offset, limit=page_limit)
@@ -168,25 +190,7 @@ async def admin_get_all_stations(
         rows = []
         for s in stations:
             active_devices = [device for device in devices_by_station.get(s.id, []) if device.is_active]
-            runtime_states = [_device_runtime_state(device, s, now_ts) for device in active_devices]
-            latest_data_time = max([int(device.last_data_time or 0) for device in active_devices] + [int(s.last_update or 0)])
-            effective_status = "online" if any(state["effective_status"] == "online" for state in runtime_states) else "offline"
-            row = {
-                "id": s.id,
-                "station_code": s.station_code,
-                "name": s.name,
-                "project_id": s.project_id,
-                "location": s.location,
-                "status": effective_status,
-                "stored_status": s.status,
-                "last_update": latest_data_time,
-                "age_seconds": max(0, now_ts - latest_data_time) if latest_data_time else None,
-                "online_device_count": sum(state["effective_status"] == "online" for state in runtime_states),
-                "active_device_count": len(active_devices),
-                "config": s.config,
-                "created_at": s.created_at,
-                "updated_at": s.updated_at
-            }
+            row, effective_status = _build_station_admin_row(s, active_devices, now_ts)
             if not status or effective_status == status.lower():
                 rows.append(row)
         page_offset, page_limit = normalize_page(offset, limit)
@@ -197,6 +201,25 @@ async def admin_get_all_stations(
     except Exception as e:
         logger.exception(f"Error fetching stations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _build_devices_query(q: Optional[str], station_id: Optional[int], is_active: Optional[bool], sort: Optional[str]):
+    query = select(model_config.Device)
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        query = query.where(or_(model_config.Device.name.ilike(pattern), model_config.Device.device_code.ilike(pattern)))
+    if station_id is not None:
+        query = query.where(model_config.Device.station_id == station_id)
+    if is_active is not None:
+        query = query.where(model_config.Device.is_active.is_(is_active))
+    sort_fields = {"id": model_config.Device.id, "name": model_config.Device.name, "device_code": model_config.Device.device_code, "created_at": model_config.Device.created_at}
+    if sort:
+        field = sort.lstrip("-")
+        if field not in sort_fields:
+            raise HTTPException(status_code=422, detail=UNSUPPORTED_SORT_FIELD)
+        column = sort_fields[field]
+        query = query.order_by(column.desc() if sort.startswith("-") else column.asc())
+    return query
 
 
 @router.get("/api/admin/db/devices", responses={422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
@@ -214,21 +237,7 @@ async def admin_get_all_devices(
 ):
     """Lấy tất cả devices từ DB"""
     try:
-        query = select(model_config.Device)
-        if q and q.strip():
-            pattern = f"%{q.strip()}%"
-            query = query.where(or_(model_config.Device.name.ilike(pattern), model_config.Device.device_code.ilike(pattern)))
-        if station_id is not None:
-            query = query.where(model_config.Device.station_id == station_id)
-        if is_active is not None:
-            query = query.where(model_config.Device.is_active.is_(is_active))
-        sort_fields = {"id": model_config.Device.id, "name": model_config.Device.name, "device_code": model_config.Device.device_code, "created_at": model_config.Device.created_at}
-        if sort:
-            field = sort.lstrip("-")
-            if field not in sort_fields:
-                raise HTTPException(status_code=422, detail=UNSUPPORTED_SORT_FIELD)
-            column = sort_fields[field]
-            query = query.order_by(column.desc() if sort.startswith("-") else column.asc())
+        query = _build_devices_query(q, station_id, is_active, sort)
         result = await db.execute(query)
         devices = result.scalars().all()
         station_rows = list((await db.execute(select(model_config.Station))).scalars().all())
@@ -269,6 +278,111 @@ async def admin_get_all_devices(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _parse_sensor_data_cluster_key(cluster_key: Optional[str], requested_sensor_type: Optional[str]):
+    if not cluster_key:
+        return None, None
+    if requested_sensor_type != "gnss_adjusted":
+        raise HTTPException(status_code=422, detail="GNSS cluster filter requires gnss_adjusted")
+    try:
+        return (int(value) for value in cluster_key.split(":", 1))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Invalid GNSS cluster filter")
+
+
+def _build_sensor_data_filters(station_id, requested_sensor_type, include_internal, grouped_adjustments, cluster_proj_id, cluster_idx):
+    sensor_filters = []
+    if station_id is not None:
+        sensor_filters.append(model_data.SensorData.station_id == station_id)
+    if requested_sensor_type:
+        sensor_filters.append(model_data.SensorData.sensor_type == requested_sensor_type)
+    elif not include_internal:
+        sensor_filters.append(PUBLIC_SENSOR_FILTER)
+    if grouped_adjustments:
+        sensor_filters.append(model_data.SensorData.adjustment_key.is_not(None))
+        if cluster_proj_id is not None:
+            sensor_filters.extend([
+                model_data.SensorData.adjustment_project_id == cluster_proj_id,
+                model_data.SensorData.adjustment_cluster_index == cluster_idx,
+            ])
+    return sensor_filters
+
+
+def _build_sensor_summary_query(sensor_filters):
+    return select(
+        model_data.SensorData.id,
+        model_data.SensorData.station_id,
+        model_data.SensorData.timestamp,
+        model_data.SensorData.sensor_type,
+        model_data.SensorData.value_1,
+        model_data.SensorData.value_2,
+        model_data.SensorData.value_3,
+        model_data.SensorData.value_4,
+        model_data.SensorData.value_5,
+        model_data.SensorData.adjustment_project_id.label("project_id"),
+        model_data.SensorData.adjustment_cluster_index.label("cluster_index"),
+    ).where(*sensor_filters)
+
+
+def _select_sensor_page_query(query, summary_query, grouped_adj, include_data, filters):
+    if include_data:
+        return query
+    if grouped_adj:
+        return summary_query
+    return select(
+        model_data.SensorData.id, model_data.SensorData.station_id, model_data.SensorData.timestamp,
+        model_data.SensorData.sensor_type, model_data.SensorData.value_1, model_data.SensorData.value_2,
+        model_data.SensorData.value_3, model_data.SensorData.value_4, model_data.SensorData.value_5
+    ).where(*filters)
+
+
+def _set_sensor_pagination_headers(response: Response, total: Optional[int], page_offset: int, page_limit: int, has_more: bool):
+    if total is not None:
+        set_pagination_headers(response, total=total, offset=page_offset, limit=page_limit)
+    else:
+        response.headers["X-Offset"] = str(page_offset)
+        response.headers["X-Limit"] = str(page_limit)
+        response.headers["X-Has-More"] = "true" if has_more else "false"
+
+
+async def _compute_sensor_data_total(db: AsyncSession, include_total: bool, count_q) -> Optional[int]:
+    if not include_total:
+        return None
+    return int((await db.execute(select(func.count()).select_from(count_q.subquery()))).scalar() or 0)
+
+
+def _format_sensor_data_row(d, grouped_adjustments, include_data):
+    row = {
+        "id": d.id,
+        "station_id": d.station_id,
+        "timestamp": d.timestamp,
+        "sensor_type": d.sensor_type,
+        "value_1": d.value_1,
+        "value_2": d.value_2,
+        "value_3": d.value_3,
+        "value_4": d.value_4,
+        "value_5": d.value_5,
+    }
+    if grouped_adjustments:
+        row.update({
+            "project_id": _coerce_int(getattr(d, "project_id", None)),
+            "project_code": getattr(d, "project_code", None),
+            "cluster_index": _coerce_int(getattr(d, "cluster_index", None)),
+            "cluster_name": getattr(d, "cluster_name", None),
+            "computed_at": _coerce_int(
+                getattr(d, "computed_at", None),
+                getattr(d, "timestamp", None),
+            ),
+        })
+    if include_data:
+        row["data"] = d.data
+    else:
+        source = getattr(d, "data_preview", None)
+        if source is None and not grouped_adjustments:
+            source = getattr(d, "data", None)
+        row["data_preview"] = _sensor_data_preview(source)
+    return row
+
+
 @router.get("/api/admin/db/sensor-data", responses={422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def admin_get_sensor_data(
     response: Response,
@@ -287,140 +401,36 @@ async def admin_get_sensor_data(
     """Lấy sensor data gần nhất"""
     _ = current_user
     try:
-        requested_sensor_type = sensor_type.strip().lower() if sensor_type and sensor_type.strip() else None
-        if requested_sensor_type in INTERNAL_SENSOR_TYPES and not include_internal:
-            raise HTTPException(
-                status_code=422,
-                detail="Internal GNSS streams belong to the dedicated adjustment dataset",
-            )
+        req_type = sensor_type.strip().lower() if sensor_type and sensor_type.strip() else None
+        if req_type in INTERNAL_SENSOR_TYPES and not include_internal:
+            raise HTTPException(status_code=422, detail="Internal GNSS streams belong to the dedicated adjustment dataset")
 
-        grouped_adjustments = requested_sensor_type == "gnss_adjusted" and not include_data
-        cluster_project_id = cluster_index = None
-        if cluster_key:
-            if requested_sensor_type != "gnss_adjusted":
-                raise HTTPException(status_code=422, detail="GNSS cluster filter requires gnss_adjusted")
-            try:
-                cluster_project_id, cluster_index = (int(value) for value in cluster_key.split(":", 1))
-            except (TypeError, ValueError):
-                raise HTTPException(status_code=422, detail="Invalid GNSS cluster filter")
-
-        sensor_filters = []
-        if station_id is not None:
-            sensor_filters.append(model_data.SensorData.station_id == station_id)
-        if requested_sensor_type:
-            sensor_filters.append(model_data.SensorData.sensor_type == requested_sensor_type)
-        elif not include_internal:
-            sensor_filters.append(PUBLIC_SENSOR_FILTER)
-        if grouped_adjustments:
-            sensor_filters.append(model_data.SensorData.adjustment_key.is_not(None))
-            if cluster_project_id is not None:
-                sensor_filters.extend([
-                    model_data.SensorData.adjustment_project_id == cluster_project_id,
-                    model_data.SensorData.adjustment_cluster_index == cluster_index,
-                ])
-        query = select(model_data.SensorData).where(*sensor_filters)
+        grouped_adj = req_type == "gnss_adjusted" and not include_data
+        cluster_proj_id, cluster_idx = _parse_sensor_data_cluster_key(cluster_key, req_type)
+        filters = _build_sensor_data_filters(station_id, req_type, include_internal, grouped_adj, cluster_proj_id, cluster_idx)
+        query = select(model_data.SensorData).where(*filters)
         sort_fields = {"id": model_data.SensorData.id, "timestamp": model_data.SensorData.timestamp, "station_id": model_data.SensorData.station_id, "sensor_type": model_data.SensorData.sensor_type}
         field = sort.lstrip("-")
         if field not in sort_fields:
             raise HTTPException(status_code=422, detail=UNSUPPORTED_SORT_FIELD)
 
-        if grouped_adjustments:
-            summary_query = select(
-                model_data.SensorData.id,
-                model_data.SensorData.station_id,
-                model_data.SensorData.timestamp,
-                model_data.SensorData.sensor_type,
-                model_data.SensorData.value_1,
-                model_data.SensorData.value_2,
-                model_data.SensorData.value_3,
-                model_data.SensorData.value_4,
-                model_data.SensorData.value_5,
-                model_data.SensorData.adjustment_project_id.label("project_id"),
-                model_data.SensorData.adjustment_cluster_index.label("cluster_index"),
-            ).where(*sensor_filters)
-
+        summary_query = _build_sensor_summary_query(filters) if grouped_adj else None
         page_offset, page_limit = normalize_page(offset, limit, max_limit=2000)
-        total = None
-        if include_total:
-            count_query = (
-                summary_query
-                if grouped_adjustments
-                else query
-            )
-            total = int((await db.execute(select(func.count()).select_from(count_query.subquery()))).scalar() or 0)
-        if include_data:
-            page_query = query
-            column = sort_fields[field]
-        elif grouped_adjustments:
-            page_query = summary_query
-            column = sort_fields[field]
-        else:
-            page_query = select(
-                model_data.SensorData.id,
-                model_data.SensorData.station_id,
-                model_data.SensorData.timestamp,
-                model_data.SensorData.sensor_type,
-                model_data.SensorData.value_1,
-                model_data.SensorData.value_2,
-                model_data.SensorData.value_3,
-                model_data.SensorData.value_4,
-                model_data.SensorData.value_5,
-            )
-            page_query = page_query.where(*sensor_filters)
-            column = sort_fields[field]
+        count_q = summary_query if grouped_adj else query
+        total = await _compute_sensor_data_total(db, include_total, count_q)
 
+        page_query = _select_sensor_page_query(query, summary_query, grouped_adj, include_data, filters)
         fetch_limit = page_limit + 1 if not include_total else page_limit
-        result = await db.execute(
-            page_query.order_by(column.desc() if sort.startswith("-") else column.asc())
-            .offset(page_offset)
-            .limit(fetch_limit)
-        )
-        data = result.scalars().all() if include_data else result.all()
+        column = sort_fields[field]
+        order_col = column.desc() if sort.startswith("-") else column.asc()
+        res = await db.execute(page_query.order_by(order_col).offset(page_offset).limit(fetch_limit))
+        data = res.scalars().all() if include_data else res.all()
         has_more = not include_total and len(data) > page_limit
         if has_more:
             data = data[:page_limit]
-        if total is not None:
-            set_pagination_headers(response, total=total, offset=page_offset, limit=page_limit)
-        else:
-            response.headers["X-Offset"] = str(page_offset)
-            response.headers["X-Limit"] = str(page_limit)
-            response.headers["X-Has-More"] = "true" if has_more else "false"
+        _set_sensor_pagination_headers(response, total, page_offset, page_limit, has_more)
 
-        rows = []
-        for d in data:
-            row = {
-                "id": d.id,
-                "station_id": d.station_id,
-                "timestamp": d.timestamp,
-                "sensor_type": d.sensor_type,
-                "value_1": d.value_1,
-                "value_2": d.value_2,
-                "value_3": d.value_3,
-                "value_4": d.value_4,
-                "value_5": d.value_5,
-            }
-            if grouped_adjustments:
-                row.update({
-                    "project_id": _coerce_int(getattr(d, "project_id", None)),
-                    "project_code": getattr(d, "project_code", None),
-                    "cluster_index": _coerce_int(getattr(d, "cluster_index", None)),
-                    "cluster_name": getattr(d, "cluster_name", None),
-                    "computed_at": _coerce_int(
-                        getattr(d, "computed_at", None),
-                        getattr(d, "timestamp", None),
-                    ),
-                })
-            if include_data:
-                row["data"] = d.data
-            else:
-                # Do not fetch the JSON payload for list pages. GNSS adjustment
-                # rows contain the complete network result; the detail endpoint
-                # loads that payload only when a row is opened.
-                source = getattr(d, "data_preview", None)
-                if source is None and not grouped_adjustments:
-                    source = getattr(d, "data", None)
-                row["data_preview"] = _sensor_data_preview(source)
-            rows.append(row)
+        rows = [_format_sensor_data_row(d, grouped_adj, include_data) for d in data]
         return rows
     except HTTPException:
         raise

@@ -25,27 +25,19 @@ logger = logging.getLogger(__name__)
 
 STATION_NOT_FOUND = "Station not found"
 
-def _merge_station_config(station, config_data: dict, current_user):
+def _normalize_incoming_config(new_config, current_config):
     import copy
-
-    current_config = copy.deepcopy(station.config) if station.config else get_default_station_config()
-    new_config = config_data['config']
-
-    # The monitoring reference is immutable. A station edit may update all
-    # other settings, but it cannot blank or replace a locked origin.
     locked_origin = copy.deepcopy(current_config.get('gnss_origin'))
     if locked_origin and locked_origin.get('lat') is not None and locked_origin.get('lon') is not None:
         new_config = copy.deepcopy(new_config)
         new_config['gnss_origin'] = locked_origin
 
-    # Backward compatibility for VN2000 config key:
-    # normalize legacy `vn2000_params` into canonical `vn2000`.
     if isinstance(new_config, dict) and 'vn2000_params' in new_config and 'vn2000' not in new_config:
         new_config['vn2000'] = new_config.get('vn2000_params') or {}
+    return new_config
 
-    logger.info(f"📋 [CONFIG] Before merge, offline_thresholds: {current_config.get('offline_thresholds')}")
-    logger.info(f"📋 [CONFIG] Incoming config keys: {list(new_config.keys())}")
 
+def _apply_merged_keys(current_config, new_config):
     for key, value in new_config.items():
         if key == 'custom_sensors':
             current_config[key] = value
@@ -54,9 +46,20 @@ def _merge_station_config(station, config_data: dict, current_user):
         else:
             current_config[key] = value
 
+
+def _merge_station_config(station, config_data: dict, current_user):
+    import copy
+    current_config = copy.deepcopy(station.config) if station.config else get_default_station_config()
+    new_config = _normalize_incoming_config(config_data['config'], current_config)
+
+    logger.info(f"📋 [CONFIG] Before merge, offline_thresholds: {current_config.get('offline_thresholds')}")
+    logger.info(f"📋 [CONFIG] Incoming config keys: {list(new_config.keys())}")
+
+    _apply_merged_keys(current_config, new_config)
+
     logger.info(f"📋 [CONFIG] After merge, offline_thresholds: {current_config.get('offline_thresholds')}")
 
-    station.config = current_config  # Assign NEW dict object
+    station.config = current_config
     from ..operations.forwarding import authorize
     forwarding = current_config.get('gnss_rtk_forwarding')
     if isinstance(forwarding, dict):

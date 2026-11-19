@@ -47,28 +47,32 @@ def test_modbus_tcp_real_socket():
     asyncio.run(run())
 
 
+def _calc_modbus_crc(data):
+    value = 0xffff
+    for byte in data:
+        value ^= byte
+        for _ in range(8):
+            value = (value >> 1) ^ 0xa001 if value & 1 else value >> 1
+    return value.to_bytes(2, 'little')
+
+
+def _handle_pty_respond(master):
+    packet = b''
+    while len(packet) < 8:
+        if not select.select([master], [], [], 5)[0]:
+            raise TimeoutError('RTU simulator received no request')
+        packet += os.read(master, 8 - len(packet))
+    assert packet[-2:] == _calc_modbus_crc(packet[:-2])
+    data = b'\x01\x03\x04' + struct.pack('>f', 3.5)
+    os.write(master, data + _calc_modbus_crc(data))
+
+
 def test_modbus_rtu_real_serial_pty():
-    def crc(data):
-        value = 0xffff
-        for byte in data:
-            value ^= byte
-            for _ in range(8):
-                value = (value >> 1) ^ 0xa001 if value & 1 else value >> 1
-        return value.to_bytes(2,'little')
     async def run():
         master, slave = os.openpty()
         tty.setraw(slave)
         try:
-            def respond():
-                packet = b''
-                while len(packet) < 8:
-                    if not select.select([master],[],[],5)[0]:
-                        raise TimeoutError('RTU simulator received no request')
-                    packet += os.read(master,8-len(packet))
-                assert packet[-2:] == crc(packet[:-2])
-                data = b'\x01\x03\x04' + struct.pack('>f', 3.5)
-                os.write(master,data+crc(data))
-            task = asyncio.create_task(asyncio.to_thread(respond))
+            task = asyncio.create_task(asyncio.to_thread(_handle_pty_respond, master))
             value = await bridge.read_device({'sensor_type':'water','profile':{'protocol':'modbus_rtu','serial_port':os.ttyname(slave),'points':[{'field':'water_level','address':0,'data_type':'float32'}]}})
             await task
             assert value == {'water_level':3.5}

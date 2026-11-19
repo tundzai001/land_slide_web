@@ -233,17 +233,15 @@ class ConnectionManager:
         )
         return True
 
-    def _should_send(self, connection: WebSocket, message: dict) -> bool:
+    def _check_path_and_role_access(self, connection: WebSocket, message: dict) -> bool:
         state = getattr(connection, KEY_STATE, None)
         if getattr(state, "authorization_failed", False):
             return False
         path = getattr(getattr(connection, "url", None), "path", None)
-        message_type = str(message.get("type") or "")
-        if path == WS_OPERATIONS_PATH and message_type != TYPE_INCIDENT_CHANGED:
+        msg_type = str(message.get("type") or "")
+        if path == WS_OPERATIONS_PATH and msg_type != TYPE_INCIDENT_CHANGED:
             return False
-        if path == "/ws/updates" and (
-            message_type == TYPE_INCIDENT_CHANGED or message_type.startswith("rescue_request")
-        ):
+        if path == "/ws/updates" and (msg_type == TYPE_INCIDENT_CHANGED or msg_type.startswith("rescue_request")):
             return False
         role = getattr(state, KEY_USER_ROLE, None)
         if role is not None and role != ROLE_ADMIN:
@@ -253,34 +251,41 @@ class ConnectionManager:
                     return False
             except (TypeError, ValueError):
                 return False
+        return True
+
+    def _check_sensor_subscription(self, subscription: dict, message: dict) -> bool:
+        station_ids = subscription.get(KEY_STATION_IDS) or set()
+        project_ids = subscription.get(KEY_PROJECT_IDS) or set()
+        if not station_ids and not project_ids:
+            return False
+        if station_ids:
+            try:
+                if int(message.get(KEY_STATION_ID)) not in station_ids:
+                    return False
+            except (TypeError, ValueError):
+                return False
+        return True
+
+    def _should_send(self, connection: WebSocket, message: dict) -> bool:
+        if not self._check_path_and_role_access(connection, message):
+            return False
         subscription: Optional[dict] = self._subscriptions.get(id(connection))
         if not subscription or subscription.get(KEY_LEGACY, True):
             return True
 
+        message_type = str(message.get("type") or "")
         channel = self.CHANNEL_BY_MESSAGE_TYPE.get(message_type, message_type)
         channels = subscription.get(KEY_CHANNELS) or set()
         if channels and channel not in channels:
             return False
 
-        # Sensor data is the highest-volume stream and is station-scoped.
-        if channel == "sensor":
-            station_ids = subscription.get(KEY_STATION_IDS) or set()
-            project_ids = subscription.get(KEY_PROJECT_IDS) or set()
-            message_station_id = message.get(KEY_STATION_ID)
-            if not station_ids and not project_ids:
-                return False
-            if station_ids:
-                try:
-                    if int(message_station_id) not in station_ids:
-                        return False
-                except (TypeError, ValueError):
-                    return False
+        if channel == "sensor" and not self._check_sensor_subscription(subscription, message):
+            return False
 
         project_ids = subscription.get(KEY_PROJECT_IDS) or set()
-        message_project_id = message.get(KEY_PROJECT_ID)
         if project_ids:
             try:
-                if int(message_project_id) not in project_ids:
+                if int(message.get(KEY_PROJECT_ID)) not in project_ids:
                     return False
             except (TypeError, ValueError):
                 return False
@@ -399,38 +404,43 @@ class ConnectionManager:
         # Recheck queued envelopes after authorization and subscription changes.
         return message.get("type") in {"hello", "pong", "subscription_ack", ERR_SUBSCRIPTION} or self._should_send(connection, message)
 
+    def _coalesce_outbox_message(self, outbox, message: dict) -> bool:
+        key = (
+            str(message.get("type") or ""),
+            str(message.get(KEY_STATION_ID) or ""),
+            str(message.get(KEY_SENSOR_TYPE) or ""),
+        )
+        for index, queued in enumerate(list(outbox._queue)):
+            queued_key = (
+                str(queued.get("type") or ""),
+                str(queued.get(KEY_STATION_ID) or ""),
+                str(queued.get(KEY_SENSOR_TYPE) or ""),
+            ) if isinstance(queued, dict) else None
+            if queued_key == key:
+                outbox._queue[index] = message
+                return True
+        return False
+
+    async def _handle_full_outbox(self, connection: WebSocket, message: dict, outbox) -> None:
+        reliable = str(message.get("type") or "") in self.RELIABLE_MESSAGE_TYPES or bool(message.get("reliable"))
+        if reliable:
+            self._slow_client_closes += 1
+            try:
+                await connection.close(code=1013, reason="client too slow")
+            except Exception:
+                pass
+            self.disconnect(connection)
+            return
+        if not self._coalesce_outbox_message(outbox, message):
+            self._outbox_drops += 1
+
     async def _send_one(self, connection: WebSocket, message: dict):
         if connection not in self.active_connections:
             return
         outbox = self._outboxes.get(id(connection))
         if outbox is not None:
-            reliable = str(message.get("type") or "") in self.RELIABLE_MESSAGE_TYPES or bool(message.get("reliable"))
             if outbox.full():
-                if reliable:
-                    self._slow_client_closes += 1
-                    try:
-                        await connection.close(code=1013, reason="client too slow")
-                    except Exception:
-                        pass
-                    self.disconnect(connection)
-                    return
-                # Best-effort sensor/status updates coalesce by station/type.
-                key = (
-                    str(message.get("type") or ""),
-                    str(message.get(KEY_STATION_ID) or ""),
-                    str(message.get(KEY_SENSOR_TYPE) or ""),
-                )
-                queue_items = list(outbox._queue)  # bounded internal deque
-                for index, queued in enumerate(queue_items):
-                    queued_key = (
-                        str(queued.get("type") or ""),
-                        str(queued.get(KEY_STATION_ID) or ""),
-                        str(queued.get(KEY_SENSOR_TYPE) or ""),
-                    ) if isinstance(queued, dict) else None
-                    if queued_key == key:
-                        outbox._queue[index] = message
-                        return
-                self._outbox_drops += 1
+                await self._handle_full_outbox(connection, message, outbox)
                 return
             outbox.put_nowait(message)
             return
@@ -441,15 +451,11 @@ class ConnectionManager:
             try:
                 if not await self._delivery_authorized(connection, message):
                     return
-                await asyncio.wait_for(
-                    connection.send_json(message), timeout=self.SEND_TIMEOUT_SECONDS
-                )
+                await asyncio.wait_for(connection.send_json(message), timeout=self.SEND_TIMEOUT_SECONDS)
             except Exception as exc:
                 if connection in self.active_connections:
                     detail = str(exc).strip() or exc.__class__.__name__
-                    logger.warning(
-                        "WebSocket client removed after send failure: %s", detail
-                    )
+                    logger.warning("WebSocket client removed after send failure: %s", detail)
                     self.disconnect(connection)
 
     async def _sender_loop(self, connection: WebSocket) -> None:
