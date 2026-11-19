@@ -21,6 +21,7 @@ from .common import (
     time,
     DatumParams,
     VN2000Converter,
+    haversine_2d,
     normalize_vn2000_l0_value,
     parse_vn2000_central_meridian,
 )

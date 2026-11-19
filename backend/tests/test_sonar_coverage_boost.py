@@ -2418,6 +2418,149 @@ NODATA_value -9999
         with self.assertRaises(HTTPException):
             asyncio.run(start_gnss_adjustment(req, db=db, current_user=MagicMock(role='admin', is_admin=True, assigned_projects=[1])))
 
+    def test_evaluate_origin_candidates_branches(self):
+        from processors.gnss.processing import GNSSProcessingMixin
+        proc = GNSSProcessingMixin()
+        proc.device_id = "D1"
+        proc.state = "AWAITING_CANDIDATES"
+        proc.stats = {'origin_resets': 0}
+        proc._get_rotation_matrix = MagicMock(return_value=[[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        proc._gngga_to_ecef = MagicMock(return_value=[0, 0, 0])
+        proc._save_origin_to_db = AsyncMock()
+        proc.required_points = 3
+        proc.origin_candidates = []
+
+        # 1. Not enough points
+        self.assertIsNone(proc._evaluate_origin_candidates())
+
+        # 2. Points within spread -> locks origin
+        proc.origin_candidates = [
+            {'lat': 21.000000, 'lon': 105.000000, 'h': 10.0, 'timestamp': 1000},
+            {'lat': 21.000001, 'lon': 105.000001, 'h': 10.01, 'timestamp': 1001},
+            {'lat': 21.000002, 'lon': 105.000002, 'h': 10.02, 'timestamp': 1002},
+        ]
+        proc.origin_max_xy_spread_m = 5.0
+        proc.origin_max_u_spread_m = 5.0
+        res = proc._evaluate_origin_candidates()
+        self.assertIsNotNone(res)
+        self.assertEqual(res['type'], 'origin_locked')
+        self.assertEqual(proc.state, 'ORIGIN_LOCKED')
+
+        # 3. Spread too high -> resets
+        proc.origin_candidates = [
+            {'lat': 21.000000, 'lon': 105.000000, 'h': 10.0, 'timestamp': 1000},
+            {'lat': 22.000000, 'lon': 106.000000, 'h': 50.0, 'timestamp': 1001},
+            {'lat': 23.000000, 'lon': 107.000000, 'h': 90.0, 'timestamp': 1002},
+        ]
+        proc.origin_max_xy_spread_m = 0.1
+        proc.origin_max_u_spread_m = 0.1
+        res2 = proc._evaluate_origin_candidates()
+        self.assertIsNotNone(res2)
+        self.assertEqual(res2['type'], 'origin_reset')
+        self.assertEqual(proc.stats['origin_resets'], 1)
+
+    def test_sensor_alert_mixin_pipeline(self):
+        from app.mqtt.bridge.sensor_pipeline.alerts import SensorAlertMixin
+
+        class DummyAlertPipeline(SensorAlertMixin):
+            DANGEROUS_ALERT_LEVELS = {"WARNING", "CRITICAL"}
+            def __init__(self):
+                self.analyzer = MagicMock()
+                self._reset_calls = []
+                self._suppress_calls = []
+                self._broadcast_calls = []
+                self._auto_resolve_calls = []
+            def _is_station_alerting_enabled(self, config):
+                return config.get('alerting_enabled', True)
+            def _reset_station_alert_state(self, station_id):
+                self._reset_calls.append(station_id)
+            async def _suppress_station_alerts(self, station_id, project_id=None):
+                self._suppress_calls.append((station_id, project_id))
+            async def _broadcast_dangerous_alert(self, station_id, station_name, sensor_type, alert, project_id):
+                self._broadcast_calls.append((station_id, sensor_type, alert))
+            async def _auto_resolve_sensor_alerts(self, station_id, sensor_type, station_config, project_id):
+                self._auto_resolve_calls.append((station_id, sensor_type))
+                return True
+            async def _get_station_active_alert_summary(self, station_id, station_config, db=None):
+                return {'risk_level': 'NORMAL', 'unresolved_count': 0}
+
+        pipe = DummyAlertPipeline()
+
+        # Branch 1: Alerting disabled
+        alert, is_dang, is_res = asyncio.run(pipe._analyze_and_alert(
+            station_id=10, station_name="S10", sensor_type="rain",
+            station_config={'alerting_enabled': False}, processed_data={'rain': 0},
+            current_timestamp=1000, project_id=1
+        ))
+        self.assertFalse(is_dang)
+        self.assertFalse(is_res)
+        self.assertEqual(pipe._reset_calls, [10])
+
+        # Branch 2: Dangerous IMU alert promoted to critical
+        pipe.analyzer.analyze_tilt = MagicMock(return_value={'level': 'WARNING', 'category': 'tilt_warning'})
+        alert2, is_dang2, is_res2 = asyncio.run(pipe._analyze_and_alert(
+            station_id=11, station_name="S11", sensor_type="imu",
+            station_config={'alerting_enabled': True}, processed_data={'ax': 0},
+            current_timestamp=1000, project_id=1
+        ))
+        self.assertTrue(is_dang2)
+        self.assertEqual(alert2['level'], 'CRITICAL')
+        self.assertEqual(alert2['audio_code'], 'imu_critical')
+
+        # Branch 3: Normal data -> auto resolve
+        pipe.analyzer.analyze_rainfall = MagicMock(return_value=None)
+        alert3, is_dang3, is_res3 = asyncio.run(pipe._analyze_and_alert(
+            station_id=12, station_name="S12", sensor_type="rain",
+            station_config={'alerting_enabled': True}, processed_data={'rain': 0},
+            current_timestamp=1000, project_id=1
+        ))
+        self.assertFalse(is_dang3)
+        self.assertTrue(is_res3)
+
+    def test_sync_sensor_device_crud(self):
+        from app.features.stations.configuration import _sync_sensor_device
+
+        db = AsyncMock()
+        station = MagicMock(id=1, station_code="ST01", name="Station 01")
+
+        # 1. Empty topic -> returns None
+        res_empty = asyncio.run(_sync_sensor_device(db, station, "rain", {}, {}))
+        self.assertIsNone(res_empty)
+
+        # 2. Reassign found_dev in DB
+        found_dev = MagicMock(config={}, is_active=False)
+        db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=found_dev)))
+        res_found = asyncio.run(_sync_sensor_device(db, station, "water", {"topic": "landslide/water"}, {}))
+        self.assertEqual(res_found, "water")
+        self.assertTrue(found_dev.is_active)
+        self.assertEqual(found_dev.mqtt_topic, "landslide/water")
+
+        # 3. Create brand new device when not found
+        db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+        res_new = asyncio.run(_sync_sensor_device(db, station, "imu", {"topic": "landslide/imu"}, {}))
+        self.assertEqual(res_new, "imu")
+        db.add.assert_called()
+
+    def test_handle_cors_fetch_exception_branches(self):
+        import requests
+        import app.features.projects.cors_stations as cs
+
+        # 1. 401/403 HTTP error raises exc and clears cache
+        resp = MagicMock(status_code=401)
+        http_err = requests.HTTPError("Unauthorized", response=resp)
+        with self.assertRaises(requests.HTTPError):
+            cs._handle_cors_fetch_exception(http_err, managed_key_url=False, cache_age=10)
+
+        # 2. Stale cache return for non-managed URL within TTL
+        cs._cors_base_stations_cache = [{'id': 1}]
+        cs._cors_base_stations_cache_has_value = True
+        res = cs._handle_cors_fetch_exception(requests.RequestException("timeout"), managed_key_url=False, cache_age=10)
+        self.assertEqual(res, [{'id': 1}])
+
+        # 3. Beyond stale TTL -> raises
+        with self.assertRaises(requests.RequestException):
+            cs._handle_cors_fetch_exception(requests.RequestException("timeout"), managed_key_url=False, cache_age=999999)
+
 
 
 

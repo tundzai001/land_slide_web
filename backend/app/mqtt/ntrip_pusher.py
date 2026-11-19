@@ -209,7 +209,8 @@ class NtripPusher:
                     pass
             logger.info(f"[NTRIP Pusher] {self.station_code}: Connection closed.")
 
-    async def start(self, timeout: float = 12.0):
+    async def start(self, timeout_seconds: float = 12.0, **kwargs):
+        timeout = kwargs.get("timeout", timeout_seconds)
         if self.is_running:
             return
         self._loop = asyncio.get_running_loop()
@@ -231,7 +232,8 @@ class NtripPusher:
             await self.stop()
             raise ConnectionError("NTRIP SOURCE connection closed during startup")
 
-    async def wait_for_rtcm(self, timeout: float = 10.0) -> None:
+    async def wait_for_rtcm(self, timeout_seconds: float = 10.0, **kwargs) -> None:
+        timeout = kwargs.get("timeout", timeout_seconds)
         try:
             async with asyncio.timeout(timeout):
                 await self._first_rtcm_sent.wait()
@@ -336,7 +338,8 @@ class NtripPusherManager:
             logger.info(f"[NTRIP Pusher] Stopped for station {station_code}")
 
     @classmethod
-    async def wait_for_rtcm(cls, station_code: str, timeout: float = 10.0) -> None:
+    async def wait_for_rtcm(cls, station_code: str, timeout_seconds: float = 10.0, **kwargs) -> None:
+        timeout = kwargs.get("timeout", timeout_seconds)
         pushers = cls._instances.get(station_code)
         if not pushers:
             raise RuntimeError(f"NTRIP pusher is not running for station {station_code}")

@@ -79,18 +79,30 @@ def parse_vn2000_central_meridian(raw_value, default: float = 105.0) -> Tuple[fl
     if not raw:
         return default, "default"
 
-    import re
-    if any(c in raw for c in '°dD'):
-        dms_match = re.match(r"^([+-]?\d+(?:\.\d+)?)\s*[°d]\s*(\d+(?:\.\d+)?)\s*['m]?$", raw, re.I)
-    else:
-        dms_match = re.match(r"^([+-]?\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*['m]?$", raw, re.I)
-    if dms_match:
-        deg = float(dms_match.group(1))
-        minutes = float(dms_match.group(2))
-        if 0 <= minutes < 60:
-            sign = -1 if deg < 0 else 1
-            return sign * (abs(deg) + minutes / 60.0), "deg_min"
+    # Check for separator ° or d/D or whitespace
+    parts = None
+    for sep in ('°', 'd', 'D'):
+        if sep in raw:
+            parts = raw.split(sep, 1)
+            break
+    if parts is None and ' ' in raw:
+        tokens = raw.split()
+        if len(tokens) == 2:
+            parts = tokens
 
+    if parts is not None and len(parts) == 2:
+        deg_str = parts[0].strip()
+        min_str = parts[1].strip().rstrip("'mM\" ")
+        try:
+            deg = float(deg_str)
+            minutes = float(min_str)
+            if 0 <= minutes < 60:
+                sign = -1 if deg < 0 else 1
+                return sign * (abs(deg) + minutes / 60.0), "deg_min"
+        except ValueError:
+            pass
+
+    import re
     compact_match = re.match(r"^([+-]?\d+)\.(\d{2})$", raw)
     if compact_match:
         deg = float(compact_match.group(1))
