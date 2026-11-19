@@ -16,24 +16,49 @@ from .common import (_STATUS_ATTENTION_ORDER, _attention_rank, _base_scope_stmt,
 
 router = APIRouter(tags=["Incidents"])
 
+class IncidentQueryFilter:
+    def __init__(
+        self,
+        status_filter: Optional[str] = Query(None, alias="status"),
+        priority: Optional[str] = None,
+        source_severity: Optional[str] = None,
+        signal_state: Optional[str] = None,
+        source_kind: Optional[str] = None,
+        project_id: Optional[int] = None,
+        station_id: Optional[int] = None,
+        assigned_to: Optional[int] = None,
+        q: Optional[str] = None,
+    ):
+        self.status_filter = status_filter
+        self.priority = priority
+        self.source_severity = source_severity
+        self.signal_state = signal_state
+        self.source_kind = source_kind
+        self.project_id = project_id
+        self.station_id = station_id
+        self.assigned_to = assigned_to
+        self.q = q
+
+
 @router.get("/api/incidents", responses={422: {"description": "Unprocessable Entity"}})
 async def list_incidents(
     response: Response,
-    status_filter: Optional[str] = Query(None, alias="status"),
-    priority: Optional[str] = None,
-    source_severity: Optional[str] = None,
-    signal_state: Optional[str] = None,
-    source_kind: Optional[str] = None,
-    project_id: Optional[int] = None,
-    station_id: Optional[int] = None,
-    assigned_to: Optional[int] = None,
-    q: Optional[str] = None,
+    filters: IncidentQueryFilter = Depends(),
     cursor: Optional[str] = None,
     limit: int = Query(50, ge=1, le=100),
     sort: str = Query("-updated_at"),
     db: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.VIEW_INCIDENTS)),
 ):
+    status_filter = filters.status_filter
+    priority = filters.priority
+    source_severity = filters.source_severity
+    signal_state = filters.signal_state
+    source_kind = filters.source_kind
+    project_id = filters.project_id
+    station_id = filters.station_id
+    assigned_to = filters.assigned_to
+    q = filters.q
     _private_headers(response)
     if sort not in {"attention", "-updated_at", "updated_at", "opened_at"}:
         raise HTTPException(status_code=422, detail={"code": "INVALID_SORT", "message": "Sort không được hỗ trợ"})

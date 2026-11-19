@@ -31,6 +31,9 @@ JS_OUT = PROJECT_ROOT / "frontend" / "js" / "blender-assets.js"
 TERRAIN_WIDTH = 15.6
 TERRAIN_DEPTH = 10.8
 PRINCIPLED_BSDF_NODE = "Principled BSDF"
+BSDF_BASE_COLOR = "Base Color"
+BSDF_EMISSION_COLOR = "Emission Color"
+BSDF_EMISSION_STRENGTH = "Emission Strength"
 
 
 def clear_scene():
@@ -70,22 +73,19 @@ def make_material(
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
     bsdf = nodes.get(PRINCIPLED_BSDF_NODE)
-    base_color_key = "Base Color"
-    emission_color_key = "Emission Color"
-    emission_strength_key = "Emission Strength"
     if bsdf:
-        bsdf.inputs[base_color_key].default_value = base_color
+        bsdf.inputs[BSDF_BASE_COLOR].default_value = base_color
         bsdf.inputs["Metallic"].default_value = metallic
         bsdf.inputs["Roughness"].default_value = roughness
         if "Alpha" in bsdf.inputs:
             bsdf.inputs["Alpha"].default_value = alpha
-        if emission_color and emission_color_key in bsdf.inputs:
-            bsdf.inputs[emission_color_key].default_value = (*emission_color[:3], 1.0)
-            bsdf.inputs[emission_strength_key].default_value = emission_strength
+        if emission_color and BSDF_EMISSION_COLOR in bsdf.inputs:
+            bsdf.inputs[BSDF_EMISSION_COLOR].default_value = (*emission_color[:3], 1.0)
+            bsdf.inputs[BSDF_EMISSION_STRENGTH].default_value = emission_strength
         if use_vertex_color:
             vc_node = nodes.new(type="ShaderNodeVertexColor")
             vc_node.layer_name = "Col"
-            links.new(vc_node.outputs["Color"], bsdf.inputs[base_color_key])
+            links.new(vc_node.outputs["Color"], bsdf.inputs[BSDF_BASE_COLOR])
     if alpha < 1.0:
         if hasattr(mat, "surface_render_method"):
             mat.surface_render_method = "BLENDED"
@@ -1431,10 +1431,10 @@ def create_grafana_wall_material():
         bsdf.inputs["Roughness"].default_value = 0.12
         bsdf.inputs["Metallic"].default_value = 0.08
         links.new(tex_node.outputs["Color"], bsdf.inputs["Base Color"])
-        if "Emission Color" in bsdf.inputs:
-            links.new(tex_node.outputs["Color"], bsdf.inputs["Emission Color"])
-        if "Emission Strength" in bsdf.inputs:
-            bsdf.inputs["Emission Strength"].default_value = 1.65
+        if BSDF_EMISSION_COLOR in bsdf.inputs:
+            links.new(tex_node.outputs["Color"], bsdf.inputs[BSDF_EMISSION_COLOR])
+        if BSDF_EMISSION_STRENGTH in bsdf.inputs:
+            bsdf.inputs[BSDF_EMISSION_STRENGTH].default_value = 1.65
     return mat
 
 
@@ -2317,7 +2317,7 @@ def import_nasa_satellites(sat_grp, mats):
                 slot.material = mats["sat_bus_silver"]
 
         templates[key] = joined
-        for name in list(imp_names):
+        for name in tuple(imp_names):
             if name != joined_name and name in bpy.data.objects:
                 bpy.data.objects.remove(bpy.data.objects[name], do_unlink=True)
 

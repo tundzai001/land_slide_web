@@ -45,8 +45,7 @@ def _rolling_mean_stability(
     up_slope_limit_mps: float = 0.002,
     ewma_fast_tau_seconds: float = 3.0,
     ewma_slow_tau_seconds: float = 30.0,
-    ewma_horizontal_limit_m: float = 0.008,
-    ewma_up_limit_m: float = 0.015,
+    **kwargs,
 ) -> dict:
     """Compare two consecutive time-based baseline-mean windows.
 
@@ -56,6 +55,9 @@ def _rolling_mean_stability(
     windows are measured in receiver time rather than sample count because the
     field AGRICA stream is commonly slower and more irregular than 1 Hz.
     """
+
+    ewma_horizontal_limit_m = kwargs.get("ewma_horizontal_limit_m", 0.008)
+    ewma_up_limit_m = kwargs.get("ewma_up_limit_m", 0.015)
 
     by_epoch: Dict[int, np.ndarray] = {}
     for epoch, vector in samples:

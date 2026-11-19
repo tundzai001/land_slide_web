@@ -184,8 +184,7 @@ async def ensure_incident_case(
     project_name: Optional[str] = None,
     project_code: Optional[str] = None,
     station_name: Optional[str] = None,
-    station_code: Optional[str] = None,
-    now: Optional[int] = None,
+    **kwargs,
 ) -> tuple[model_data.IncidentCase, bool, Optional[model_data.IncidentEvent]]:
     """Create or refresh a case in the caller's transaction.
 
@@ -193,6 +192,9 @@ async def ensure_incident_case(
     event unless severity/state actually changes.  This prevents the incident
     timeline from growing once per MQTT sample.
     """
+
+    now = kwargs.get("now")
+    station_code = kwargs.get("station_code")
 
     kind = normalize_source_kind(source_kind)
     timestamp = int(now or time.time())

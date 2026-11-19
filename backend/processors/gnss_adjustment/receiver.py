@@ -61,12 +61,13 @@ class RoundRobinReceiverMixin:
         on_stable_collection_invalid: Optional[Callable[[str], None]] = None,
         on_collection_stopped: Optional[Callable[[], None]] = None,
         collection_status_callback: Optional[Callable[[], dict]] = None,
-        expected_cross_rovers: Optional[set[str]] = None,
         base_llh_override: Optional[dict] = None,
-        before_route_start: Optional[Callable[[], Any]] = None,
-        before_rover_restore: Optional[Callable[[], Any]] = None,
-        after_rover_restore: Optional[Callable[[], Any]] = None,
+        **kwargs,
     ) -> None:
+        expected_cross_rovers = kwargs.get("expected_cross_rovers")
+        before_route_start = kwargs.get("before_route_start")
+        before_rover_restore = kwargs.get("before_rover_restore")
+        after_rover_restore = kwargs.get("after_rover_restore")
         logger.info("[Round-Robin] Setting %s as temporary base", rover_code)
         await self._emit_progress(
             project_id,

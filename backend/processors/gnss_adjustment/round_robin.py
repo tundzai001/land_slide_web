@@ -144,18 +144,19 @@ class RoundRobinAdjustmentManager(
         source_port: int = 2101,
         control_password: str = "12345",
         source_password: str = "12345",
-        web_cors_api_base_url: str = "",
-        web_cors_api_token: str = "",
-        web_cors_api_username: str = "",
-        web_cors_api_password: str = "",
         route_start_callback: Optional[Callable[[str, str, int, str, str], Any]] = None,
         route_wait_callback: Optional[Callable[[str, float], Any]] = None,
         route_stop_callback: Optional[Callable[[str], Any]] = None,
         result_callback: Optional[Callable[[int, dict], Any]] = None,
-        error_callback: Optional[Callable[[int, str], Any]] = None,
-        progress_callback: Optional[Callable[[int, str], Any]] = None,
-        reference_change_callback: Optional[Callable[[dict, float, str], Any]] = None,
+        **kwargs,
     ):
+        web_cors_api_base_url = kwargs.get("web_cors_api_base_url", "")
+        web_cors_api_token = kwargs.get("web_cors_api_token", "")
+        web_cors_api_username = kwargs.get("web_cors_api_username", "")
+        web_cors_api_password = kwargs.get("web_cors_api_password", "")
+        error_callback = kwargs.get("error_callback")
+        progress_callback = kwargs.get("progress_callback")
+        reference_change_callback = kwargs.get("reference_change_callback")
         self.mqtt_client = mqtt_client
         self.caster_host = caster_host
         self.caster_hosts = list(dict.fromkeys(
