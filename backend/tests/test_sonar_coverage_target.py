@@ -1184,6 +1184,70 @@ class TestStationAnalysisAndRuntimeCoverage:
                 assert total_r2 == 1
                 assert len(summary2) >= 1
 
+    def test_agrica_adjustment_runtime_class(self):
+        from processors.gnss_adjustment.runtime import AgricaAdjustmentRuntime
+        runtime = AgricaAdjustmentRuntime(epoch_tolerance_s=2, max_epoch_age_s=15)
+        clusters, bases, info = runtime._prepare_clusters_and_bases(
+            [{"stations": [10, 20], "base_lat": 21.0, "base_lon": 105.0, "base_alt": 50.0, "base_station": "BASE1"}],
+            []
+        )
+        assert len(clusters) == 1
+        assert 0 in bases
+        assert info[0]["name"] == "BASE1"
+
+        now_ts = int(time.time())
+        runtime._buffers[(1, now_ts - 100)] = {}
+        runtime._buffers[(1, now_ts)] = {}
+        runtime._prune(now_ts)
+        assert (1, now_ts - 100) not in runtime._buffers
+
+        steps = []
+        base_ecef = runtime._resolve_cluster_base([], bases, info, 0, {}, steps)
+        assert base_ecef is not None
+        assert len(steps) == 1
+
+        obs = MagicMock(rover_ecef=(100, 200, 300), base_llh=(21, 105, 50), station_id=10)
+        origins = {10: (100, 200, 300), 20: (150, 250, 350)}
+        runtime._match_base_from_origins([obs], origins)
+
+    def test_incidents_transitions_and_validation(self):
+        from app.features.incidents.write_router import _validate_case_transition
+        mock_case = MagicMock(status="new", priority="HIGH")
+        _validate_case_transition(mock_case, "acknowledged", None)
+
+        with pytest.raises(HTTPException):
+            _validate_case_transition(mock_case, "resolved", None)
+
+        mock_case.status = "acknowledged"
+        mock_case.priority = "UNTRIAGED"
+        with pytest.raises(HTTPException):
+            _validate_case_transition(mock_case, "in_progress", "note")
+
+    @pytest.mark.anyio
+    async def test_job_simulations_data(self):
+        from app.features.data_export.database.job import _export_simulations_data, EXPORT_TASKS
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            db = AsyncMock()
+            mock_run = MagicMock(
+                id=1, project_code="P1", station_code="S1", created_at=1700000000, display_name="Run1"
+            )
+            mock_exec = MagicMock()
+            mock_exec.scalars.return_value.all.return_value = [mock_run]
+            db.execute.return_value = mock_exec
+
+            query = MagicMock()
+            task_id = "task-sim-123"
+            EXPORT_TASKS[task_id] = {}
+            with patch("app.features.data_export.database.job.build_simulation_pdf", return_value=b"PDF"), \
+                 patch("app.features.data_export.database.job.build_simulation_xlsx", return_value=b"XLSX"), \
+                 patch("app.features.data_export.database.job.build_simulation_json", return_value="{}"):
+                rec_p, count, summary = await _export_simulations_data(zf, db, task_id, query, 0, "2024-01-01")
+                assert count == 1
+                assert rec_p == 1
+                assert len(summary) == 1
+
+
 
 
 
