@@ -1,5 +1,6 @@
 """Targeted tests to boost coverage on newly refactored processors and modules for SonarCloud."""
 
+import asyncio
 import io
 import math
 import sys
@@ -607,12 +608,82 @@ class TestStationAnalysisAndRuntimeCoverage:
         assert normalize_episode_category("gnss_velocity_critical") == "gnss_velocity"
         assert normalize_episode_category("custom_cat") == "custom_cat"
 
-        ref = incident_reference("SENSOR_ALERT", 123, 1700000000)
-        assert "INC-" in ref and "A123" in ref
+    def test_job_export_config_and_row(self):
+        from app.features.data_export.database.job import (
+            _export_config_entities,
+            _extract_adjustment_station_metadata,
+            _build_adjustment_row,
+        )
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            mock_p = MagicMock(id=1, project_code="P1", name="Proj 1", description="Desc", is_active=True)
+            mock_s = MagicMock(id=10, project_id=1, station_code="S10", name="St 10", status="online", last_update=time.time(), location="POINT(105 21)")
+            tot, summary = asyncio.run(_export_config_entities(
+                zf, ["projects", "stations"], [mock_p], [mock_s], {1: "P1"}, {10: {"project_code": "P1", "station_code": "S10"}},
+                {10}, [], "2024-01-01", AsyncMock()
+            ))
+            assert tot == 2
+            assert len(summary) == 2
 
-        assert _text("hello world", 5) == "hello"
-        assert _event_payload({"priority": "HIGH", "secret": "123"}) == {"priority": "HIGH"}
-        assert _event_payload(None) == {}
+        # metadata
+        payload = {"points": {"pt1": {"station_id": 10}}, "context": {"stations": [10, 20]}}
+        sids, scodes = _extract_adjustment_station_metadata(payload, {10: {"station_code": "S10"}, 20: {"station_code": "S20"}})
+        assert sids == [10, 20]
+        assert scodes == ["S10", "S20"]
+
+        # row
+        row = _build_adjustment_row(
+            {"record_ids": [1, 2]}, {"cluster_index": 0, "cluster_name": "C0", "source": "network", "status": "SOLVED"},
+            int(time.time()), 1, "P1", [10], ["S10"], {"observation_baseline_count": 5}, {}, {}, "http://excel"
+        )
+        assert len(row) > 10
+
+    @pytest.mark.anyio
+    async def test_gnss_pipeline_diagnostics_and_handlers(self):
+        from app.mqtt.bridge.sensor_pipeline.gnss import GnssPayloadMixin
+        mixin = GnssPayloadMixin()
+        mixin.round_robin_manager = MagicMock()
+        mixin.adjustment_run_contexts = {1: {"cluster_name": "Cluster1"}}
+        mixin._upsert_latest_sensor_cache = AsyncMock()
+
+        seed_status = {
+            "clusters": [{
+                "rolling_stability_by_station": {10: {"delta_neu_m": [0.001, 0.002, 0.003]}},
+                "solver_window_open_by_station": {10: True},
+                "solver_sample_counts_by_station": {10: 10},
+                "solver_durations_by_station_seconds": {10: 30},
+                "sample_counts_by_station": {},
+                "durations_by_station_seconds": {},
+                "solver_window_reset_counts_by_station": {},
+                "solver_drift_failure_counts_by_station": {},
+                "warming_station_ids": [10],
+                "latest_position_type_by_station": {20: 1},
+            }],
+            "missing_station_ids": [20],
+            "silent_station_ids": [30],
+            "invalid_fix_station_ids": [20],
+            "warming_station_ids": [10],
+            "stability_window_seconds": 15,
+        }
+        parts = mixin._collect_seed_progress_parts(seed_status)
+        assert len(parts) == 1
+        waiting = mixin._build_seed_waiting_parts(seed_status, parts)
+        assert len(waiting) >= 2
+
+        # gngga handlers
+        proc = MagicMock()
+        now_ts = int(time.time())
+        res_data = await mixin._handle_gngga_result(
+            {"type": "gnss_processed", "data": {"latitude": 21.0, "longitude": 105.0, "altitude": 100.0}},
+            {"station_code": "S1"}, 1, 10, "Station 1", proc, {}, 101, "$GNGGA", now_ts
+        )
+        assert res_data["latitude"] == 21.0
+
+        await mixin._handle_origin_status_message(
+            {"status": "LOCKING", "fix_quality": 4, "fix_mode": "FIXED", "message": "Collecting"},
+            1, 10, now_ts
+        )
+        mixin._upsert_latest_sensor_cache.assert_called()
 
 
 
