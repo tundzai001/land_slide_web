@@ -1460,8 +1460,9 @@ def create_uv_quad_panel(bm, center, width, height, yaw_rad, u0, u1, v0=0.0, v1=
         loop[uv_layer].uv = uv
 
 
-def build_operations_hub(root, mats, _templates=None):
+def build_operations_hub(root, mats, templates=None):
     """Build a Cohesive Modern Glass-and-Steel AI Data Center & Command Building with Motorized Sliding Glass Doors, Server Racks, Rooftop Helipad, and a Curved Panoramic Grafana + WebGIS Video Wall."""
+    _ = templates
     ox, oy = 5.15, -0.55
     oz = terrain_height(ox, oy)
     ops_grp = bpy.data.objects.new("Operations_Command_Node", None)
@@ -2116,8 +2117,9 @@ def import_helicopters(root, mats):
     )
 
 
-def import_web_vehicles(root, _mats):
+def import_web_vehicles(root, mats):
     """Import multi-part 3D vehicles from frontend/assets/blender/models/cars_big_set.glb and place them along the mountain highway."""
+    _ = mats
     cars_glb = BLENDER_DIR / "models" / "cars_big_set.glb"
     if not cars_glb.exists():
         return
