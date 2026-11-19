@@ -192,6 +192,65 @@ class RoundRobinReceiverMixin:
             ) from route_exc
         return False
 
+    async def _switch_mode_base_and_verify(
+        self, rover_code: str, project_id: Optional[int], mountpoint: str,
+        client_info: dict, commands: list[bytes], rover_commands: list[bytes]
+    ) -> None:
+        await self._emit_progress(
+            project_id,
+            f"{rover_code}: sending SET BASE to {client_info.get('CasterHost')}:{client_info.get('CasterPort')} (HTTP Basic auth {'enabled' if self.control_password else 'disabled'}).",
+        )
+        try:
+            base_verified = await self._send_set_command(
+                mountpoint,
+                client_info.get("Username", rover_code),
+                client_info.get("receiverID", ""),
+                commands,
+                password=self.control_password,
+                caster_host=client_info.get("CasterHost"),
+                caster_port=client_info.get("CasterPort"),
+                ack_station_code=rover_code,
+            )
+        except Exception:
+            await self._stop_ntrip_route(rover_code)
+            raise
+        if not base_verified:
+            detail = self._last_set_error or "AICaster returned no rejection detail"
+            await self._emit_progress(
+                project_id,
+                f"{rover_code}: SET BASE was not fully verified; sending an immediate ROVER recovery sequence before aborting.",
+            )
+            try:
+                await self._stop_ntrip_route(rover_code)
+            except Exception as stop_exc:
+                logger.warning("Could not stop route on SET BASE failure for %s: %s", rover_code, stop_exc)
+            recovered = False
+            try:
+                await self._restore_rover_output_sequence(
+                    rover_code=rover_code,
+                    mountpoint=mountpoint,
+                    client_info=client_info,
+                    commands=rover_commands,
+                    project_id=project_id,
+                )
+                recovered = True
+            except Exception as recovery_exc:
+                recovery_detail = str(recovery_exc) or "no verified MQTT recovery ACK"
+                logger.critical("Emergency ROVER recovery was not verified for %s: %s", rover_code, recovery_detail)
+                detail = f"{detail}; ROVER recovery also unverified: {recovery_detail}"
+            error_message = f"AICaster rejected the SET command for {rover_code}: {detail}"
+            if recovered:
+                raise _SafeRoverRotationSkip(error_message)
+            raise RuntimeError(error_message)
+
+        warning_suffix = ""
+        if self._last_set_warnings:
+            warning_suffix = " Optional RTCM fallbacks: " + "; ".join(self._last_set_warnings)
+        await self._emit_progress(
+            project_id,
+            f"{rover_code}: SET BASE accepted; response={self._last_set_response or '200 OK'}.{warning_suffix}",
+        )
+
     async def _reapply_base_profile_for_rtcm(
         self, rover_code: str, project_id: Optional[int], mountpoint: str,
         client_info: dict, commands: list[bytes], route_exc: Exception
@@ -298,6 +357,68 @@ class RoundRobinReceiverMixin:
         }
         return handover_verified, verified_participants, participants, counts, stable_participants
 
+    def _check_solver_window_abort(
+        self, rolling: dict, stability_targets: set[str],
+        drift_evaluation_epochs: dict, drift_failure_counts: dict
+    ) -> tuple[set[str], set[str]]:
+        aborting_now = set()
+        for name in stability_targets:
+            diagnostic = rolling.get(name, {})
+            latest_epoch = diagnostic.get("latest_epoch")
+            abort_exceeded = _rolling_drift_exceeds_abort_limits(
+                diagnostic,
+                horizontal_component_limit_m=self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M,
+                up_component_limit_m=self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M,
+            )
+            if abort_exceeded:
+                aborting_now.add(name)
+            if latest_epoch is not None and latest_epoch != drift_evaluation_epochs.get(name):
+                drift_evaluation_epochs[name] = latest_epoch
+                drift_failure_counts[name] = (
+                    int(drift_failure_counts.get(name) or 0) + 1 if abort_exceeded else 0
+                )
+        aborting_repeatedly = {
+            name for name, count in drift_failure_counts.items()
+            if count >= self.STABILITY_ABORT_CONSECUTIVE_EPOCHS
+        }
+        return aborting_now, aborting_repeatedly
+
+    async def _handle_solver_abort_reset(
+        self, rover_code: str, project_id: Optional[int], aborting_repeatedly: set[str],
+        rolling: dict, reset_count: int, on_stable_collection_invalid: Any
+    ) -> None:
+        drift_details = []
+        for name in sorted(aborting_repeatedly):
+            delta = rolling.get(name, {}).get("delta_neu_m")
+            if delta and len(delta) == 3:
+                drift_details.append(
+                    f"{name} dN/E/U={float(delta[0]) * 1000:.1f}/{float(delta[1]) * 1000:.1f}/{float(delta[2]) * 1000:.1f} mm"
+                )
+        if on_stable_collection_invalid:
+            on_stable_collection_invalid("drift")
+        await self._emit_progress(
+            project_id,
+            f"{rover_code}: rolling-window or EWMA transition diagnostic exceeded abort envelope for {self.STABILITY_ABORT_CONSECUTIVE_EPOCHS} consecutive receiver epochs; quarantined solver window #{reset_count} and reset the stability hold timer. {'; '.join(drift_details) or 'rolling threshold exceeded'}.",
+        )
+
+    def _check_solver_window_ready(
+        self, latest_status: dict, stability_targets: set[str], aborting_now: set[str]
+    ) -> bool:
+        solver_counts = {
+            str(name): int(count)
+            for name, count in (latest_status.get("solver_sample_counts_by_rover") or {}).items()
+        }
+        solver_durations = {
+            str(name): int(duration)
+            for name, duration in (latest_status.get("solver_durations_by_rover_seconds") or {}).items()
+        }
+        solver_ready = {
+            name for name in stability_targets
+            if solver_counts.get(name, 0) >= self.CROSS_BASE_STABLE_MIN_DISTINCT_EPOCHS
+            and solver_durations.get(name, 0) >= self.CROSS_BASE_STABLE_MIN_DURATION_SECONDS
+        }
+        return not aborting_now and stability_targets.issubset(solver_ready)
+
     async def _process_stability_step(
         self, rover_code: str, project_id: Optional[int], rolling: dict,
         latest_status: dict, stability_targets: set[str], solver_window_open: bool,
@@ -377,6 +498,53 @@ class RoundRobinReceiverMixin:
                     f"{rover_code}: no complete stationary solver window within {self.CROSS_BASE_STABILITY_TIMEOUT_SECONDS}s"
                 )
             await asyncio.sleep(self.CROSS_BASE_STATUS_POLL_SECONDS)
+
+    async def _run_adaptive_temporary_base_collection(
+        self,
+        rover_code: str,
+        project_id: Optional[int],
+        collection_status_callback: Callable[[], dict],
+        on_stable_collection_started: Optional[Callable[[], None]],
+        on_stable_collection_invalid: Optional[Callable[[str], None]],
+        expected_cross_rovers: Any,
+    ) -> None:
+        expected = set(expected_cross_rovers or ())
+        await self._emit_progress(
+            project_id,
+            f"{rover_code}: RTCM route is live; waiting up to {self.CROSS_BASE_SWITCH_TIMEOUT_SECONDS}s for AGRICA to verify the temporary base and a solver-eligible baseline.",
+        )
+        handover_verified, verified_participants, participants, counts, stable_participants = (
+            await self._poll_rover_handover(rover_code, project_id, collection_status_callback, expected)
+        )
+        if not handover_verified:
+            summary = (
+                f"{rover_code}: no solver-eligible baseline verified within "
+                f"{self.CROSS_BASE_SWITCH_TIMEOUT_SECONDS}s "
+                f"(expected {', '.join(sorted(expected)) or 'any rover'}; observed "
+                f"{', '.join(f'{k}:{v}' for k, v in sorted(counts.items())) or 'none'})."
+            )
+            await self._emit_progress(project_id, summary)
+            raise _SafeRoverRotationSkip(summary)
+
+        await self._emit_progress(
+            project_id,
+            f"{rover_code}: temporary-base handover verified from {', '.join(sorted(verified_participants))} after at least {self.CROSS_BASE_HANDOVER_MIN_SAMPLES} distinct epochs each; waiting {self.CROSS_BASE_POST_HANDOVER_SETTLE_SECONDS}s for the new FIXED solution to settle before opening the solver window.",
+        )
+        unavailable_targets = sorted(expected - verified_participants)
+        if unavailable_targets:
+            await self._emit_progress(
+                project_id,
+                f"{rover_code}: continuing with partial live coverage; no verified handover from {', '.join(unavailable_targets)}. These rovers will not invalidate the useful cross-baselines; the final connected-graph check remains mandatory.",
+            )
+        await asyncio.sleep(self.CROSS_BASE_POST_HANDOVER_SETTLE_SECONDS)
+        await self._emit_progress(
+            project_id,
+            f"{rover_code}: monitoring baseline mean, scatter and slope before opening solver window.",
+        )
+        await self._monitor_temporary_base_stability(
+            rover_code, project_id, collection_status_callback,
+            on_stable_collection_started, on_stable_collection_invalid, verified_participants
+        )
 
     async def _refresh_client_mountpoint_if_needed(self, before_rover_restore: Any, rover_code: str) -> tuple[Optional[dict], Optional[str], Optional[str]]:
         if not before_rover_restore:
