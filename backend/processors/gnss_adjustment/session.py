@@ -19,39 +19,46 @@ def requires_common_base_handover(cluster: dict) -> bool:
 class RoundRobinSessionLifecycleMixin:
     """Own session creation, cancellation, and station membership lookup."""
 
+    def _prepare_single_cluster(
+        self, raw_cluster: dict, assigned_station_ids: set[int]
+    ) -> dict | None:
+        if not isinstance(raw_cluster, dict):
+            return None
+        station_ids = []
+        for station_id in raw_cluster.get("stations", []):
+            try:
+                station_ids.append(int(station_id))
+            except (TypeError, ValueError):
+                continue
+        station_ids = list(dict.fromkeys(station_ids))
+        rover_codes = [
+            str(code).strip()
+            for code in raw_cluster.get("rovers", [])
+            if str(code).strip()
+        ]
+        if len(station_ids) < 2:
+            raise ValueError("each GNSS adjustment cluster needs at least two stations")
+        if len(rover_codes) != len(station_ids):
+            raise ValueError("cluster station IDs and rover codes are inconsistent")
+        overlap = assigned_station_ids.intersection(station_ids)
+        if overlap:
+            raise ValueError(
+                f"a station cannot belong to more than one active cluster: {sorted(overlap)}"
+            )
+        assigned_station_ids.update(station_ids)
+        cluster = dict(raw_cluster)
+        cluster["stations"] = station_ids
+        cluster["rovers"] = rover_codes
+        cluster["observations"] = []
+        return cluster
+
     def configure_project(self, project_id: int, clusters: list[dict]) -> None:
         prepared_clusters = []
         assigned_station_ids: set[int] = set()
         for raw_cluster in clusters or []:
-            if not isinstance(raw_cluster, dict):
-                continue
-            station_ids = []
-            for station_id in raw_cluster.get("stations", []):
-                try:
-                    station_ids.append(int(station_id))
-                except (TypeError, ValueError):
-                    continue
-            station_ids = list(dict.fromkeys(station_ids))
-            rover_codes = [
-                str(code).strip()
-                for code in raw_cluster.get("rovers", [])
-                if str(code).strip()
-            ]
-            if len(station_ids) < 2:
-                raise ValueError("each GNSS adjustment cluster needs at least two stations")
-            if len(rover_codes) != len(station_ids):
-                raise ValueError("cluster station IDs and rover codes are inconsistent")
-            overlap = assigned_station_ids.intersection(station_ids)
-            if overlap:
-                raise ValueError(
-                    f"a station cannot belong to more than one active cluster: {sorted(overlap)}"
-                )
-            assigned_station_ids.update(station_ids)
-            cluster = dict(raw_cluster)
-            cluster["stations"] = station_ids
-            cluster["rovers"] = rover_codes
-            cluster["observations"] = []
-            prepared_clusters.append(cluster)
+            cluster = self._prepare_single_cluster(raw_cluster, assigned_station_ids)
+            if cluster is not None:
+                prepared_clusters.append(cluster)
 
         if not prepared_clusters:
             raise ValueError("no valid GNSS adjustment clusters were supplied")

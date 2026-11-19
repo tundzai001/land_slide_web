@@ -31,44 +31,13 @@ def _block_diagonal(blocks: list[NDArray[np.float64]]) -> NDArray[np.float64]:
     return result
 
 
-def adjust_network(
+def _build_linearized_model(
     network: Network,
-    *,
-    rcond: float | None = None,
-    a_priori_variance_factor: float = 1.0,
-    global_significance: float = 0.05,
-    local_significance: float = 0.001,
-    csharp_compatible: bool = False,
-) -> AdjustmentResult:
-    """Adjust a 3D baseline network using full-covariance weighted least squares.
-
-    Coordinates and observations must use the same three-axis Cartesian metric frame. Fixed points
-    are treated as exact. The implementation whitens observations and uses SVD-based
-    ``lstsq``; it never explicitly inverts the normal matrix to estimate corrections.
-    """
-
-    network.validate()
-    if not np.isfinite(a_priori_variance_factor) or a_priori_variance_factor <= 0.0:
-        raise NetworkError("a_priori_variance_factor must be positive and finite")
-    if not 0.0 < global_significance < 1.0:
-        raise NetworkError("global_significance must be between 0 and 1")
-    if not 0.0 < local_significance < 1.0:
-        raise NetworkError("local_significance must be between 0 and 1")
-
-    unknown_names = [name for name, point in network.points.items() if not point.fixed]
-    unknown_index = {name: index for index, name in enumerate(unknown_names)}
-    observation_count = 3 * len(network.baselines)
-    parameter_count = 3 * len(unknown_names)
-    if parameter_count == 0:
-        raise NetworkError("network has no unknown points to adjust")
-    if observation_count < parameter_count:
-        raise NetworkError(
-            f"insufficient observations: {observation_count} equations for {parameter_count} unknowns"
-        )
-
-    # A matrix and l vector of the standard linearized baseline model:
-    #     v = A x - l
-    # where l = observed - computed from approximate coordinates.
+    unknown_index: dict[str, int],
+    observation_count: int,
+    parameter_count: int,
+    csharp_compatible: bool,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], list[NDArray[np.float64]]]:
     design = np.zeros((observation_count, parameter_count), dtype=float)
     observed_minus_computed = np.zeros(observation_count, dtype=float)
     covariance_blocks: list[NDArray[np.float64]] = []
@@ -92,14 +61,128 @@ def adjust_network(
                 raise NetworkError(
                     "C# compatibility mode only supports per-component standard deviations"
                 )
-            # Exact legacy behavior from Adj.cs: P_ii = 0.001^2 / (std_i^2 + 1e-8).
-            # The common 0.001^2 scale does not change x or v, so it is applied
-            # only when reproducing the legacy reference standard deviation.
             covariance = covariance + np.eye(3) * 1e-8
         covariance_blocks.append(covariance)
+    return design, observed_minus_computed, covariance_blocks
 
-    # Whiten block by block. Solving triangular systems is both faster and more
-    # accurate than constructing a dense weight matrix or its square root.
+
+def _build_adjusted_points(
+    network: Network,
+    unknown_index: dict[str, int],
+    correction: NDArray[np.float64],
+    covariance_parameters: NDArray[np.float64],
+    posterior_covariance_parameters: NDArray[np.float64],
+) -> list[AdjustedPoint]:
+    adjusted_points: list[AdjustedPoint] = []
+    for name, point in network.points.items():
+        if point.fixed:
+            p_corr = np.zeros(3)
+            p_std = np.zeros(3)
+            p_cov = np.zeros((3, 3), dtype=float)
+            post_std = np.zeros(3)
+            post_cov = np.zeros((3, 3), dtype=float)
+        else:
+            offset = 3 * unknown_index[name]
+            p_corr = correction[offset : offset + 3]
+            p_cov = covariance_parameters[offset : offset + 3, offset : offset + 3]
+            p_cov = (p_cov + p_cov.T) / 2.0
+            p_std = np.asarray(covariance_standard_deviation(p_cov), dtype=float)
+            post_cov = posterior_covariance_parameters[offset : offset + 3, offset : offset + 3]
+            post_cov = (post_cov + post_cov.T) / 2.0
+            post_std = np.asarray(covariance_standard_deviation(post_cov), dtype=float)
+
+        coord = np.asarray(point.approximate) + p_corr
+        adjusted_points.append(
+            AdjustedPoint(
+                name=name,
+                coordinate=tuple(float(v) for v in coord),
+                correction=tuple(float(v) for v in p_corr),
+                standard_deviation=tuple(float(v) for v in p_std),
+                covariance=tuple(tuple(float(v) for v in row) for row in p_cov),
+                posterior_standard_deviation=tuple(float(v) for v in post_std),
+                posterior_covariance=tuple(tuple(float(v) for v in row) for row in post_cov),
+                fixed=point.fixed,
+            )
+        )
+    return adjusted_points
+
+
+def _build_adjusted_baselines(
+    network: Network,
+    residual: NDArray[np.float64],
+    standardized: NDArray[np.float64],
+    redundancy: NDArray[np.float64],
+) -> list[AdjustedBaseline]:
+    adjusted_baselines: list[AdjustedBaseline] = []
+    for index, baseline in enumerate(network.baselines):
+        rows = slice(3 * index, 3 * index + 3)
+        b_res = residual[rows]
+        adjusted = np.asarray(baseline.delta) + b_res
+        adjusted_baselines.append(
+            AdjustedBaseline(
+                from_point=baseline.from_point,
+                to_point=baseline.to_point,
+                observed=baseline.delta,
+                residual=tuple(float(v) for v in b_res),
+                adjusted=tuple(float(v) for v in adjusted),
+                standardized_residual=tuple(float(v) for v in standardized[rows]),
+                redundancy=tuple(float(v) for v in redundancy[rows]),
+            )
+        )
+    return adjusted_baselines
+
+
+def _validate_network_inputs(
+    network: Network,
+    a_priori_variance_factor: float,
+    global_significance: float,
+    local_significance: float,
+    parameter_count: int,
+    observation_count: int,
+) -> None:
+    network.validate()
+    if not np.isfinite(a_priori_variance_factor) or a_priori_variance_factor <= 0.0:
+        raise NetworkError("a_priori_variance_factor must be positive and finite")
+    if not 0.0 < global_significance < 1.0:
+        raise NetworkError("global_significance must be between 0 and 1")
+    if not 0.0 < local_significance < 1.0:
+        raise NetworkError("local_significance must be between 0 and 1")
+    if parameter_count == 0:
+        raise NetworkError("network has no unknown points to adjust")
+    if observation_count < parameter_count:
+        raise NetworkError(
+            f"insufficient observations: {observation_count} equations for {parameter_count} unknowns"
+        )
+
+
+def adjust_network(
+    network: Network,
+    *,
+    rcond: float | None = None,
+    a_priori_variance_factor: float = 1.0,
+    global_significance: float = 0.05,
+    local_significance: float = 0.001,
+    csharp_compatible: bool = False,
+) -> AdjustmentResult:
+    """Adjust a 3D baseline network using full-covariance weighted least squares."""
+    unknown_names = [name for name, point in network.points.items() if not point.fixed]
+    unknown_index = {name: index for index, name in enumerate(unknown_names)}
+    observation_count = 3 * len(network.baselines)
+    parameter_count = 3 * len(unknown_names)
+
+    _validate_network_inputs(
+        network,
+        a_priori_variance_factor,
+        global_significance,
+        local_significance,
+        parameter_count,
+        observation_count,
+    )
+
+    design, observed_minus_computed, covariance_blocks = _build_linearized_model(
+        network, unknown_index, observation_count, parameter_count, csharp_compatible
+    )
+
     whitened_design = np.empty_like(design)
     whitened_rhs = np.empty_like(observed_minus_computed)
     for index, covariance in enumerate(covariance_blocks):
@@ -125,8 +208,6 @@ def adjust_network(
         weighted_residual_sum / degrees_of_freedom if degrees_of_freedom > 0 else None
     )
 
-    # SVD cofactor matrix. This is only used for covariance propagation, not for
-    # the correction solution itself.
     _, singular_values_full, vt = np.linalg.svd(whitened_design, full_matrices=False)
     cofactor_parameters = (vt.T / np.square(singular_values_full)) @ vt
     covariance_parameters = a_priori_variance_factor * cofactor_parameters
@@ -137,9 +218,6 @@ def adjust_network(
     covariance_residual = covariance_observations - design @ cofactor_parameters @ design.T
     covariance_residual = (covariance_residual + covariance_residual.T) / 2.0
 
-    # Normalized residuals for data snooping must use the a-priori variance
-    # factor. Scaling by the posterior estimate can mask a gross error because
-    # the same error inflates both numerator and denominator.
     residual_std = np.sqrt(
         np.maximum(a_priori_variance_factor * np.diag(covariance_residual), 0.0)
     )
@@ -161,67 +239,10 @@ def adjust_network(
         1.0,
     )
 
-    adjusted_points: list[AdjustedPoint] = []
-    for name, point in network.points.items():
-        if point.fixed:
-            point_correction = np.zeros(3)
-            point_std = np.zeros(3)
-            point_covariance = np.zeros((3, 3), dtype=float)
-            posterior_point_std = np.zeros(3)
-            posterior_point_covariance = np.zeros((3, 3), dtype=float)
-        else:
-            offset = 3 * unknown_index[name]
-            point_correction = correction[offset : offset + 3]
-            point_covariance = covariance_parameters[offset : offset + 3, offset : offset + 3]
-            point_covariance = (point_covariance + point_covariance.T) / 2.0
-            point_std = np.asarray(covariance_standard_deviation(point_covariance), dtype=float)
-            posterior_point_covariance = posterior_covariance_parameters[
-                offset : offset + 3, offset : offset + 3
-            ]
-            posterior_point_covariance = (
-                posterior_point_covariance + posterior_point_covariance.T
-            ) / 2.0
-            posterior_point_std = np.asarray(
-                covariance_standard_deviation(posterior_point_covariance), dtype=float
-            )
-        coordinate = np.asarray(point.approximate) + point_correction
-        adjusted_points.append(
-            AdjustedPoint(
-                name=name,
-                coordinate=tuple(float(value) for value in coordinate),
-                correction=tuple(float(value) for value in point_correction),
-                standard_deviation=tuple(float(value) for value in point_std),
-                covariance=tuple(
-                    tuple(float(value) for value in row)
-                    for row in point_covariance
-                ),
-                posterior_standard_deviation=tuple(
-                    float(value) for value in posterior_point_std
-                ),
-                posterior_covariance=tuple(
-                    tuple(float(value) for value in row)
-                    for row in posterior_point_covariance
-                ),
-                fixed=point.fixed,
-            )
-        )
-
-    adjusted_baselines: list[AdjustedBaseline] = []
-    for index, baseline in enumerate(network.baselines):
-        rows = slice(3 * index, 3 * index + 3)
-        baseline_residual = residual[rows]
-        adjusted = np.asarray(baseline.delta) + baseline_residual
-        adjusted_baselines.append(
-            AdjustedBaseline(
-                from_point=baseline.from_point,
-                to_point=baseline.to_point,
-                observed=baseline.delta,
-                residual=tuple(float(value) for value in baseline_residual),
-                adjusted=tuple(float(value) for value in adjusted),
-                standardized_residual=tuple(float(value) for value in standardized[rows]),
-                redundancy=tuple(float(value) for value in redundancy[rows]),
-            )
-        )
+    adjusted_points = _build_adjusted_points(
+        network, unknown_index, correction, covariance_parameters, posterior_covariance_parameters
+    )
+    adjusted_baselines = _build_adjusted_baselines(network, residual, standardized, redundancy)
 
     nonzero_standardized = np.abs(standardized[residual_std > np.finfo(float).eps])
     max_standardized = (

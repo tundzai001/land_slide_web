@@ -107,15 +107,7 @@ class Network:
             point_map[point.name] = point
         return cls(point_map, list(baselines))
 
-    def validate(self) -> None:
-        if not self.points:
-            raise NetworkError("network has no points")
-        if not self.baselines:
-            raise NetworkError("network has no baselines")
-        fixed = {name for name, point in self.points.items() if point.fixed}
-        if not fixed:
-            raise NetworkError("network needs at least one fixed point to define its datum")
-
+    def _build_adjacency(self) -> dict[str, set[str]]:
         adjacency = {name: set() for name in self.points}
         for baseline in self.baselines:
             for endpoint in (baseline.from_point, baseline.to_point):
@@ -125,21 +117,35 @@ class Network:
                     )
             adjacency[baseline.from_point].add(baseline.to_point)
             adjacency[baseline.to_point].add(baseline.from_point)
+        return adjacency
 
-        unseen = set(self.points)
+    @staticmethod
+    def _verify_components(adjacency: dict[str, set[str]], points: set[str], fixed: set[str]) -> None:
+        unseen = set(points)
         while unseen:
             seed = next(iter(unseen))
             component, stack = set(), [seed]
             while stack:
                 name = stack.pop()
-                if name in component:
-                    continue
-                component.add(name)
-                stack.extend(adjacency[name] - component)
+                if name not in component:
+                    component.add(name)
+                    stack.extend(adjacency[name] - component)
             unseen -= component
             if component.isdisjoint(fixed):
                 names = ", ".join(sorted(component))
                 raise NetworkError(f"network component has no fixed point: {names}")
+
+    def validate(self) -> None:
+        if not self.points:
+            raise NetworkError("network has no points")
+        if not self.baselines:
+            raise NetworkError("network has no baselines")
+        fixed = {name for name, point in self.points.items() if point.fixed}
+        if not fixed:
+            raise NetworkError("network needs at least one fixed point to define its datum")
+
+        adjacency = self._build_adjacency()
+        self._verify_components(adjacency, set(self.points), fixed)
 
 
 @dataclass(frozen=True, slots=True)

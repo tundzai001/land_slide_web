@@ -31,6 +31,164 @@ def _formal_covariance_from_precision(precision_sum: Any) -> np.ndarray:
     return 0.5 * (covariance + covariance.T)
 
 
+def _filter_valid_sample_epochs(
+    samples: Iterable[tuple[int, Iterable[float]]]
+) -> list[tuple[int, np.ndarray]]:
+    by_epoch: Dict[int, np.ndarray] = {}
+    for epoch, vector in samples:
+        try:
+            epoch_value = int(epoch)
+            vector_value = np.asarray(tuple(vector), dtype=float)
+        except (TypeError, ValueError):
+            continue
+        if vector_value.shape == (3,) and np.all(np.isfinite(vector_value)):
+            by_epoch[epoch_value] = vector_value
+    return sorted(by_epoch.items())
+
+
+def _compute_ewma_stats(
+    ordered: list[tuple[int, np.ndarray]],
+    ewma_fast_tau: float,
+    ewma_slow_tau: float,
+    ewma_h_limit: float,
+    ewma_up_limit: float,
+) -> tuple[np.ndarray, bool]:
+    fast_mean = ordered[0][1].astype(float, copy=True)
+    slow_mean = ordered[0][1].astype(float, copy=True)
+    previous_epoch = int(ordered[0][0])
+    for epoch, vector in ordered[1:]:
+        dt = max(0.0, float(int(epoch) - previous_epoch))
+        alpha_fast = 1.0 - math.exp(-dt / max(float(ewma_fast_tau), 1e-6))
+        alpha_slow = 1.0 - math.exp(-dt / max(float(ewma_slow_tau), 1e-6))
+        fast_mean += alpha_fast * (vector - fast_mean)
+        slow_mean += alpha_slow * (vector - slow_mean)
+        previous_epoch = int(epoch)
+    ewma_delta = fast_mean - slow_mean
+    ewma_transition = bool(
+        abs(float(ewma_delta[0])) > ewma_h_limit
+        or abs(float(ewma_delta[1])) > ewma_h_limit
+        or abs(float(ewma_delta[2])) > ewma_up_limit
+    )
+    return ewma_delta, ewma_transition
+
+
+def _window_statistics(rows: list[tuple[int, np.ndarray]]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    epochs = np.asarray([epoch for epoch, _vector in rows], dtype=float)
+    vectors = np.vstack([vector for _epoch, vector in rows])
+    mean = np.mean(vectors, axis=0)
+    std = np.std(vectors, axis=0, ddof=1) if len(rows) > 1 else np.zeros(3)
+    centered_time = epochs - float(np.mean(epochs))
+    denominator = float(centered_time @ centered_time)
+    slope = (
+        centered_time @ (vectors - mean) / denominator
+        if denominator > np.finfo(float).eps
+        else np.zeros(3)
+    )
+    return mean, std, np.asarray(slope, dtype=float)
+
+
+def _compute_single_diagnostic(
+    ordered: list[tuple[int, np.ndarray]],
+    end_index: int,
+    window_seconds: int,
+    min_samples: int,
+    h_limit: float,
+    up_limit: float,
+    h_std_limit: float,
+    up_std_limit: float,
+    h_slope_limit: float,
+    up_slope_limit: float,
+) -> Optional[dict]:
+    end_epoch = int(ordered[end_index][0])
+    recent_start = end_epoch - window_seconds + 1
+    previous_start = end_epoch - 2 * window_seconds + 1
+    previous_end = end_epoch - window_seconds
+    previous = [
+        (epoch, vector)
+        for epoch, vector in ordered[:end_index + 1]
+        if previous_start <= epoch <= previous_end
+    ]
+    recent = [
+        (epoch, vector)
+        for epoch, vector in ordered[:end_index + 1]
+        if recent_start <= epoch <= end_epoch
+    ]
+    if len(previous) < min_samples or len(recent) < min_samples:
+        return None
+    prev_mean, prev_std, prev_slope = _window_statistics(previous)
+    rec_mean, rec_std, rec_slope = _window_statistics(recent)
+    delta = rec_mean - prev_mean
+    mean_stable = bool(
+        abs(float(delta[0])) <= h_limit
+        and abs(float(delta[1])) <= h_limit
+        and abs(float(delta[2])) <= up_limit
+    )
+    scatter_stable = bool(
+        max(abs(float(prev_std[0])), abs(float(rec_std[0]))) <= h_std_limit
+        and max(abs(float(prev_std[1])), abs(float(rec_std[1]))) <= h_std_limit
+        and max(abs(float(prev_std[2])), abs(float(rec_std[2]))) <= up_std_limit
+    )
+    slope_stable = bool(
+        max(abs(float(prev_slope[0])), abs(float(rec_slope[0]))) <= h_slope_limit
+        and max(abs(float(prev_slope[1])), abs(float(rec_slope[1]))) <= h_slope_limit
+        and max(abs(float(prev_slope[2])), abs(float(rec_slope[2]))) <= up_slope_limit
+    )
+    return {
+        "stable": mean_stable and scatter_stable and slope_stable,
+        "mean_stable": mean_stable,
+        "scatter_stable": scatter_stable,
+        "slope_stable": slope_stable,
+        "delta_neu_m": tuple(float(v) for v in delta),
+        "delta_3d_m": float(np.linalg.norm(delta)),
+        "previous_window_std_neu_m": tuple(float(v) for v in prev_std),
+        "recent_window_std_neu_m": tuple(float(v) for v in rec_std),
+        "previous_window_slope_neu_mps": tuple(float(v) for v in prev_slope),
+        "recent_window_slope_neu_mps": tuple(float(v) for v in rec_slope),
+        "previous_window_start_epoch": previous[0][0],
+        "previous_window_end_epoch": previous[-1][0],
+        "previous_window_sample_count": len(previous),
+        "recent_window_start_epoch": recent[0][0],
+        "recent_window_end_epoch": recent[-1][0],
+        "recent_window_sample_count": len(recent),
+    }
+
+
+def _scan_stability_history(
+    ordered: list[tuple[int, np.ndarray]],
+    window_seconds: int,
+    min_samples_per_window: int,
+    max_sample_gap_seconds: int,
+    limits: tuple[float, float, float, float, float, float],
+) -> tuple[Optional[dict], Optional[int], Optional[int]]:
+    stable_run_start_epoch = None
+    previous_diagnostic_epoch = None
+    latest_diagnostic = None
+    latest_diagnostic_epoch = None
+    for end_index in range(len(ordered)):
+        current_diagnostic = _compute_single_diagnostic(
+            ordered,
+            end_index,
+            window_seconds,
+            min_samples_per_window,
+            *limits,
+        )
+        if current_diagnostic is None:
+            continue
+        current_epoch = int(ordered[end_index][0])
+        latest_diagnostic = current_diagnostic
+        latest_diagnostic_epoch = current_epoch
+        if current_diagnostic["stable"] and (
+            previous_diagnostic_epoch is None
+            or current_epoch - previous_diagnostic_epoch <= max_sample_gap_seconds
+        ):
+            if stable_run_start_epoch is None:
+                stable_run_start_epoch = current_epoch
+        else:
+            stable_run_start_epoch = current_epoch if current_diagnostic["stable"] else None
+        previous_diagnostic_epoch = current_epoch
+    return latest_diagnostic, latest_diagnostic_epoch, stable_run_start_epoch
+
+
 def _rolling_mean_stability(
     samples: Iterable[tuple[int, Iterable[float]]],
     *,
@@ -47,30 +205,11 @@ def _rolling_mean_stability(
     ewma_slow_tau_seconds: float = 30.0,
     **kwargs,
 ) -> dict:
-    """Compare two consecutive time-based baseline-mean windows.
-
-    FIXED/source validation says where a vector came from; it does not prove
-    that the ambiguity solution is stationary.  This diagnostic is deliberately
-    component-wise so a vertical drift cannot hide inside a 3-D norm.  The
-    windows are measured in receiver time rather than sample count because the
-    field AGRICA stream is commonly slower and more irregular than 1 Hz.
-    """
-
+    """Compare two consecutive time-based baseline-mean windows."""
     ewma_horizontal_limit_m = kwargs.get("ewma_horizontal_limit_m", 0.008)
     ewma_up_limit_m = kwargs.get("ewma_up_limit_m", 0.015)
 
-    by_epoch: Dict[int, np.ndarray] = {}
-    for epoch, vector in samples:
-        try:
-            epoch_value = int(epoch)
-            vector_value = np.asarray(tuple(vector), dtype=float)
-        except (TypeError, ValueError):
-            continue
-        if vector_value.shape != (3,) or not np.all(np.isfinite(vector_value)):
-            continue
-        by_epoch[epoch_value] = vector_value
-
-    ordered = sorted(by_epoch.items())
+    ordered = _filter_valid_sample_epochs(samples)
     window_seconds = max(1, int(window_seconds))
     min_samples_per_window = max(1, int(min_samples_per_window))
     max_sample_gap_seconds = max(1, int(max_sample_gap_seconds))
@@ -102,139 +241,37 @@ def _rolling_mean_stability(
     if len(ordered) < min_samples_per_window * 2:
         return result
 
-    def window_statistics(rows: list[tuple[int, np.ndarray]]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        epochs = np.asarray([epoch for epoch, _vector in rows], dtype=float)
-        vectors = np.vstack([vector for _epoch, vector in rows])
-        mean = np.mean(vectors, axis=0)
-        std = np.std(vectors, axis=0, ddof=1) if len(rows) > 1 else np.zeros(3)
-        centered_time = epochs - float(np.mean(epochs))
-        denominator = float(centered_time @ centered_time)
-        slope = (
-            centered_time @ (vectors - mean) / denominator
-            if denominator > np.finfo(float).eps
-            else np.zeros(3)
-        )
-        return mean, std, np.asarray(slope, dtype=float)
-
-    def diagnostic_at(end_index: int) -> Optional[dict]:
-        end_epoch = int(ordered[end_index][0])
-        recent_start = end_epoch - window_seconds + 1
-        previous_start = end_epoch - 2 * window_seconds + 1
-        previous_end = end_epoch - window_seconds
-        previous = [
-            (epoch, vector)
-            for epoch, vector in ordered[:end_index + 1]
-            if previous_start <= epoch <= previous_end
-        ]
-        recent = [
-            (epoch, vector)
-            for epoch, vector in ordered[:end_index + 1]
-            if recent_start <= epoch <= end_epoch
-        ]
-        if (
-            len(previous) < min_samples_per_window
-            or len(recent) < min_samples_per_window
-        ):
-            return None
-        previous_mean, previous_std, previous_slope = window_statistics(previous)
-        recent_mean, recent_std, recent_slope = window_statistics(recent)
-        delta = recent_mean - previous_mean
-        mean_stable = bool(
-            abs(float(delta[0])) <= horizontal_component_limit_m
-            and abs(float(delta[1])) <= horizontal_component_limit_m
-            and abs(float(delta[2])) <= up_component_limit_m
-        )
-        scatter_stable = bool(
-            max(abs(float(previous_std[0])), abs(float(recent_std[0])))
-            <= horizontal_std_limit_m
-            and max(abs(float(previous_std[1])), abs(float(recent_std[1])))
-            <= horizontal_std_limit_m
-            and max(abs(float(previous_std[2])), abs(float(recent_std[2])))
-            <= up_std_limit_m
-        )
-        slope_stable = bool(
-            max(abs(float(previous_slope[0])), abs(float(recent_slope[0])))
-            <= horizontal_slope_limit_mps
-            and max(abs(float(previous_slope[1])), abs(float(recent_slope[1])))
-            <= horizontal_slope_limit_mps
-            and max(abs(float(previous_slope[2])), abs(float(recent_slope[2])))
-            <= up_slope_limit_mps
-        )
-        return {
-            "stable": mean_stable and scatter_stable and slope_stable,
-            "mean_stable": mean_stable,
-            "scatter_stable": scatter_stable,
-            "slope_stable": slope_stable,
-            "delta_neu_m": tuple(float(value) for value in delta),
-            "delta_3d_m": float(np.linalg.norm(delta)),
-            "previous_window_std_neu_m": tuple(float(value) for value in previous_std),
-            "recent_window_std_neu_m": tuple(float(value) for value in recent_std),
-            "previous_window_slope_neu_mps": tuple(float(value) for value in previous_slope),
-            "recent_window_slope_neu_mps": tuple(float(value) for value in recent_slope),
-            "previous_window_start_epoch": previous[0][0],
-            "previous_window_end_epoch": previous[-1][0],
-            "previous_window_sample_count": len(previous),
-            "recent_window_start_epoch": recent[0][0],
-            "recent_window_end_epoch": recent[-1][0],
-            "recent_window_sample_count": len(recent),
-        }
-
-    stable_run_start_epoch = None
-    previous_diagnostic_epoch = None
-    latest_diagnostic = None
-    latest_diagnostic_epoch = None
-    for end_index in range(len(ordered)):
-        current_diagnostic = diagnostic_at(end_index)
-        if current_diagnostic is None:
-            continue
-        current_epoch = int(ordered[end_index][0])
-        latest_diagnostic = current_diagnostic
-        latest_diagnostic_epoch = current_epoch
-        if (
-            current_diagnostic["stable"]
-            and (
-                previous_diagnostic_epoch is None
-                or current_epoch - previous_diagnostic_epoch
-                <= max_sample_gap_seconds
-            )
-        ):
-            if stable_run_start_epoch is None:
-                stable_run_start_epoch = current_epoch
-        else:
-            stable_run_start_epoch = current_epoch if current_diagnostic["stable"] else None
-        previous_diagnostic_epoch = current_epoch
-
+    limits = (
+        horizontal_component_limit_m,
+        up_component_limit_m,
+        horizontal_std_limit_m,
+        up_std_limit_m,
+        horizontal_slope_limit_mps,
+        up_slope_limit_mps,
+    )
+    latest_diagnostic, latest_epoch, stable_run_start = _scan_stability_history(
+        ordered, window_seconds, min_samples_per_window, max_sample_gap_seconds, limits
+    )
     if latest_diagnostic is None:
         return result
 
-    fast_mean = ordered[0][1].astype(float, copy=True)
-    slow_mean = ordered[0][1].astype(float, copy=True)
-    previous_epoch = int(ordered[0][0])
-    for epoch, vector in ordered[1:]:
-        dt = max(0.0, float(int(epoch) - previous_epoch))
-        alpha_fast = 1.0 - math.exp(-dt / max(float(ewma_fast_tau_seconds), 1e-6))
-        alpha_slow = 1.0 - math.exp(-dt / max(float(ewma_slow_tau_seconds), 1e-6))
-        fast_mean += alpha_fast * (vector - fast_mean)
-        slow_mean += alpha_slow * (vector - slow_mean)
-        previous_epoch = int(epoch)
-    ewma_delta = fast_mean - slow_mean
-    ewma_transition = bool(
-        abs(float(ewma_delta[0])) > ewma_horizontal_limit_m
-        or abs(float(ewma_delta[1])) > ewma_horizontal_limit_m
-        or abs(float(ewma_delta[2])) > ewma_up_limit_m
+    ewma_delta, ewma_transition = _compute_ewma_stats(
+        ordered,
+        ewma_fast_tau_seconds,
+        ewma_slow_tau_seconds,
+        ewma_horizontal_limit_m,
+        ewma_up_limit_m,
     )
     result.update(latest_diagnostic)
     result["ewma_delta_neu_m"] = tuple(float(value) for value in ewma_delta)
     result["ewma_transition_detected"] = ewma_transition
     result["ewma_fast_tau_seconds"] = float(ewma_fast_tau_seconds)
     result["ewma_slow_tau_seconds"] = float(ewma_slow_tau_seconds)
-    result["latest_epoch"] = latest_diagnostic_epoch
+    result["latest_epoch"] = latest_epoch
     result["enough_samples"] = True
-    if result["stable"] and stable_run_start_epoch is not None:
-        result["stable_run_start_epoch"] = stable_run_start_epoch
-        result["stable_run_seconds"] = max(
-            0, int(result["latest_epoch"]) - int(stable_run_start_epoch)
-        )
+    if result["stable"] and stable_run_start is not None:
+        result["stable_run_start_epoch"] = stable_run_start
+        result["stable_run_seconds"] = max(0, int(result["latest_epoch"]) - int(stable_run_start))
     return result
 
 
@@ -327,27 +364,28 @@ def _initial_positive_sequence_ess(
     )
 
 
+def _starts_new_ess_session(row: dict, previous: Optional[dict]) -> bool:
+    if previous is None:
+        return False
+    if row.get("session_id") != previous.get("session_id"):
+        return True
+    if row.get("direction") != previous.get("direction"):
+        return True
+    epoch = row.get("observation_epoch")
+    previous_epoch = previous.get("observation_epoch")
+    if epoch is not None and previous_epoch is not None:
+        gap = int(epoch) - int(previous_epoch)
+        return gap < 0 or gap > _ESS_MAX_CONTIGUOUS_GAP_SECONDS
+    return False
+
+
 def _split_effective_sample_sessions(rows: List[dict]) -> List[List[dict]]:
     """Split an edge stream at route/direction changes and material time gaps."""
-
     sessions: List[List[dict]] = []
     current: List[dict] = []
     previous: Optional[dict] = None
     for row in rows:
-        epoch = row.get("observation_epoch")
-        starts_new_session = False
-        if previous is not None:
-            previous_epoch = previous.get("observation_epoch")
-            if row.get("session_id") != previous.get("session_id"):
-                starts_new_session = True
-            elif row.get("direction") != previous.get("direction"):
-                starts_new_session = True
-            elif epoch is not None and previous_epoch is not None:
-                gap = int(epoch) - int(previous_epoch)
-                starts_new_session = (
-                    gap < 0 or gap > _ESS_MAX_CONTIGUOUS_GAP_SECONDS
-                )
-        if starts_new_session and current:
+        if _starts_new_ess_session(row, previous) and current:
             sessions.append(current)
             current = []
         current.append(row)

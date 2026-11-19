@@ -131,12 +131,32 @@ def _graph_components(
     return components
 
 
+def _average_row_metrics(rows: list[tuple[dict, int]], item: dict) -> None:
+    for key in ("observed_xyz", "adjusted_xyz", "residual_xyz"):
+        if all(row.get(key) is not None for row, _ in rows):
+            item[key] = tuple(
+                sum(direction * float(row[key][axis]) for row, direction in rows)
+                / len(rows)
+                for axis in range(3)
+            )
+    if all(row.get("standard_deviation_xyz") is not None for row, _ in rows):
+        item["standard_deviation_xyz"] = tuple(
+            sum(float(row["standard_deviation_xyz"][axis]) for row, _ in rows)
+            / len(rows)
+            for axis in range(3)
+        )
+    for key in ("velocity_up_std", "ratio"):
+        values = [float(row[key]) for row, _ in rows if row.get(key) is not None]
+        if values:
+            item[key] = sum(values) / len(values)
+    if item.get("observed_xyz") is not None:
+        item["observed_length"] = _vector_length(item["observed_xyz"])
+    if item.get("adjusted_xyz") is not None:
+        item["adjusted_length"] = _vector_length(item["adjusted_xyz"])
+
+
 def _aggregate_parallel_baselines(baselines: List[dict]) -> List[dict]:
-    """Collapse repeated/reverse report rows to one arithmetic mean per edge.
-
-    Solver input uses covariance-weighted aggregation in ``_build_cluster_result``.
-    """
-
+    """Collapse repeated/reverse report rows to one arithmetic mean per edge."""
     groups: Dict[tuple[str, str], list[tuple[dict, int]]] = {}
     for baseline in baselines:
         key, _, direction = _canonical_baseline(
@@ -149,27 +169,7 @@ def _aggregate_parallel_baselines(baselines: List[dict]) -> List[dict]:
         item = dict(rows[0][0])
         item["from"], item["to"] = start, end
         item["observation_count"] = len(rows)
-        for key in ("observed_xyz", "adjusted_xyz", "residual_xyz"):
-            if all(row.get(key) is not None for row, _ in rows):
-                item[key] = tuple(
-                    sum(direction * float(row[key][axis]) for row, direction in rows)
-                    / len(rows)
-                    for axis in range(3)
-                )
-        if all(row.get("standard_deviation_xyz") is not None for row, _ in rows):
-            item["standard_deviation_xyz"] = tuple(
-                sum(float(row["standard_deviation_xyz"][axis]) for row, _ in rows)
-                / len(rows)
-                for axis in range(3)
-            )
-        for key in ("velocity_up_std", "ratio"):
-            values = [float(row[key]) for row, _ in rows if row.get(key) is not None]
-            if values:
-                item[key] = sum(values) / len(values)
-        if item.get("observed_xyz") is not None:
-            item["observed_length"] = _vector_length(item["observed_xyz"])
-        if item.get("adjusted_xyz") is not None:
-            item["adjusted_length"] = _vector_length(item["adjusted_xyz"])
+        _average_row_metrics(rows, item)
         averaged.append(item)
     return averaged
 
@@ -185,20 +185,66 @@ def _sum_cycle_vectors(
     return total[0], total[1], total[2]
 
 
+def _find_tree_path(
+    tree: Dict[str, List[tuple[str, int, int]]], start: str, end: str
+) -> tuple[List[str], List[tuple[int, int]]]:
+    pending = [(end, [end], [])]
+    visited = set()
+    while pending:
+        node, points, steps = pending.pop()
+        if node == start:
+            return points, steps
+        if node in visited:
+            continue
+        visited.add(node)
+        for neighbor, edge_index, direction in reversed(tree.get(node, [])):
+            if neighbor not in visited:
+                pending.append((neighbor, points + [neighbor], steps + [(edge_index, direction)]))
+    return [], []
+
+
+def _build_single_loop(
+    loop_number: int,
+    chord_index: int,
+    start: str,
+    end: str,
+    path_points: List[str],
+    path_steps: List[tuple[int, int]],
+    baselines: List[dict],
+) -> dict | None:
+    cycle_steps = [(chord_index, 1)] + path_steps
+    cycle_points = [start, end] + path_points[1:]
+    if len(set(cycle_points)) < 3:
+        return None
+
+    observed = _sum_cycle_vectors(cycle_steps, baselines, "observed_xyz")
+    adjusted = _sum_cycle_vectors(cycle_steps, baselines, "adjusted_xyz")
+    total_length = sum(
+        float(baselines[index]["observed_length"]) for index, _ in cycle_steps
+    )
+    observed_closure = _vector_length(observed)
+    adjusted_closure = _vector_length(adjusted)
+    return {
+        "loop": loop_number,
+        "points": cycle_points,
+        "baseline_indices": [index for index, _ in cycle_steps],
+        "baseline_directions": [direction for _, direction in cycle_steps],
+        "observed_misclosure_xyz": observed,
+        "observed_closure": observed_closure,
+        "adjusted_misclosure_xyz": adjusted,
+        "adjusted_closure": adjusted_closure,
+        "total_length": total_length,
+        "observed_relative_precision": (
+            total_length / observed_closure if observed_closure > 1e-15 else None
+        ),
+        "adjusted_relative_precision": (
+            total_length / adjusted_closure if adjusted_closure > 1e-15 else None
+        ),
+    }
+
+
 def _build_fundamental_loops(baselines: List[dict]) -> List[dict]:
-    """Find a deterministic independent cycle basis for a baseline multigraph.
-
-    This is report-only graph post-processing. Each non-tree edge closes one
-    fundamental loop. Callers must aggregate repeated observations first, so a
-    loop always contains distinct geometric edges (at least three points).
-
-    Build the spanning forest from rover-to-rover edges first.  A BASE-star is
-    a valid basis algebraically, but it makes every reported loop pass through
-    BASE and hides the directly observed rover-only closures.  BASE edges are
-    therefore added only where needed to anchor otherwise disconnected rover
-    components.  Original baseline indices are preserved in the report.
-    """
-
+    """Find a deterministic independent cycle basis for a baseline multigraph."""
     parent: Dict[str, str] = {}
     tree: Dict[str, List[tuple[str, int, int]]] = {}
     chords: List[int] = []
@@ -234,55 +280,13 @@ def _build_fundamental_loops(baselines: List[dict]) -> List[dict]:
     for loop_number, chord_index in enumerate(chords, start=1):
         chord = baselines[chord_index]
         start, end = str(chord["from"]), str(chord["to"])
-        # Close the chord start->end by finding the unique tree path end->start.
-        pending = [(end, [end], [])]
-        visited = set()
-        path_points: List[str] = []
-        path_steps: List[tuple[int, int]] = []
-        while pending:
-            node, points, steps = pending.pop()
-            if node == start:
-                path_points, path_steps = points, steps
-                break
-            if node in visited:
-                continue
-            visited.add(node)
-            for neighbor, edge_index, direction in reversed(tree.get(node, [])):
-                if neighbor not in visited:
-                    pending.append(
-                        (neighbor, points + [neighbor], steps + [(edge_index, direction)])
-                    )
+        path_points, path_steps = _find_tree_path(tree, start, end)
         if not path_points:
             continue
-
-        cycle_steps = [(chord_index, 1)] + path_steps
-        cycle_points = [start, end] + path_points[1:]
-        if len(set(cycle_points)) < 3:
-            # Repeated measurements of the same edge are not a geometric loop.
-            continue
-        observed = _sum_cycle_vectors(cycle_steps, baselines, "observed_xyz")
-        adjusted = _sum_cycle_vectors(cycle_steps, baselines, "adjusted_xyz")
-        total_length = sum(
-            float(baselines[index]["observed_length"]) for index, _ in cycle_steps
+        loop_item = _build_single_loop(
+            loop_number, chord_index, start, end, path_points, path_steps, baselines
         )
-        observed_closure = _vector_length(observed)
-        adjusted_closure = _vector_length(adjusted)
-        loops.append({
-            "loop": loop_number,
-            "points": cycle_points,
-            "baseline_indices": [index for index, _ in cycle_steps],
-            "baseline_directions": [direction for _, direction in cycle_steps],
-            "observed_misclosure_xyz": observed,
-            "observed_closure": observed_closure,
-            "adjusted_misclosure_xyz": adjusted,
-            "adjusted_closure": adjusted_closure,
-            "total_length": total_length,
-            "observed_relative_precision": (
-                total_length / observed_closure if observed_closure > 1e-15 else None
-            ),
-            "adjusted_relative_precision": (
-                total_length / adjusted_closure if adjusted_closure > 1e-15 else None
-            ),
-        })
+        if loop_item is not None:
+            loops.append(loop_item)
     return loops
 

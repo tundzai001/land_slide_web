@@ -251,6 +251,36 @@ class RoundRobinAicasterMixin:
             f"(error {expected_error:.2f} m; fixed-BASE error={fixed_error:.2f} m)"
         )
 
+    def _check_fixed_base_length_handover(
+        self, observation: Any, expected: tuple, cluster: dict
+    ) -> tuple[bool, str]:
+        if not (cluster.get("require_fixed_base_length_check")):
+            return True, ""
+        rover_llh = getattr(observation, "rover_llh", None)
+        baseline_neu = getattr(observation, "baseline_neu", None)
+        if not _is_usable_llh(rover_llh) or not baseline_neu:
+            return False, (
+                f"rejected {observation.rover_name}: fixed-base identity matched, "
+                "but rover_llh or baseline_neu is unavailable for the mandatory "
+                "baseline-length handover check"
+            )
+        estimated_length = _llh_horizontal_distance_m(expected, rover_llh)
+        measured_length = math.hypot(float(baseline_neu[0]), float(baseline_neu[1]))
+        length_error = abs(estimated_length - measured_length)
+        if length_error > self.FIXED_BASE_LENGTH_TOLERANCE_M:
+            return False, (
+                f"rejected {observation.rover_name}: base coordinate matches BASE, "
+                f"but baseline horizontal length is {measured_length:.1f} m while "
+                f"selected-base geometry estimates {estimated_length:.1f} m "
+                f"(error {length_error:.2f} m, limit "
+                f"{self.FIXED_BASE_LENGTH_TOLERANCE_M:.1f} m); rover is probably still "
+                "using the previous RTCM source"
+            )
+        return True, (
+            f", baseline length {measured_length:.1f}/{estimated_length:.1f} m "
+            f"(error {length_error:.2f} m)"
+        )
+
     def _verify_usable_base_llh(
         self, cluster: dict, active_base: str, observation: Any, reported: tuple, expected: tuple
     ) -> tuple[bool, str]:
@@ -277,31 +307,12 @@ class RoundRobinAicasterMixin:
             )
 
         geometry_diagnostic = ""
-        if active_base == "BASE" and cluster.get("require_fixed_base_length_check"):
-            rover_llh = getattr(observation, "rover_llh", None)
-            baseline_neu = getattr(observation, "baseline_neu", None)
-            if not _is_usable_llh(rover_llh) or not baseline_neu:
-                return False, (
-                    f"rejected {observation.rover_name}: fixed-base identity matched, "
-                    "but rover_llh or baseline_neu is unavailable for the mandatory "
-                    "baseline-length handover check"
-                )
-            estimated_length = _llh_horizontal_distance_m(expected, rover_llh)
-            measured_length = math.hypot(float(baseline_neu[0]), float(baseline_neu[1]))
-            length_error = abs(estimated_length - measured_length)
-            if length_error > self.FIXED_BASE_LENGTH_TOLERANCE_M:
-                return False, (
-                    f"rejected {observation.rover_name}: base coordinate matches {active_base}, "
-                    f"but baseline horizontal length is {measured_length:.1f} m while "
-                    f"selected-base geometry estimates {estimated_length:.1f} m "
-                    f"(error {length_error:.2f} m, limit "
-                    f"{self.FIXED_BASE_LENGTH_TOLERANCE_M:.1f} m); rover is probably still "
-                    "using the previous RTCM source"
-                )
-            geometry_diagnostic = (
-                f", baseline length {measured_length:.1f}/{estimated_length:.1f} m "
-                f"(error {length_error:.2f} m)"
-            )
+        if active_base == "BASE":
+            ok, diag = self._check_fixed_base_length_handover(observation, expected, cluster)
+            if not ok:
+                return False, diag
+            geometry_diagnostic = diag
+
         return True, (
             f"verified base {active_base} (horizontal delta {separation:.2f} m, "
             f"height delta {height_delta:.2f} m{geometry_diagnostic})"
