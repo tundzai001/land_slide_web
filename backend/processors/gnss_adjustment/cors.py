@@ -167,6 +167,21 @@ class RoundRobinCorsMixin:
         return str(parsed.hostname or raw).strip().lower().rstrip(".")
 
 
+    def _check_sid_match(
+        self, cfg: dict, sid: int, target: str, target_host: str, target_server_id: Optional[int]
+    ) -> bool:
+        if target_server_id is not None and sid != target_server_id:
+            return False
+        candidate = str(cfg.get(f"mountpoint{sid}") or "").strip().casefold()
+        if not candidate or candidate != target:
+            return False
+        if not target_host:
+            return True
+        candidate_host = self._normalize_stream_host(
+            cfg.get(f"serverhost{sid}") or cfg.get(f"server{sid}_host")
+        )
+        return candidate_host == target_host
+
     def _match_cors_station_servers(
         self, station: dict, target: str, target_host: str, target_serial: str, target_server_id: Optional[int]
     ) -> list[tuple[str, int, dict]]:
@@ -178,17 +193,11 @@ class RoundRobinCorsMixin:
         station_serial = str(station.get("serial") or "").strip()
         if target_serial and station_serial.casefold() != target_serial:
             return []
-        matches = []
-        for sid in (1, 2):
-            if target_server_id is not None and sid != target_server_id:
-                continue
-            candidate = str(cfg.get(f"mountpoint{sid}") or "").strip().casefold()
-            candidate_host = self._normalize_stream_host(
-                cfg.get(f"serverhost{sid}") or cfg.get(f"server{sid}_host")
-            )
-            if candidate and candidate == target and (not target_host or candidate_host == target_host):
-                matches.append((station_serial, sid, cfg))
-        return matches
+        return [
+            (station_serial, sid, cfg)
+            for sid in (1, 2)
+            if self._check_sid_match(cfg, sid, target, target_host, target_server_id)
+        ]
 
     def _find_cors_station_sync(
         self,
@@ -264,81 +273,77 @@ class RoundRobinCorsMixin:
                 selected_server_id, all_streams,
             )
 
-    async def _set_cors_fixed_base_enabled_unlocked(
-        self, mountpoint, enabled, selected_host, selected_serial,
-        selected_server_id, all_streams,
-    ) -> None:
-        if not mountpoint:
-            return
-        snapshot_key = (
-            self._normalize_stream_host(selected_host),
-            str(mountpoint).strip().casefold(),
-            str(selected_serial or "").strip().casefold(),
-            int(selected_server_id) if selected_server_id not in (None, "") else 0,
+    async def _fetch_or_create_fixed_base_snapshot(
+        self, snapshot_key: tuple, mountpoint: str, selected_host: str,
+        selected_serial: str, selected_server_id: Any, all_streams: bool
+    ) -> tuple[dict, str, int, dict]:
+        snapshot = self._cors_fixed_base_snapshots.get(snapshot_key)
+        if snapshot:
+            return snapshot, snapshot["serial"], snapshot["server_id"], copy.deepcopy(snapshot["service_config"])
+        serial, server_id, original = await asyncio.to_thread(
+            self._find_cors_station_sync,
+            mountpoint,
+            selected_host,
+            selected_serial,
+            selected_server_id,
         )
-        if not enabled:
-            snapshot = self._cors_fixed_base_snapshots.get(snapshot_key)
-            if snapshot and snapshot["confirmed_disabled"]:
-                return
-            if snapshot:
-                serial = snapshot["serial"]
-                server_id = snapshot["server_id"]
-                original = copy.deepcopy(snapshot["service_config"])
-            else:
-                serial, server_id, original = await asyncio.to_thread(
-                    self._find_cors_station_sync,
-                    mountpoint,
-                    selected_host,
-                    selected_serial,
-                    selected_server_id,
-                )
-                # A peer may already have disabled S1 when this job snapshots S2.
-                # Retain the original flags so the final release restores both.
-                peers = [peer for peer in self._cors_fixed_base_snapshots.values()
-                         if peer["serial"].casefold() == serial.casefold()]
-                for peer in peers:
-                    for sid in peer["disabled_server_ids"]:
-                        flag = f"server{sid}_enabled"
-                        if flag in peer["service_config"]:
-                            original[flag] = peer["service_config"][flag]
-                        else:
-                            original.pop(flag, None)
-                disabled_server_ids = (1, 2) if all_streams else (server_id,)
-                snapshot = {
-                    "serial": serial,
-                    "server_id": server_id,
-                    "service_config": copy.deepcopy(original),
-                    "disabled_server_ids": disabled_server_ids,
-                    "confirmed_disabled": False,
-                }
-                self._cors_fixed_base_snapshots[snapshot_key] = snapshot
-            peers = [peer for key, peer in self._cors_fixed_base_snapshots.items()
-                     if key != snapshot_key and peer["serial"].casefold() == serial.casefold()]
-            disabled_config = self._cors_service_config_with_server_enabled(
-                original,
-                None if all_streams else server_id,
-                enabled=False,
-            )
-            for peer in peers:
-                for sid in peer["disabled_server_ids"]:
-                    disabled_config[f"server{sid}_enabled"] = False
-            await asyncio.to_thread(
-                self._cors_configure_service_sync,
-                serial,
-                disabled_config,
-            )
-            # The API confirms dispatch, not device application. SOURCE startup
-            # must still prove the selected caster has released the mountpoint.
-            snapshot["confirmed_disabled"] = True
-            logger.info(
-                "WEB CORS configure-service sent fixed-base disable request %s host=%s serial=%s S%s; awaiting SOURCE mountpoint release",
-                mountpoint,
-                selected_host,
-                serial,
-                server_id,
-            )
-            return
+        peers = [peer for peer in self._cors_fixed_base_snapshots.values()
+                 if peer["serial"].casefold() == serial.casefold()]
+        for peer in peers:
+            for sid in peer["disabled_server_ids"]:
+                flag = f"server{sid}_enabled"
+                if flag in peer["service_config"]:
+                    original[flag] = peer["service_config"][flag]
+                else:
+                    original.pop(flag, None)
+        disabled_server_ids = (1, 2) if all_streams else (server_id,)
+        snapshot = {
+            "serial": serial,
+            "server_id": server_id,
+            "service_config": copy.deepcopy(original),
+            "disabled_server_ids": disabled_server_ids,
+            "confirmed_disabled": False,
+        }
+        self._cors_fixed_base_snapshots[snapshot_key] = snapshot
+        return snapshot, serial, server_id, original
 
+    async def _disable_cors_fixed_base_unlocked(
+        self, snapshot_key: tuple, mountpoint: str, selected_host: str,
+        selected_serial: str, selected_server_id: Any, all_streams: bool
+    ) -> None:
+        snapshot = self._cors_fixed_base_snapshots.get(snapshot_key)
+        if snapshot and snapshot["confirmed_disabled"]:
+            return
+        snapshot, serial, server_id, original = await self._fetch_or_create_fixed_base_snapshot(
+            snapshot_key, mountpoint, selected_host, selected_serial, selected_server_id, all_streams
+        )
+        peers = [peer for key, peer in self._cors_fixed_base_snapshots.items()
+                 if key != snapshot_key and peer["serial"].casefold() == serial.casefold()]
+        disabled_config = self._cors_service_config_with_server_enabled(
+            original,
+            None if all_streams else server_id,
+            enabled=False,
+        )
+        for peer in peers:
+            for sid in peer["disabled_server_ids"]:
+                disabled_config[f"server{sid}_enabled"] = False
+        await asyncio.to_thread(
+            self._cors_configure_service_sync,
+            serial,
+            disabled_config,
+        )
+        snapshot["confirmed_disabled"] = True
+        logger.info(
+            "WEB CORS configure-service sent fixed-base disable request %s host=%s serial=%s S%s; awaiting SOURCE mountpoint release",
+            mountpoint,
+            selected_host,
+            serial,
+            server_id,
+        )
+
+    async def _restore_cors_fixed_base_unlocked(
+        self, snapshot_key: tuple, mountpoint: str, selected_host: str
+    ) -> None:
         snapshot = self._cors_fixed_base_snapshots.get(snapshot_key)
         if snapshot is None:
             logger.warning(
@@ -365,6 +370,25 @@ class RoundRobinCorsMixin:
             snapshot["serial"],
             snapshot["server_id"],
         )
+
+    async def _set_cors_fixed_base_enabled_unlocked(
+        self, mountpoint, enabled, selected_host, selected_serial,
+        selected_server_id, all_streams,
+    ) -> None:
+        if not mountpoint:
+            return
+        snapshot_key = (
+            self._normalize_stream_host(selected_host),
+            str(mountpoint).strip().casefold(),
+            str(selected_serial or "").strip().casefold(),
+            int(selected_server_id) if selected_server_id not in (None, "") else 0,
+        )
+        if not enabled:
+            await self._disable_cors_fixed_base_unlocked(
+                snapshot_key, mountpoint, selected_host, selected_serial, selected_server_id, all_streams
+            )
+        else:
+            await self._restore_cors_fixed_base_unlocked(snapshot_key, mountpoint, selected_host)
 
 
     @staticmethod
@@ -474,6 +498,16 @@ class RoundRobinCorsMixin:
             matches.append((station, candidate_server_id))
         return matches
 
+    @staticmethod
+    def _is_target_station_candidate(station: dict, target_serial: str, target_name: str) -> bool:
+        candidate_serial = str(station.get("serial") or "").strip().casefold()
+        candidate_name = str(station.get("name") or station.get("code") or "").strip().casefold()
+        if target_serial:
+            return candidate_serial == target_serial
+        if target_name:
+            return candidate_name == target_name
+        return True
+
     def _cors_failover_stream(
         self,
         stations: list[dict],
@@ -496,20 +530,172 @@ class RoundRobinCorsMixin:
         for station in stations:
             if not isinstance(station, dict):
                 continue
-            candidate_serial = str(station.get("serial") or "").strip().casefold()
-            candidate_name = str(
-                station.get("name") or station.get("code") or ""
-            ).strip().casefold()
-            if target_serial:
-                if candidate_serial != target_serial:
-                    continue
-            elif target_name and candidate_name != target_name:
+            if not self._is_target_station_candidate(station, target_serial, target_name):
                 continue
             matches.extend(self._match_station_candidate_servers(
                 station, target_server_id, target_host, target_mountpoint
             ))
         return matches[0] if len(matches) == 1 else None
 
+
+    async def _activate_backup_cors_stream(
+        self, cluster: dict, backup_station: dict, backup_serial: str, backup_server_id: int, primary_mp: str
+    ) -> bool:
+        backup_config = self._cors_effective_service_config(backup_station)
+        if not self._cors_server_enabled(backup_config, backup_server_id):
+            enabled_config = self._cors_service_config_with_server_enabled(
+                backup_config, backup_server_id, enabled=True
+            )
+            await asyncio.to_thread(self._cors_configure_service_sync, backup_serial, enabled_config)
+            backup_station["service_config"] = enabled_config
+            logger.warning(
+                "CORS automatic failover: %s offline; enabled %s/S%s -> %s",
+                cluster.get("base_station"),
+                cluster.get("backup_base_station"),
+                backup_server_id,
+                primary_mp,
+            )
+            return True
+        return False
+
+    async def _activate_primary_cors_stream(
+        self, cluster: dict, primary_station: dict, primary_serial: str, primary_server_id: int,
+        backup_station: dict, backup_serial: str, backup_server_id: int, primary_mp: str
+    ) -> bool:
+        changed = False
+        backup_config = self._cors_effective_service_config(backup_station)
+        if self._cors_server_enabled(backup_config, backup_server_id):
+            disabled_config = self._cors_service_config_with_server_enabled(
+                backup_config, backup_server_id, enabled=False
+            )
+            await asyncio.to_thread(self._cors_configure_service_sync, backup_serial, disabled_config)
+            backup_station["service_config"] = disabled_config
+            changed = True
+        primary_config = self._cors_effective_service_config(primary_station)
+        if not self._cors_server_enabled(primary_config, primary_server_id):
+            enabled_config = self._cors_service_config_with_server_enabled(
+                primary_config, primary_server_id, enabled=True
+            )
+            await asyncio.to_thread(self._cors_configure_service_sync, primary_serial, enabled_config)
+            primary_station["service_config"] = enabled_config
+            changed = True
+            logger.info(
+                "CORS automatic failback: restored %s/S%s -> %s and stopped %s/S%s",
+                cluster.get("base_station"),
+                primary_server_id,
+                primary_mp,
+                cluster.get("backup_base_station"),
+                backup_server_id,
+            )
+        return changed
+
+    def _resolve_and_validate_streams(
+        self, cluster: dict, stations: list[dict]
+    ) -> tuple[Optional[dict], Optional[tuple]]:
+        primary = self._cors_failover_stream(
+            stations,
+            station_name=cluster.get("base_station"),
+            serial=cluster.get("base_serial"),
+            server_id=cluster.get("base_server_id"),
+            host=cluster.get("base_stream_host"),
+            mountpoint=cluster.get("base_stream_mp"),
+        )
+        backup = self._cors_failover_stream(
+            stations,
+            station_name=cluster.get("backup_base_station"),
+            serial=cluster.get("backup_base_serial"),
+            server_id=cluster.get("backup_base_server_id"),
+            host=cluster.get("backup_base_stream_host"),
+            mountpoint=cluster.get("backup_base_stream_mp"),
+        )
+        name = str(cluster.get("name") or "GNSS cluster")
+        if primary is None or backup is None:
+            return {"cluster": name, "state": "INVALID_STREAM_IDENTITY"}, None
+
+        primary_station, primary_server_id = primary
+        backup_station, backup_server_id = backup
+        primary_serial = str(primary_station.get("serial") or "").strip()
+        backup_serial = str(backup_station.get("serial") or "").strip()
+        primary_mp = str(cluster.get("base_stream_mp") or "").strip()
+        backup_mp = str(cluster.get("backup_base_stream_mp") or "").strip()
+        if not primary_mp or primary_mp.casefold() != backup_mp.casefold():
+            return {"cluster": name, "state": "MOUNTPOINT_MISMATCH"}, None
+        if (
+            self._cors_stream_is_managed_by_adjustment(primary_serial, primary_server_id)
+            or self._cors_stream_is_managed_by_adjustment(backup_serial, backup_server_id)
+        ):
+            return {"cluster": name, "state": "PAUSED_FOR_ADJUSTMENT"}, None
+
+        resolved = (
+            name, primary_station, primary_serial, primary_server_id,
+            backup_station, backup_serial, backup_server_id, primary_mp
+        )
+        return None, resolved
+
+    async def _reconcile_single_cors_cluster(self, cluster: dict, stations: list[dict]) -> dict | None:
+        if not isinstance(cluster, dict) or not cluster.get("backup_base_station"):
+            return None
+        early_res, resolved = self._resolve_and_validate_streams(cluster, stations)
+        if early_res is not None:
+            return early_res
+
+        (
+            name, primary_station, primary_serial, primary_server_id,
+            backup_station, backup_serial, backup_server_id, primary_mp
+        ) = resolved
+
+        primary_online = self._cors_station_is_online(primary_station)
+        backup_online = self._cors_station_is_online(backup_station)
+        pair_key = (
+            primary_serial.casefold(),
+            primary_server_id,
+            backup_serial.casefold(),
+            backup_server_id,
+            primary_mp.casefold(),
+        )
+
+        configuration_changed = False
+        change_started_at = time.time()
+        previous_state = self._cors_failover_last_state.get(pair_key)
+
+        if not primary_online and not backup_online:
+            desired_state = "NO_SOURCE_BOTH_OFFLINE"
+            self._cors_failover_last_state[pair_key] = desired_state
+            return {"cluster": name, "state": desired_state}
+
+        if not primary_online:
+            desired_state = "BACKUP_ACTIVE"
+            configuration_changed = await self._activate_backup_cors_stream(
+                cluster, backup_station, backup_serial, backup_server_id, primary_mp
+            )
+        else:
+            desired_state = "PRIMARY_ACTIVE"
+            configuration_changed = await self._activate_primary_cors_stream(
+                cluster, primary_station, primary_serial, primary_server_id,
+                backup_station, backup_serial, backup_server_id, primary_mp
+            )
+
+        self._cors_failover_last_state[pair_key] = desired_state
+        if (self.reference_change_callback and configuration_changed
+                and previous_state != desired_state):
+            result = self.reference_change_callback(
+                cluster, change_started_at, f"cors_failover:{desired_state}",
+            )
+            if inspect.isawaitable(result):
+                await result
+        return {
+            "cluster": name,
+            "state": desired_state,
+            "primary_online": primary_online,
+            "backup_online": backup_online,
+            "mountpoint": primary_mp,
+            "primary_station": str(cluster.get("base_station") or ""),
+            "primary_serial": primary_serial,
+            "primary_server_id": primary_server_id,
+            "backup_station": str(cluster.get("backup_base_station") or ""),
+            "backup_serial": backup_serial,
+            "backup_server_id": backup_server_id,
+        }
 
     async def reconcile_cors_failover_pairs(
         self,
@@ -523,21 +709,13 @@ class RoundRobinCorsMixin:
                 stations=stations,
             )
 
-
     async def _reconcile_cors_failover_pairs_unlocked(
         self,
         clusters: list[dict],
         *,
         stations: Optional[list[dict]] = None,
     ) -> list[dict]:
-        """Keep each primary S1 / cross-station backup S2 pair mutually exclusive.
-
-        Example: SinQuyen1/S1 normally owns mountpoint SinQuyen1.  If its
-        receiver is offline, SinQuyen2/S2 is hard-enabled and feeds that same
-        mountpoint. Once SinQuyen1 is online again,
-        the backup is stopped before S1 is restored.
-        """
-
+        """Keep each primary S1 / cross-station backup S2 pair mutually exclusive."""
         if stations is None:
             stations = await asyncio.to_thread(
                 self._cors_api_request_sync,
@@ -549,148 +727,7 @@ class RoundRobinCorsMixin:
         stations = [item for item in (stations or []) if isinstance(item, dict)]
         outcomes: list[dict] = []
         for cluster in clusters or []:
-            if not isinstance(cluster, dict) or not cluster.get("backup_base_station"):
-                continue
-            primary = self._cors_failover_stream(
-                stations,
-                station_name=cluster.get("base_station"),
-                serial=cluster.get("base_serial"),
-                server_id=cluster.get("base_server_id"),
-                host=cluster.get("base_stream_host"),
-                mountpoint=cluster.get("base_stream_mp"),
-            )
-            backup = self._cors_failover_stream(
-                stations,
-                station_name=cluster.get("backup_base_station"),
-                serial=cluster.get("backup_base_serial"),
-                server_id=cluster.get("backup_base_server_id"),
-                host=cluster.get("backup_base_stream_host"),
-                mountpoint=cluster.get("backup_base_stream_mp"),
-            )
-            name = str(cluster.get("name") or "GNSS cluster")
-            if primary is None or backup is None:
-                outcomes.append({"cluster": name, "state": "INVALID_STREAM_IDENTITY"})
-                continue
-            primary_station, primary_server_id = primary
-            backup_station, backup_server_id = backup
-            primary_serial = str(primary_station.get("serial") or "").strip()
-            backup_serial = str(backup_station.get("serial") or "").strip()
-            primary_mp = str(cluster.get("base_stream_mp") or "").strip()
-            backup_mp = str(cluster.get("backup_base_stream_mp") or "").strip()
-            if not primary_mp or primary_mp.casefold() != backup_mp.casefold():
-                outcomes.append({"cluster": name, "state": "MOUNTPOINT_MISMATCH"})
-                continue
-            if (
-                self._cors_stream_is_managed_by_adjustment(primary_serial, primary_server_id)
-                or self._cors_stream_is_managed_by_adjustment(backup_serial, backup_server_id)
-            ):
-                outcomes.append({"cluster": name, "state": "PAUSED_FOR_ADJUSTMENT"})
-                continue
-
-            primary_online = self._cors_station_is_online(primary_station)
-            backup_online = self._cors_station_is_online(backup_station)
-            pair_key = (
-                primary_serial.casefold(),
-                primary_server_id,
-                backup_serial.casefold(),
-                backup_server_id,
-                primary_mp.casefold(),
-            )
-            previous_state = self._cors_failover_last_state.get(pair_key)
-            change_started_at = time.time()
-            configuration_changed = False
-
-            if not primary_online and not backup_online:
-                desired_state = "NO_SOURCE_BOTH_OFFLINE"
-                self._cors_failover_last_state[pair_key] = desired_state
-                outcomes.append({"cluster": name, "state": desired_state})
-                continue
-
-            if not primary_online:
-                desired_state = "BACKUP_ACTIVE"
-                backup_config = self._cors_effective_service_config(backup_station)
-                if not self._cors_server_enabled(backup_config, backup_server_id):
-                    enabled_config = self._cors_service_config_with_server_enabled(
-                        backup_config,
-                        backup_server_id,
-                        enabled=True,
-                    )
-                    await asyncio.to_thread(
-                        self._cors_configure_service_sync,
-                        backup_serial,
-                        enabled_config,
-                    )
-                    backup_station["service_config"] = enabled_config
-                    configuration_changed = True
-                    logger.warning(
-                        "CORS automatic failover: %s offline; enabled %s/S%s -> %s",
-                        cluster.get("base_station"),
-                        cluster.get("backup_base_station"),
-                        backup_server_id,
-                        primary_mp,
-                    )
-            else:
-                desired_state = "PRIMARY_ACTIVE"
-                # Break-before-make on failback: never leave S1 and backup S2
-                # publishing the same mountpoint concurrently.
-                backup_config = self._cors_effective_service_config(backup_station)
-                if self._cors_server_enabled(backup_config, backup_server_id):
-                    disabled_config = self._cors_service_config_with_server_enabled(
-                        backup_config,
-                        backup_server_id,
-                        enabled=False,
-                    )
-                    await asyncio.to_thread(
-                        self._cors_configure_service_sync,
-                        backup_serial,
-                        disabled_config,
-                    )
-                    backup_station["service_config"] = disabled_config
-                    configuration_changed = True
-                primary_config = self._cors_effective_service_config(primary_station)
-                if not self._cors_server_enabled(primary_config, primary_server_id):
-                    enabled_config = self._cors_service_config_with_server_enabled(
-                        primary_config,
-                        primary_server_id,
-                        enabled=True,
-                    )
-                    await asyncio.to_thread(
-                        self._cors_configure_service_sync,
-                        primary_serial,
-                        enabled_config,
-                    )
-                    primary_station["service_config"] = enabled_config
-                    configuration_changed = True
-                    logger.info(
-                        "CORS automatic failback: restored %s/S%s -> %s and stopped %s/S%s",
-                        cluster.get("base_station"),
-                        primary_server_id,
-                        primary_mp,
-                        cluster.get("backup_base_station"),
-                        backup_server_id,
-                    )
-
-            self._cors_failover_last_state[pair_key] = desired_state
-            if (self.reference_change_callback and configuration_changed
-                    and previous_state != desired_state):
-                # Publish only after every required control operation succeeded.
-                # Repeated writes from a stale CORS map are not new handovers.
-                result = self.reference_change_callback(
-                    cluster, change_started_at, f"cors_failover:{desired_state}",
-                )
-                if inspect.isawaitable(result):
-                    await result
-            outcomes.append({
-                "cluster": name,
-                "state": desired_state,
-                "primary_online": primary_online,
-                "backup_online": backup_online,
-                "mountpoint": primary_mp,
-                "primary_station": str(cluster.get("base_station") or ""),
-                "primary_serial": primary_serial,
-                "primary_server_id": primary_server_id,
-                "backup_station": str(cluster.get("backup_base_station") or ""),
-                "backup_serial": backup_serial,
-                "backup_server_id": backup_server_id,
-            })
+            outcome = await self._reconcile_single_cors_cluster(cluster, stations)
+            if outcome is not None:
+                outcomes.append(outcome)
         return outcomes
