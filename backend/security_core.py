@@ -85,78 +85,88 @@ def check_waf_granular(payload: str):
         return "LFI"
     return None
 
+# --- Middleware Helpers ---
+def _track_request_metrics(client_ip: str, url_path: str, now: float) -> None:
+    security_state.total_requests += 1
+    if url_path.startswith("/api/data") or "/pi-" in url_path.lower():
+        security_state.pi_requests += 1
+        return
+
+    security_state.client_requests += 1
+    if "/api/" in url_path and not url_path.endswith("/heartbeat") and client_ip not in security_state.whitelisted_ips:
+        if now % 2 < 0.5:
+            async_add_threat_map(client_ip, "NORMAL")
+
+def _check_ip_ban(client_ip: str, now: float) -> JSONResponse | None:
+    if client_ip not in security_state.blocked_ips:
+        return None
+    if now > security_state.blocked_ips[client_ip]:
+        del security_state.blocked_ips[client_ip]
+        security_state.add_event("UNBAN", client_ip, "Ban duration expired.")
+        return None
+    security_state.blocked_requests += 1
+    return JSONResponse(status_code=403, content={"detail": "IP address is banned by Security Core."})
+
+def _check_rate_limit(client_ip: str, now: float) -> JSONResponse | None:
+    if client_ip not in security_state.ip_records:
+        security_state.ip_records[client_ip] = []
+    
+    records = [ts for ts in security_state.ip_records[client_ip] if now - ts < security_state.RATE_LIMIT_WINDOW]
+    records.append(now)
+    security_state.ip_records[client_ip] = records
+
+    if len(records) > security_state.RATE_LIMIT_MAX_REQUESTS:
+        security_state.blocked_ips[client_ip] = now + security_state.BLOCK_DURATION
+        logger.warning(f"[Anti-DDoS] Auto-banning IP {client_ip} for high traffic.")
+        security_state.blocked_requests += 1
+        security_state.add_event("DDOS", client_ip, f"Triggered rate limit > {security_state.RATE_LIMIT_MAX_REQUESTS} req/s")
+        return JSONResponse(status_code=429, content={"detail": "Too many requests. You have been temporarily blocked."})
+    return None
+
+def _record_waf_block(threat_type: str, client_ip: str, now: float) -> JSONResponse:
+    security_state.blocked_ips[client_ip] = now + security_state.BLOCK_DURATION
+    logger.warning(f"[WAF] Malicious payload ({threat_type}) detected from {client_ip}. IP banned.")
+    security_state.waf_blocks += 1
+    if threat_type == "SQLI":
+        security_state.sqli_blocks += 1
+    elif threat_type == "XSS":
+        security_state.xss_blocks += 1
+    elif threat_type == "LFI":
+        security_state.lfi_blocks += 1
+    security_state.add_event("WAF", client_ip, f"Signature matched: {threat_type}")
+    return JSONResponse(status_code=403, content={"detail": "Malicious payload detected and blocked."})
+
+def _check_waf_threat(client_ip: str, request: Request, now: float) -> JSONResponse | None:
+    threat = check_waf_granular(str(request.url)) or check_waf_granular(str(request.headers))
+    if threat:
+        return _record_waf_block(threat, client_ip, now)
+    return None
+
 # --- Middleware ---
 class AdvancedSecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         client_ip = request.client.host if request.client else "unknown"
-        security_state.total_requests += 1
         now = time.time()
-
-        url_path = str(request.url.path)
-
-        # Distinguish Pi vs Client Traffic
-        if url_path.startswith("/api/data") or "/pi-" in url_path.lower():
-            security_state.pi_requests += 1
-        else:
-            security_state.client_requests += 1
-            if "/api/" in url_path and not url_path.endswith("/heartbeat") and client_ip not in security_state.whitelisted_ips:
-                # Log normal traffic on map randomly or sparsely to see traffic flow (throttle it so map doesn't lag)
-                if now % 2 < 0.5: # Simple throttle
-                    async_add_threat_map(client_ip, "NORMAL")
+        _track_request_metrics(client_ip, str(request.url.path), now)
 
         if client_ip in security_state.whitelisted_ips:
             return await call_next(request)
 
-        # 0. Panic Mode
         if security_state.panic_mode:
             security_state.blocked_requests += 1
             return JSONResponse(status_code=503, content={"detail": "Service Unavailable. System is under lockdown."})
 
-        # 1. Check if Blocked
-        if client_ip in security_state.blocked_ips:
-            if now > security_state.blocked_ips[client_ip]:
-                del security_state.blocked_ips[client_ip] # Unban
-                security_state.add_event("UNBAN", client_ip, "Ban duration expired.")
-            else:
-                security_state.blocked_requests += 1
-                return JSONResponse(status_code=403, content={"detail": "IP address is banned by Security Core."})
+        ban_resp = _check_ip_ban(client_ip, now)
+        if ban_resp:
+            return ban_resp
 
-        # 2. Rate Limiting (Token Bucket / Sliding Window Hybrid)
-        if client_ip not in security_state.ip_records:
-            security_state.ip_records[client_ip] = []
-        
-        # Prune old for this IP
-        security_state.ip_records[client_ip] = [ts for ts in security_state.ip_records[client_ip] if now - ts < security_state.RATE_LIMIT_WINDOW]
-        security_state.ip_records[client_ip].append(now)
+        rate_resp = _check_rate_limit(client_ip, now)
+        if rate_resp:
+            return rate_resp
 
-        if len(security_state.ip_records[client_ip]) > security_state.RATE_LIMIT_MAX_REQUESTS:
-            security_state.blocked_ips[client_ip] = now + security_state.BLOCK_DURATION
-            logger.warning(f"[Anti-DDoS] Auto-banning IP {client_ip} for high traffic.")
-            security_state.blocked_requests += 1
-            security_state.add_event("DDOS", client_ip, f"Triggered rate limit > {security_state.RATE_LIMIT_MAX_REQUESTS} req/s")
-            return JSONResponse(status_code=429, content={"detail": "Too many requests. You have been temporarily blocked."})
+        waf_resp = _check_waf_threat(client_ip, request, now)
+        if waf_resp:
+            return waf_resp
 
-        # 3. WAF (Headers and URL only to avoid consuming body)
-        full_url_str = str(request.url)
-        headers_str = str(request.headers)
-        
-        # Check payload and headers for malicious strings
-        threat_type_url = check_waf_granular(full_url_str)
-        threat_type_hdr = check_waf_granular(headers_str)
-        threat_type = threat_type_url or threat_type_hdr
-
-        if threat_type:
-            security_state.blocked_ips[client_ip] = now + security_state.BLOCK_DURATION
-            logger.warning(f"[WAF] Malicious payload ({threat_type}) detected from {client_ip}. IP banned.")
-            security_state.waf_blocks += 1
-            if threat_type == "SQLI": security_state.sqli_blocks += 1
-            elif threat_type == "XSS": security_state.xss_blocks += 1
-            elif threat_type == "LFI": security_state.lfi_blocks += 1
-            
-            security_state.add_event("WAF", client_ip, f"Signature matched: {threat_type}")
-            return JSONResponse(status_code=403, content={"detail": "Malicious payload detected and blocked."})
-
-        # Process Request
-        response = await call_next(request)
-        return response
+        return await call_next(request)
 

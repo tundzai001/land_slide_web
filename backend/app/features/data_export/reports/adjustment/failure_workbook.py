@@ -10,13 +10,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
 
-def _write_failure_workbook(path, payload: dict[str, Any]) -> None:
-    """Write a readable failure report, including captured raw GNSS evidence."""
-    context = payload.get("context") or {}
-    diagnostics = context.get("diagnostics") or {}
-    workbook = Workbook()
-
-    summary = workbook.active
+def _populate_failure_summary_sheet(summary, payload: dict[str, Any], context: dict[str, Any]) -> None:
     summary.title = "LOI_BINH_SAI"
     summary.append(["BÁO CÁO BÌNH SAI GNSS THẤT BẠI", None])
     summary.append([
@@ -56,56 +50,34 @@ def _write_failure_workbook(path, payload: dict[str, Any]) -> None:
         row[0].font = Font(bold=True)
         row[1].alignment = Alignment(wrap_text=True, vertical="top")
 
+
+def _populate_raw_gnss_sheet(workbook: Workbook, diagnostics: dict, context: dict) -> None:
     raw_sheet = workbook.create_sheet("RAW_GNSS")
     raw_headers = [
-        "epoch_ts",
-        "station_id",
-        "rover",
-        "position_type",
-        "base",
-        "solver_eligible",
-        "reason",
-        "raw_payload",
+        "epoch_ts", "station_id", "rover", "position_type",
+        "base", "solver_eligible", "reason", "raw_payload",
     ]
     raw_sheet.append(raw_headers)
     for item in diagnostics.get("raw_gnss") or context.get("raw_gnss") or []:
         raw_sheet.append([item.get(header) for header in raw_headers])
     if raw_sheet.max_row == 1:
-        raw_sheet.append([
-            None,
-            None,
-            None,
-            None,
-            None,
-            False,
-            "Không nhận được AGRICA trước khi lỗi",
-            None,
-        ])
+        raw_sheet.append([None, None, None, None, None, False, "Không nhận được AGRICA trước khi lỗi", None])
     raw_sheet.freeze_panes = "A2"
     raw_sheet.auto_filter.ref = raw_sheet.dimensions
     for cell in raw_sheet[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="087F5B")
-    for column, width in {
-        "A": 20,
-        "B": 14,
-        "C": 22,
-        "D": 16,
-        "E": 22,
-        "F": 18,
-        "G": 55,
-        "H": 100,
-    }.items():
+    widths = {"A": 20, "B": 14, "C": 22, "D": 16, "E": 22, "F": 18, "G": 55, "H": 100}
+    for column, width in widths.items():
         raw_sheet.column_dimensions[column].width = width
 
+
+def _populate_diagnostic_sheet(workbook: Workbook, diagnostics: dict) -> None:
     diagnostic_sheet = workbook.create_sheet("CHAN_DOAN")
     diagnostic_sheet.append(["Mục", "Giá trị"])
     for key, value in sorted(diagnostics.items()):
         if key != "raw_gnss":
-            diagnostic_sheet.append([
-                key,
-                json.dumps(value, ensure_ascii=False, default=str),
-            ])
+            diagnostic_sheet.append([key, json.dumps(value, ensure_ascii=False, default=str)])
     diagnostic_sheet.column_dimensions["A"].width = 30
     diagnostic_sheet.column_dimensions["B"].width = 110
     for cell in diagnostic_sheet[1]:
@@ -113,6 +85,21 @@ def _write_failure_workbook(path, payload: dict[str, Any]) -> None:
         cell.fill = PatternFill("solid", fgColor="344054")
     for row in diagnostic_sheet.iter_rows(min_row=2):
         row[1].alignment = Alignment(wrap_text=True, vertical="top")
+
+
+def _write_failure_workbook(path, payload: dict[str, Any]) -> None:
+    """Write a readable failure report, including captured raw GNSS evidence."""
+    context = payload.get("context") or {}
+    diagnostics = context.get("diagnostics") or {}
+    workbook = Workbook()
+
+    _populate_failure_summary_sheet(workbook.active, payload, context)
+    _populate_raw_gnss_sheet(workbook, diagnostics, context)
+    _populate_diagnostic_sheet(workbook, diagnostics)
+
+    if not hasattr(path, "write"):
+        raise TypeError("GNSS failure workbooks must be written to a download stream")
+    workbook.save(path)
 
     if not hasattr(path, "write"):
         raise TypeError("GNSS failure workbooks must be written to a download stream")

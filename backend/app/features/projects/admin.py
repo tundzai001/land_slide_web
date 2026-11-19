@@ -207,6 +207,41 @@ async def create_project(
         raise HTTPException(status_code=500, detail="Không thể tạo dự án.")
 
 
+async def _validate_and_update_project_code(db: AsyncSession, project: model_config.Project, project_id: int, project_data: dict) -> None:
+    if 'project_code' not in project_data:
+        return
+    project_code = str(project_data['project_code'] or '').strip()
+    if not project_code:
+        raise HTTPException(status_code=422, detail="Mã dự án không được để trống")
+    duplicate = await db.execute(
+        select(model_config.Project).where(
+            model_config.Project.project_code == project_code,
+            model_config.Project.id != project_id,
+        )
+    )
+    if duplicate.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Mã dự án đã được sử dụng")
+    project.project_code = project_code
+
+
+def _apply_project_metadata_updates(project: model_config.Project, project_data: dict) -> None:
+    if 'name' in project_data:
+        name = str(project_data['name'] or '').strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Tên dự án không được để trống")
+        project.name = name
+    if 'description' in project_data:
+        project.description = project_data['description']
+    if 'location' in project_data:
+        project.location = update_location_address(project.location, project_data['location'])
+    if 'is_active' in project_data:
+        project.is_active = project_data['is_active']
+    if 'gnss_clusters' in project_data:
+        project.gnss_clusters = project_data['gnss_clusters']
+    if 'auto_adjustment_config' in project_data:
+        project.auto_adjustment_config = project_data['auto_adjustment_config']
+
+
 @router.put("/api/admin/projects/{project_id}", responses={404: {"description": "Not Found"}, 409: {"description": "Conflict"}, 422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def update_project(
     project_id: int,
@@ -226,35 +261,8 @@ async def update_project(
         validate_project_fields(project_data)
         position = validate_map_position(project_data['map_position']) if 'map_position' in project_data else None
 
-        if 'project_code' in project_data:
-            project_code = str(project_data['project_code'] or '').strip()
-            if not project_code:
-                raise HTTPException(status_code=422, detail="Mã dự án không được để trống")
-            duplicate = await db.execute(
-                select(model_config.Project).where(
-                    model_config.Project.project_code == project_code,
-                    model_config.Project.id != project_id,
-                )
-            )
-            if duplicate.scalar_one_or_none():
-                raise HTTPException(status_code=409, detail="Mã dự án đã được sử dụng")
-            project.project_code = project_code
-
-        if 'name' in project_data:
-            name = str(project_data['name'] or '').strip()
-            if not name:
-                raise HTTPException(status_code=422, detail="Tên dự án không được để trống")
-            project.name = name
-        if 'description' in project_data:
-            project.description = project_data['description']
-        if 'location' in project_data:
-            project.location = update_location_address(project.location, project_data['location'])
-        if 'is_active' in project_data:
-            project.is_active = project_data['is_active']
-        if 'gnss_clusters' in project_data:
-            project.gnss_clusters = project_data['gnss_clusters']
-        if 'auto_adjustment_config' in project_data:
-            project.auto_adjustment_config = project_data['auto_adjustment_config']
+        await _validate_and_update_project_code(db, project, project_id, project_data)
+        _apply_project_metadata_updates(project, project_data)
 
         project.updated_at = int(time.time())
         await save_project_map_position(db, project, position)
@@ -268,7 +276,6 @@ async def update_project(
                 await reload_scheduler()
             except Exception as e:
                 logger.warning(f"Could not reload scheduler: {e}")
-
 
         return {
             "id": project.id,

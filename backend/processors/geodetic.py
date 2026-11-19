@@ -65,31 +65,19 @@ VN2000_PROVINCE_TABLE = [
 
 from dataclasses import dataclass, field
 
-def parse_vn2000_central_meridian(raw_value, default: float = 105.0) -> Tuple[float, str]:
-    """Parse VN2000 central meridian.
-
-    Operators often enter province meridians as compact degree-minute notation
-    (104.45 means 104 degrees 45 minutes). Decimal-degree values such as 104.75
-    remain valid and are returned unchanged.
-    """
-    if raw_value is None:
-        return default, "default"
-
-    raw = str(raw_value).strip().replace(",", ".")
-    if not raw:
-        return default, "default"
-
-    # Check for separator ° or d/D or whitespace
-    parts = None
+def _split_deg_min_tokens(raw: str):
     for sep in ('°', 'd', 'D'):
         if sep in raw:
-            parts = raw.split(sep, 1)
-            break
-    if parts is None and ' ' in raw:
+            return raw.split(sep, 1)
+    if ' ' in raw:
         tokens = raw.split()
         if len(tokens) == 2:
-            parts = tokens
+            return tokens
+    return None
 
+
+def _try_parse_deg_min(raw: str) -> Tuple[float, str] | None:
+    parts = _split_deg_min_tokens(raw)
     if parts is not None and len(parts) == 2:
         deg_str = parts[0].strip()
         min_str = parts[1].strip().rstrip("'mM\" ")
@@ -101,7 +89,10 @@ def parse_vn2000_central_meridian(raw_value, default: float = 105.0) -> Tuple[fl
                 return sign * (abs(deg) + minutes / 60.0), "deg_min"
         except ValueError:
             pass
+    return None
 
+
+def _try_parse_compact_deg_min(raw: str) -> Tuple[float, str] | None:
     import re
     compact_match = re.match(r"^([+-]?\d+)\.(\d{2})$", raw)
     if compact_match:
@@ -110,6 +101,25 @@ def parse_vn2000_central_meridian(raw_value, default: float = 105.0) -> Tuple[fl
         if 0 < minutes < 60:
             sign = -1 if deg < 0 else 1
             return sign * (abs(deg) + minutes / 60.0), "deg_min_compact"
+    return None
+
+
+def parse_vn2000_central_meridian(raw_value, default: float = 105.0) -> Tuple[float, str]:
+    """Parse VN2000 central meridian."""
+    if raw_value is None:
+        return default, "default"
+
+    raw = str(raw_value).strip().replace(",", ".")
+    if not raw:
+        return default, "default"
+
+    parsed = _try_parse_deg_min(raw)
+    if parsed is not None:
+        return parsed
+
+    parsed_compact = _try_parse_compact_deg_min(raw)
+    if parsed_compact is not None:
+        return parsed_compact
 
     try:
         return float(raw), "decimal_deg"

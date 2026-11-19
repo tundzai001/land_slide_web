@@ -156,42 +156,51 @@ async def create(identifier, trigger='manual'):
                 raise
 
 
+def _verify_manifest_envelope(archive: zipfile.ZipFile) -> tuple[dict, set[str]]:
+    base_files = {'auth.dump', 'config.dump', 'data.dump'}
+    if archive.getinfo(MANIFEST_FILENAME).file_size > 16384:
+        raise ValueError('Invalid manifest size')
+    envelope = json.loads(archive.read(MANIFEST_FILENAME))
+    manifest = envelope['manifest']
+    version = manifest.get('version')
+    if version not in (1, 2) or not hmac.compare_digest(sign(manifest), str(envelope.get('signature', ''))):
+        raise ValueError('Backup signature invalid; restore only backups signed by this installation')
+    files = set(manifest.get('files', {}))
+    if files != base_files and not (version == 1 and files == base_files | {'journal.sqlite3'}):
+        raise ValueError('Invalid manifest files')
+    if version == 2 and manifest.get('trigger') not in {'manual', 'scheduled'}:
+        raise ValueError('Invalid backup metadata')
+    if sorted(archive.namelist()) != sorted([MANIFEST_FILENAME, *files]):
+        raise ValueError('Backup must contain exactly the manifest and its declared files')
+    return manifest, files
+
+
+def _extract_and_verify_file(archive: zipfile.ZipFile, name: str, expected_meta: dict, destination: str | None) -> None:
+    info = archive.getinfo(name)
+    if (info.compress_type != zipfile.ZIP_STORED or
+            info.file_size != expected_meta['bytes'] or
+            info.file_size > 50 * 1024**3):
+        raise ValueError('Invalid dump size')
+    sha = hashlib.sha256()
+    with archive.open(name) as source:
+        target = open(Path(destination) / name, 'wb') if destination else None
+        try:
+            while chunk := source.read(1024 * 1024):
+                sha.update(chunk)
+                if target:
+                    target.write(chunk)
+        finally:
+            if target:
+                target.close()
+    if sha.hexdigest() != expected_meta['sha256']:
+        raise ValueError('Backup checksum mismatch')
+
+
 def validate_archive(path, destination=None):
     with zipfile.ZipFile(path) as archive:
-        base_files = {'auth.dump', 'config.dump', 'data.dump'}
-        if archive.getinfo(MANIFEST_FILENAME).file_size > 16384:
-            raise ValueError('Invalid manifest size')
-        envelope = json.loads(archive.read(MANIFEST_FILENAME))
-        manifest = envelope['manifest']
-        version = manifest.get('version')
-        if version not in (1, 2) or not hmac.compare_digest(sign(manifest), str(envelope.get('signature', ''))):
-            raise ValueError('Backup signature invalid; restore only backups signed by this installation')
-        files = set(manifest.get('files', {}))
-        if (files != base_files and not (version == 1 and files == base_files | {'journal.sqlite3'})):
-            raise ValueError('Invalid manifest files')
-        if version == 2 and manifest.get('trigger') not in {'manual', 'scheduled'}:
-            raise ValueError('Invalid backup metadata')
-        if sorted(archive.namelist()) != sorted([MANIFEST_FILENAME, *files]):
-            raise ValueError('Backup must contain exactly the manifest and its declared files')
+        manifest, files = _verify_manifest_envelope(archive)
         for name in files:
-            info = archive.getinfo(name)
-            if (info.compress_type != zipfile.ZIP_STORED or
-                    info.file_size != manifest['files'][name]['bytes'] or
-                    info.file_size > 50 * 1024**3):
-                raise ValueError('Invalid dump size')
-            sha = hashlib.sha256()
-            with archive.open(name) as source:
-                target = open(Path(destination) / name, 'wb') if destination else None
-                try:
-                    while chunk := source.read(1024 * 1024):
-                        sha.update(chunk)
-                        if target:
-                            target.write(chunk)
-                finally:
-                    if target:
-                        target.close()
-            if sha.hexdigest() != manifest['files'][name]['sha256']:
-                raise ValueError('Backup checksum mismatch')
+            _extract_and_verify_file(archive, name, manifest['files'][name], destination)
         return manifest
 
 

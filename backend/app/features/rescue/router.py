@@ -273,6 +273,52 @@ async def get_rescue_requests(
     return result
 
 
+async def _sync_incident_case_on_rescue_update(db: AsyncSession, row_id: int, new_status: str, admin_note: str | None, current_user: model_auth.User) -> None:
+    incident_case = await get_case_for_source(db, "RESCUE_REQUEST", row_id, for_update=True)
+    if incident_case is None:
+        return
+
+    target_status = {
+        "pending": "in_progress" if incident_case.status in {"resolved", "dismissed"} else incident_case.status,
+        "resolved": "resolved",
+        "rejected": "dismissed",
+    }[new_status]
+    status_changed = incident_case.status != target_status
+    reopened = incident_case.status in {"resolved", "dismissed"} and target_status == "in_progress"
+    incident_case.status = target_status
+    incident_case.resolved_at = int(time.time()) if target_status == "resolved" else None
+    if not status_changed:
+        return
+
+    incident_case.version += 1
+    incident_event = await append_event(
+        db,
+        incident_case,
+        "status_changed",
+        actor_kind="user",
+        actor_user_id=int(current_user.id),
+        actor_username=current_user.username,
+        note=admin_note or ("legacy_reopen" if reopened else None),
+        payload={"status": target_status, "legacy_reopen": reopened},
+    )
+    await db.commit()
+    await db.refresh(incident_event)
+    await ws_manager.broadcast_operations({
+        "protocol": 2,
+        "type": "incident_changed",
+        "event_id": int(incident_event.id),
+        "sequence_from": int(incident_event.sequence),
+        "sequence_to": int(incident_event.sequence),
+        "incident_id": int(incident_case.id),
+        "incident_revision": int(incident_case.revision),
+        "workflow_version": int(incident_case.version),
+        "action": "updated",
+        "project_id": incident_case.project_id,
+        "station_id": incident_case.station_id,
+        "summary": serialize_case(incident_case),
+    })
+
+
 @router.patch("/api/admin/rescue-requests/{request_id}", responses={400: {"description": "Bad Request"}, 403: {"description": "Forbidden"}, 404: {"description": "Not Found"}})
 async def update_rescue_request(
     request_id: int,
@@ -300,47 +346,9 @@ async def update_rescue_request(
     else:
         row.handled_by = None
         row.handled_at = None
-    incident_case = await get_case_for_source(db, "RESCUE_REQUEST", int(row.id), for_update=True)
-    incident_event = None
-    if incident_case is not None:
-        target_status = {
-            "pending": "in_progress" if incident_case.status in {"resolved", "dismissed"} else incident_case.status,
-            "resolved": "resolved",
-            "rejected": "dismissed",
-        }[new_status]
-        status_changed = incident_case.status != target_status
-        reopened = incident_case.status in {"resolved", "dismissed"} and target_status == "in_progress"
-        incident_case.status = target_status
-        incident_case.resolved_at = int(time.time()) if target_status == "resolved" else None
-        if status_changed:
-            incident_case.version += 1
-            incident_event = await append_event(
-                db,
-                incident_case,
-                "status_changed",
-                actor_kind="user",
-                actor_user_id=int(current_user.id),
-                actor_username=current_user.username,
-                note=payload.admin_note or ("legacy_reopen" if reopened else None),
-                payload={"status": target_status, "legacy_reopen": reopened},
-            )
+
+    await _sync_incident_case_on_rescue_update(db, int(row.id), new_status, payload.admin_note, current_user)
     await db.commit()
-    if incident_event is not None:
-        await db.refresh(incident_event)
-        await ws_manager.broadcast_operations({
-            "protocol": 2,
-            "type": "incident_changed",
-            "event_id": int(incident_event.id),
-            "sequence_from": int(incident_event.sequence),
-            "sequence_to": int(incident_event.sequence),
-            "incident_id": int(incident_case.id),
-            "incident_revision": int(incident_case.revision),
-            "workflow_version": int(incident_case.version),
-            "action": "updated",
-            "project_id": incident_case.project_id,
-            "station_id": incident_case.station_id,
-            "summary": serialize_case(incident_case),
-        })
     return {"status": "ok", "id": int(row.id), "new_status": row.status}
 
 

@@ -222,6 +222,74 @@ async def heartbeat_pi_device(
         raise HTTPException(status_code=500, detail="Heartbeat failed")
 
 
+def _build_pi_device_query(q: str | None, device_status: str | None, status_filter: str | None, station_id: int | None, sort: str):
+    query = select(PiDevice)
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        query = query.where(or_(PiDevice.name.ilike(pattern), PiDevice.serial.ilike(pattern)))
+    normalized_status = (device_status or status_filter or "").strip().lower()
+    if normalized_status:
+        query = query.where(PiDevice.status == normalized_status)
+    if station_id is not None:
+        query = query.where(PiDevice.station_id == station_id)
+    sort_fields = {"registered_at": PiDevice.registered_at, "last_seen": PiDevice.last_seen, "name": PiDevice.name, "status": PiDevice.status}
+    field_name = sort.lstrip("-")
+    if field_name not in sort_fields:
+        raise HTTPException(status_code=422, detail="Unsupported sort field")
+    order_column = sort_fields[field_name]
+    return query.order_by(order_column.desc() if sort.startswith("-") else order_column.asc())
+
+
+async def _fetch_station_and_center_metadata(db: AsyncSession, devices: list) -> tuple[dict, dict]:
+    station_info = {}
+    station_ids = [d.station_id for d in devices if d.station_id]
+    if station_ids:
+        s_res = await db.execute(select(model_config.Station).where(model_config.Station.id.in_(station_ids)))
+        stations = s_res.scalars().all()
+        project_ids = list({s.project_id for s in stations if s.project_id})
+        project_names = {}
+        if project_ids:
+            p_res = await db.execute(select(model_config.Project).where(model_config.Project.id.in_(project_ids)))
+            for p in p_res.scalars().all():
+                project_names[p.id] = p.name
+        for s in stations:
+            station_info[s.id] = {
+                "name": s.name,
+                "project_id": s.project_id,
+                "project_name": project_names.get(s.project_id, ""),
+            }
+
+    center_info = {}
+    center_ids = [getattr(d, "pi_center_id", None) for d in devices if getattr(d, "pi_center_id", None)]
+    if center_ids:
+        c_res = await db.execute(select(PiDevice).where(PiDevice.id.in_(center_ids)))
+        for c in c_res.scalars().all():
+            center_info[c.id] = {"name": c.name, "serial": c.serial}
+
+    return station_info, center_info
+
+
+def _serialize_pi_device(d, station_info: dict, center_info: dict) -> dict:
+    center_id = getattr(d, "pi_center_id", None)
+    return {
+        "id": d.id,
+        "serial": d.serial,
+        "name": d.name,
+        "device_type": getattr(d, "device_type", "pi"),
+        "status": d.status,
+        "is_locked": getattr(d, 'is_locked', False),
+        "station_id": d.station_id,
+        "station_name": station_info.get(d.station_id, {}).get("name"),
+        "project_id": station_info.get(d.station_id, {}).get("project_id"),
+        "project_name": station_info.get(d.station_id, {}).get("project_name"),
+        "pi_center_id": center_id,
+        "pi_center_name": center_info.get(center_id, {}).get("name"),
+        "pi_center_serial": center_info.get(center_id, {}).get("serial"),
+        "last_seen": d.last_seen,
+        "registered_at": d.registered_at,
+    }
+
+
 @router.get("/pi-devices", responses={422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def list_pi_devices(
     response: Response,
@@ -237,80 +305,19 @@ async def list_pi_devices(
 ):
     """List all registered Pi devices (admin only)."""
     try:
-        query = select(PiDevice)
-        if q and q.strip():
-            pattern = f"%{q.strip()}%"
-            query = query.where(or_(PiDevice.name.ilike(pattern), PiDevice.serial.ilike(pattern)))
-        normalized_status = (device_status or status_filter or "").strip().lower()
-        if normalized_status:
-            query = query.where(PiDevice.status == normalized_status)
-        if station_id is not None:
-            query = query.where(PiDevice.station_id == station_id)
-        sort_fields = {"registered_at": PiDevice.registered_at, "last_seen": PiDevice.last_seen, "name": PiDevice.name, "status": PiDevice.status}
-        field_name = sort.lstrip("-")
-        if field_name not in sort_fields:
-            raise HTTPException(status_code=422, detail="Unsupported sort field")
-        order_column = sort_fields[field_name]
-        query = query.order_by(order_column.desc() if sort.startswith("-") else order_column.asc())
+        query = _build_pi_device_query(q, device_status, status_filter, station_id, sort)
         page_offset, page_limit = normalize_page(offset, limit)
         all_devices = list((await db.execute(query)).scalars().all())
         set_pagination_headers(response, total=len(all_devices), offset=page_offset, limit=page_limit)
         devices = all_devices[page_offset:] if page_limit is None else all_devices[page_offset:page_offset + page_limit]
 
-        # Fetch station + project info for assigned devices
-        station_info = {}  # station_id -> {name, project_name}
-        station_ids = [d.station_id for d in devices if d.station_id]
-        if station_ids:
-            s_res = await db.execute(
-                select(model_config.Station).where(model_config.Station.id.in_(station_ids))
-            )
-            stations = s_res.scalars().all()
-            # Fetch project names
-            project_ids = list({s.project_id for s in stations if s.project_id})
-            project_names = {}
-            if project_ids:
-                p_res = await db.execute(
-                    select(model_config.Project).where(model_config.Project.id.in_(project_ids))
-                )
-                for p in p_res.scalars().all():
-                    project_names[p.id] = p.name
-            for s in stations:
-                station_info[s.id] = {
-                    "name": s.name,
-                    "project_id": s.project_id,
-                    "project_name": project_names.get(s.project_id, ""),
-                }
-
-        # Fetch Pi Center info for Pi Points
-        center_info = {} # center_id -> {name, serial}
-        center_ids = [getattr(d, "pi_center_id", None) for d in devices if getattr(d, "pi_center_id", None)]
-        if center_ids:
-            c_res = await db.execute(
-                select(PiDevice).where(PiDevice.id.in_(center_ids))
-            )
-            for c in c_res.scalars().all():
-                center_info[c.id] = {"name": c.name, "serial": c.serial}
-
-        return [
-            {
-                "id":            d.id,
-                "serial":        d.serial,
-                "name":          d.name,
-                "device_type":   getattr(d, "device_type", "pi"),
-                "status":        d.status,
-                "is_locked":     getattr(d, 'is_locked', False),
-                "station_id":    d.station_id,
-                "station_name":  station_info.get(d.station_id, {}).get("name"),
-                "project_id":    station_info.get(d.station_id, {}).get("project_id"),
-                "project_name":  station_info.get(d.station_id, {}).get("project_name"),
-                "pi_center_id":  getattr(d, "pi_center_id", None),
-                "pi_center_name": center_info.get(getattr(d, "pi_center_id", None), {}).get("name"),
-                "pi_center_serial": center_info.get(getattr(d, "pi_center_id", None), {}).get("serial"),
-                "last_seen":     d.last_seen,
-                "registered_at": d.registered_at,
-            }
-            for d in devices
-        ]
+        station_info, center_info = await _fetch_station_and_center_metadata(db, devices)
+        return [_serialize_pi_device(d, station_info, center_info) for d in devices]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error listing Pi devices: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:

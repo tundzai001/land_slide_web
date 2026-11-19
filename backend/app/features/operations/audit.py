@@ -21,31 +21,47 @@ def remember_original(session, obj):
         }))
 
 
+def _extract_object_changes(operation: str, state, original: dict) -> dict:
+    changes = {}
+    for column in state.mapper.column_attrs:
+        attribute = state.attrs[column.key]
+        history = attribute.history
+        if operation == 'update' and not history.has_changes():
+            continue
+        old = history.deleted[0] if history.deleted else original.get(column.key)
+        if operation == 'delete':
+            old = state.dict.get(column.key)
+        changes[column.key] = {
+            'old': old,
+            'new': state.dict.get(column.key) if operation != 'delete' else None,
+        }
+    return changes
+
+
+def _process_audit_objects(pending: list, operation: str, objects, original_map: dict) -> None:
+    for obj in objects:
+        state = inspect(obj)
+        original = original_map.get(id(obj), {})
+        changes = _extract_object_changes(operation, state, original)
+        if changes:
+            pending.append({
+                'table': state.mapper.local_table.name,
+                'operation': operation,
+                'identity': state.identity,
+                'changes': store.redact(changes),
+                '_object': obj,
+            })
+
+
 @event.listens_for(Session, 'before_flush')
 def capture_changes(session, *_):
     context = store.current_audit()
     if context is None:
         return
     pending = session.info.setdefault('audit_pending', [])
+    original_map = session.info.get('audit_original', {})
     for operation, objects in [('create', session.new), ('update', session.dirty), ('delete', session.deleted)]:
-        for obj in objects:
-            state = inspect(obj)
-            changes = {}
-            original = session.info.get('audit_original', {}).get(id(obj), {})
-            for column in state.mapper.column_attrs:
-                attribute = state.attrs[column.key]
-                history = attribute.history
-                if operation == 'update' and not history.has_changes():
-                    continue
-                # Read loaded state only, avoiding an implicit async database query.
-                old = history.deleted[0] if history.deleted else original.get(column.key)
-                if operation == 'delete':
-                    old = state.dict.get(column.key)
-                changes[column.key] = {'old': old,
-                                       'new': state.dict.get(column.key) if operation != 'delete' else None}
-            if changes:
-                pending.append({'table': state.mapper.local_table.name, 'operation': operation,
-                                'identity': state.identity, 'changes': store.redact(changes), '_object': obj})
+        _process_audit_objects(pending, operation, objects, original_map)
 
 
 @event.listens_for(Session, 'do_orm_execute')

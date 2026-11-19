@@ -106,6 +106,23 @@ def _pdf_font() -> str:
     return "Helvetica"
 
 
+def _build_line_chart(series: list, key: str, label: str, font: str):
+    from reportlab.graphics.shapes import Drawing, Line, PolyLine, String
+    from reportlab.lib import colors
+    drawing = Drawing(480, 105)
+    rows = series[::max(1, len(series) // 180)] if series else []
+    values = [float(row.get(key) or 0) for row in rows]
+    low, high = (min(values), max(values)) if values else (0.0, 1.0)
+    if high <= low:
+        high = low + 1.0
+    drawing.add(String(0, 91, f"{label}: {low:.2f} – {high:.2f}", fontName=font, fontSize=8, fillColor=colors.HexColor("#334155")))
+    drawing.add(Line(0, 8, 470, 8, strokeColor=colors.HexColor("#CBD5E1")))
+    points = [(index / max(1, len(values) - 1) * 470, 12 + (value - low) / (high - low) * 70) for index, value in enumerate(values)]
+    if len(points) > 1:
+        drawing.add(PolyLine(points, strokeColor=colors.HexColor("#0F766E"), strokeWidth=1.5))
+    return drawing
+
+
 def build_pdf(run: Any) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
@@ -139,21 +156,8 @@ def build_pdf(run: Any) -> bytes:
         story.append(Paragraph(f"Lỗi: {payload['error']}", normal))
     series = payload["time_series"]
     story += [PageBreak(), Paragraph("BIỂU ĐỒ DIỄN BIẾN 2D", heading)]
-    def line_chart(key: str, label: str) -> Drawing:
-        drawing = Drawing(480, 105)
-        rows = series[::max(1, len(series) // 180)] if series else []
-        values = [float(row.get(key) or 0) for row in rows]
-        low, high = (min(values), max(values)) if values else (0.0, 1.0)
-        if high <= low:
-            high = low + 1.0
-        drawing.add(String(0, 91, f"{label}: {low:.2f} – {high:.2f}", fontName=font, fontSize=8, fillColor=colors.HexColor("#334155")))
-        drawing.add(Line(0, 8, 470, 8, strokeColor=colors.HexColor("#CBD5E1")))
-        points = [(index / max(1, len(values) - 1) * 470, 12 + (value - low) / (high - low) * 70) for index, value in enumerate(values)]
-        if len(points) > 1:
-            drawing.add(PolyLine(points, strokeColor=colors.HexColor("#0F766E"), strokeWidth=1.5))
-        return drawing
     for key, label in [("fos", "FoS"), ("cumulative_rain_mm", "Mưa tích lũy (mm)"), ("pore_pressure_ratio", "Áp lực lỗ rỗng ru"), ("velocity_m_s", "Vận tốc (m/s)"), ("runout_m", "Quãng trượt (m)"), ("houses_affected", "Nhà ảnh hưởng")]:
-        story.extend([line_chart(key, label), Spacer(1, 4)])
+        story.extend([_build_line_chart(series, key, label, font), Spacer(1, 4)])
     profile = payload["terrain_profile"]
     if profile:
         story += [PageBreak(), Paragraph("MẶT CẮT SƯỜN DỐC VÀ MẶT TRƯỢT", heading)]

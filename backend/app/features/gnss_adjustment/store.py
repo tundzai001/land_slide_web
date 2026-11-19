@@ -69,6 +69,18 @@ def add_report_links(
     return result
 
 
+def _extract_evidence_row(record: object) -> dict[str, Any]:
+    if isinstance(record, dict):
+        row = copy.deepcopy(record.get("data") if "data" in record else record)
+        raw_payload = record.get("raw_payload")
+    else:
+        row = copy.deepcopy(getattr(record, "data", None) or {})
+        raw_payload = getattr(record, "raw_payload", None)
+    if raw_payload is not None:
+        row["raw_payload"] = raw_payload
+    return row
+
+
 def hydrate_adjustment_payload(
     payload: dict[str, Any],
     evidence: Iterable[object],
@@ -77,19 +89,7 @@ def hydrate_adjustment_payload(
     if "baseline_observations" in payload:
         return copy.deepcopy(payload)
     result = copy.deepcopy(payload)
-    observations = []
-    for record in evidence:
-        if isinstance(record, dict):
-            row = copy.deepcopy(
-                record.get("data") if "data" in record else record
-            )
-            raw_payload = record.get("raw_payload")
-        else:
-            row = copy.deepcopy(getattr(record, "data", None) or {})
-            raw_payload = getattr(record, "raw_payload", None)
-        if raw_payload is not None:
-            row["raw_payload"] = raw_payload
-        observations.append(row)
+    observations = [_extract_evidence_row(record) for record in evidence]
     if observations:
         if str(result.get("status") or "").lower() == "failed":
             context = result.setdefault("context", {})

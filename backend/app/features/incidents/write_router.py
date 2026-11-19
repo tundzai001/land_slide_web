@@ -153,6 +153,25 @@ async def assign_incident(
     return await _mutate_case(db, current_user, incident_id, "assign", body.model_dump(), idempotency_key, mutate)
 
 
+ALLOWED_TRANSITIONS = {
+    "new": {"acknowledged", "dismissed"},
+    "acknowledged": {"in_progress", "monitoring", "resolved", "dismissed"},
+    "in_progress": {"monitoring", "resolved", "dismissed"},
+    "monitoring": {"in_progress", "resolved", "dismissed"},
+    "resolved": {"in_progress"},
+    "dismissed": {"in_progress"},
+}
+
+
+def _validate_case_transition(case, target: str, note: str | None) -> None:
+    if target not in ALLOWED_TRANSITIONS.get(case.status, set()):
+        raise HTTPException(status_code=422, detail={"code": "INVALID_TRANSITION", "message": "Chuyển trạng thái không hợp lệ"})
+    if target in {"resolved", "dismissed", "in_progress"} and case.status in {"resolved", "dismissed"} and not note:
+        raise HTTPException(status_code=422, detail={"code": "NOTE_REQUIRED", "message": "Thao tác này cần ghi chú"})
+    if target in {"in_progress", "monitoring", "resolved"} and case.priority == "UNTRIAGED":
+        raise HTTPException(status_code=422, detail={"code": "TRIAGE_REQUIRED", "message": "Cần phân loại ưu tiên trước"})
+
+
 @router.post("/api/incidents/{incident_id}/transition", responses={409: {"description": "Conflict"}, 422: {"description": "Unprocessable Entity"}})
 async def transition_incident(
     incident_id: int,
@@ -164,26 +183,18 @@ async def transition_incident(
     target = body.to_status.strip().lower()
     if target not in VALID_STATUSES:
         raise HTTPException(status_code=422, detail={"code": "INVALID_STATUS", "message": "Status không hợp lệ"})
+
     def mutate(case):
         if case.status == target:
             return False, "status_changed", body.note, {"status": target}
-        allowed = {
-            "new": {"acknowledged", "dismissed"},
-            "acknowledged": {"in_progress", "monitoring", "resolved", "dismissed"},
-            "in_progress": {"monitoring", "resolved", "dismissed"},
-            "monitoring": {"in_progress", "resolved", "dismissed"},
-            "resolved": {"in_progress"},
-            "dismissed": {"in_progress"},
-        }
-        if target not in allowed.get(case.status, set()):
-            raise HTTPException(status_code=422, detail={"code": "INVALID_TRANSITION", "message": "Chuyển trạng thái không hợp lệ"})
-        if target in {"resolved", "dismissed", "in_progress"} and case.status in {"resolved", "dismissed"} and not body.note:
-            raise HTTPException(status_code=422, detail={"code": "NOTE_REQUIRED", "message": "Thao tác này cần ghi chú"})
-        if target in {"in_progress", "monitoring", "resolved"} and case.priority == "UNTRIAGED":
-            raise HTTPException(status_code=422, detail={"code": "TRIAGE_REQUIRED", "message": "Cần phân loại ưu tiên trước"})
-        case.status = target; case.version += 1; case.resolved_at = int(time.time()) if target == "resolved" else None
-        if target == "acknowledged" and case.acknowledged_at is None: case.acknowledged_at = int(time.time())
+        _validate_case_transition(case, target, body.note)
+        case.status = target
+        case.version += 1
+        case.resolved_at = int(time.time()) if target == "resolved" else None
+        if target == "acknowledged" and case.acknowledged_at is None:
+            case.acknowledged_at = int(time.time())
         return True, "status_changed", body.note, {"status": target}
+
     return await _mutate_case(db, current_user, incident_id, "transition", body.model_dump(), idempotency_key, mutate)
 
 

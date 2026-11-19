@@ -17,6 +17,107 @@ from ....models import data as model_data
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 
+def _build_station_info_table(station, colors, mm, Table, TableStyle):
+    loc = station.location or {}
+    last_up = datetime.fromtimestamp(station.last_update).strftime('%Y-%m-%d %H:%M:%S') if station.last_update else 'N/A'
+    info_data = [
+        ['Station Name', station.name],
+        ['Station Code', station.station_code],
+        ['Status', station.status or 'N/A'],
+        ['Location', f"Lat: {loc.get('lat', 'N/A')}, Lon: {loc.get('lon', 'N/A')}"],
+        ['Last Update', last_up],
+        ['Report Generated', datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
+    ]
+    info_table = Table(info_data, colWidths=[45*mm, 120*mm])
+    info_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    return info_table
+
+
+def _build_sensor_cache_elements(sensor_cache, colors, mm, Table, TableStyle, Paragraph, subtitle_style, normal_style):
+    elements = [Paragraph("Latest Sensor Readings", subtitle_style)]
+    if not sensor_cache:
+        elements.append(Paragraph("No sensor data available.", normal_style))
+        return elements
+
+    sensor_rows = [['Sensor Type', 'Timestamp', 'Key Values']]
+    for sc in sensor_cache:
+        ts_str = datetime.fromtimestamp(sc.timestamp).strftime('%H:%M:%S %d/%m') if sc.timestamp else '—'
+        data_dict = sc.data if isinstance(sc.data, dict) else {}
+        kv_str = ', '.join([f"{k}: {v}" for k, v in list(data_dict.items())[:4]])
+        sensor_rows.append([sc.sensor_type.upper(), ts_str, kv_str[:80]])
+
+    s_table = Table(sensor_rows, colWidths=[30*mm, 35*mm, 100*mm])
+    s_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0d6efd')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(s_table)
+    return elements
+
+
+def _build_gnss_summary_elements(daily_summaries, colors, mm, Table, TableStyle, Paragraph, Spacer, subtitle_style):
+    if not daily_summaries:
+        return []
+    gnss_rows = [['Date', 'Displacement (mm)', 'Velocity (mm/day)', 'Risk', 'Classification']]
+    for ds in daily_summaries:
+        day_str = datetime.fromtimestamp(ds.day_start_ts).strftime('%d/%m/%Y')
+        gnss_rows.append([
+            day_str,
+            f"{ds.net_displacement_mm:.3f}",
+            f"{ds.velocity_mm_day:.4f}",
+            ds.risk_level,
+            ds.classification,
+        ])
+    g_table = Table(gnss_rows, colWidths=[28*mm, 35*mm, 35*mm, 30*mm, 37*mm])
+    g_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#10b981')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0fdf4')]),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    return [Paragraph("GNSS Daily Summary (7 days)", subtitle_style), g_table, Spacer(1, 6*mm)]
+
+
+def _build_alerts_elements(alerts, colors, mm, Table, TableStyle, Paragraph, Spacer, subtitle_style):
+    if not alerts:
+        return []
+    alert_rows = [['Time', 'Level', 'Category', 'Message']]
+    for a in alerts[:15]:
+        a_time = datetime.fromtimestamp(a.timestamp).strftime('%H:%M %d/%m')
+        msg = (a.message or '')[:60]
+        alert_rows.append([a_time, a.level, a.category, msg])
+    a_table = Table(alert_rows, colWidths=[28*mm, 22*mm, 22*mm, 93*mm])
+    a_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#ef4444')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#fef2f2')]),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    return [Paragraph("Recent Alerts (max 20)", subtitle_style), a_table, Spacer(1, 6*mm)]
+
+
 @router.get("/export/station/{station_id}/pdf", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def export_station_pdf(
     station_id: int,
@@ -87,107 +188,16 @@ async def export_station_pdf(
 
         elements = []
 
-        # Header
-        elements.append(Paragraph("Landslide Monitor - Station Report", title_style))
-        elements.append(Spacer(1, 4*mm))
-
-        # Station info table
-        loc = station.location or {}
-        last_up = datetime.fromtimestamp(station.last_update).strftime('%Y-%m-%d %H:%M:%S') if station.last_update else 'N/A'
-        info_data = [
-            ['Station Name', station.name],
-            ['Station Code', station.station_code],
-            ['Status', station.status or 'N/A'],
-            ['Location', f"Lat: {loc.get('lat', 'N/A')}, Lon: {loc.get('lon', 'N/A')}"],
-            ['Last Update', last_up],
-            ['Report Generated', datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
+        elements = [
+            Paragraph("Landslide Monitor - Station Report", title_style),
+            Spacer(1, 4*mm),
+            _build_station_info_table(station, colors, mm, Table, TableStyle),
+            Spacer(1, 8*mm),
         ]
-        info_table = Table(info_data, colWidths=[45*mm, 120*mm])
-        info_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ]))
-        elements.extend([info_table, Spacer(1, 8*mm)])
-
-        # Latest Sensor Readings
-        elements.append(Paragraph("Latest Sensor Readings", subtitle_style))
-        if sensor_cache:
-            sensor_rows = [['Sensor Type', 'Timestamp', 'Key Values']]
-            for sc in sensor_cache:
-                ts_str = datetime.fromtimestamp(sc.timestamp).strftime('%H:%M:%S %d/%m') if sc.timestamp else '—'
-                data_dict = sc.data if isinstance(sc.data, dict) else {}
-                # Extract top 3 key-value pairs
-                kv_str = ', '.join([f"{k}: {v}" for k, v in list(data_dict.items())[:4]])
-                sensor_rows.append([sc.sensor_type.upper(), ts_str, kv_str[:80]])
-
-            s_table = Table(sensor_rows, colWidths=[30*mm, 35*mm, 100*mm])
-            s_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0d6efd')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 8),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
-                ('TOPPADDING', (0, 0), (-1, -1), 3),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-            ]))
-            elements.append(s_table)
-        else:
-            elements.append(Paragraph("No sensor data available.", normal_style))
+        elements.extend(_build_sensor_cache_elements(sensor_cache, colors, mm, Table, TableStyle, Paragraph, subtitle_style, normal_style))
         elements.append(Spacer(1, 6*mm))
-
-        # GNSS Daily Summaries
-        if daily_summaries:
-            elements.append(Paragraph("GNSS Daily Summary (7 days)", subtitle_style))
-            gnss_rows = [['Date', 'Displacement (mm)', 'Velocity (mm/day)', 'Risk', 'Classification']]
-            for ds in daily_summaries:
-                day_str = datetime.fromtimestamp(ds.day_start_ts).strftime('%d/%m/%Y')
-                gnss_rows.append([
-                    day_str,
-                    f"{ds.net_displacement_mm:.3f}",
-                    f"{ds.velocity_mm_day:.4f}",
-                    ds.risk_level,
-                    ds.classification
-                ])
-            g_table = Table(gnss_rows, colWidths=[28*mm, 35*mm, 35*mm, 30*mm, 37*mm])
-            g_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#10b981')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 8),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0fdf4')]),
-                ('TOPPADDING', (0, 0), (-1, -1), 3),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-            ]))
-            elements.append(g_table)
-            elements.append(Spacer(1, 6*mm))
-
-        # Recent Alerts
-        if alerts:
-            elements.append(Paragraph("Recent Alerts (max 20)", subtitle_style))
-            alert_rows = [['Time', 'Level', 'Category', 'Message']]
-            for a in alerts[:15]:  # limit rows for PDF space
-                a_time = datetime.fromtimestamp(a.timestamp).strftime('%H:%M %d/%m')
-                msg = (a.message or '')[:60]
-                alert_rows.append([a_time, a.level, a.category, msg])
-            a_table = Table(alert_rows, colWidths=[28*mm, 22*mm, 22*mm, 93*mm])
-            a_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#ef4444')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 8),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#fef2f2')]),
-                ('TOPPADDING', (0, 0), (-1, -1), 3),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-            ]))
-            elements.append(a_table)
+        elements.extend(_build_gnss_summary_elements(daily_summaries, colors, mm, Table, TableStyle, Paragraph, Spacer, subtitle_style))
+        elements.extend(_build_alerts_elements(alerts, colors, mm, Table, TableStyle, Paragraph, Spacer, subtitle_style))
 
         # Build PDF
         doc.build(elements)

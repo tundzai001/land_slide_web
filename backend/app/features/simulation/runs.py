@@ -21,12 +21,12 @@ router = APIRouter(prefix="/api/simulations", tags=["Landslide simulations"])
 
 SIMULATION_NOT_FOUND = "Không tìm thấy lần mô phỏng"
 
-@router.post("/runs", status_code=202, responses={422: {"description": "Unprocessable Entity"}})
-async def create_run(payload: SimulationCreate, data_db: AsyncSession = Depends(get_data_db), config_db: AsyncSession = Depends(get_config_db), current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
-    now, warnings = int(time.time()), []
+async def _prepare_simulation_parameters(payload: SimulationCreate, config_db: AsyncSession, data_db: AsyncSession) -> tuple:
     sources = dict.fromkeys(payload.parameters, "Nhập thủ công")
     sensor_snapshot: dict[str, Any] = {}
+    warnings: list[str] = []
     project = station = None
+
     if payload.mode == "station_snapshot":
         if not payload.station_id:
             raise HTTPException(status_code=422, detail="Chế độ dữ liệu trạm cần station_id")
@@ -40,15 +40,27 @@ async def create_run(payload: SimulationCreate, data_db: AsyncSession = Depends(
         parameters = normalize_parameters(payload.parameters)
         if payload.project_id:
             project = (await config_db.execute(select(model_config.Project).where(model_config.Project.id == payload.project_id))).scalar_one_or_none()
+
     parameters = normalize_parameters(parameters)
-    seed = int(payload.seed if payload.seed is not None else secrets.randbelow(2_000_000_000))
+    return parameters, sources, sensor_snapshot, warnings, station, project
+
+
+def _build_simulation_display_name(payload: SimulationCreate, station, project, now: int) -> str:
     if station:
         subject = station.name
     elif project:
         subject = project.name
     else:
         subject = "Kịch bản thủ công"
-    display_name = payload.display_name or f"{subject} · {'Dữ liệu trạm' if station else 'Nhập thông số'} · {time.strftime('%d/%m/%Y %H:%M', time.localtime(now))}"
+    return payload.display_name or f"{subject} · {'Dữ liệu trạm' if station else 'Nhập thông số'} · {time.strftime('%d/%m/%Y %H:%M', time.localtime(now))}"
+
+
+@router.post("/runs", status_code=202, responses={422: {"description": "Unprocessable Entity"}})
+async def create_run(payload: SimulationCreate, data_db: AsyncSession = Depends(get_data_db), config_db: AsyncSession = Depends(get_config_db), current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
+    now = int(time.time())
+    parameters, sources, sensor_snapshot, warnings, station, project = await _prepare_simulation_parameters(payload, config_db, data_db)
+    seed = int(payload.seed if payload.seed is not None else secrets.randbelow(2_000_000_000))
+    display_name = _build_simulation_display_name(payload, station, project, now)
     run = model_data.SimulationRun(
         display_name=display_name, created_by_user_id=current_user.id, created_by_username=current_user.username,
         project_id=project.id if project else payload.project_id, project_code=project.project_code if project else None, project_name=project.name if project else None,

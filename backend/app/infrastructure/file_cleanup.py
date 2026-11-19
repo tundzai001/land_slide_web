@@ -76,23 +76,31 @@ async def _finish_job(job_id: int, owner: str, generation: int, status: str, err
         await db.commit()
 
 
+async def _execute_cleanup_job(job_id: int, lease_owner: str, generation: int, storage_key: str | None) -> None:
+    try:
+        path = rescue_storage.resolve_image_path(storage_key or "")
+        if path is not None and path.exists():
+            path.unlink()
+        await _finish_job(job_id, lease_owner, generation, "DONE")
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("Rescue cleanup job %s deferred: %s", job_id, exc)
+        await _finish_job(job_id, lease_owner, generation, "RETRY", type(exc).__name__)
+
+
+async def _run_cleanup_cycle(owner: str) -> None:
+    jobs = await _claim_jobs(owner)
+    for job_id, lease_owner, generation, storage_key in jobs:
+        await _execute_cleanup_job(job_id, lease_owner, generation, storage_key)
+
+
 async def run_file_cleanup_daemon() -> None:
     owner = secrets.token_hex(12)
     interval = max(2.0, float(getattr(settings, "FILE_CLEANUP_INTERVAL_SECONDS", 10.0)))
     while True:
         try:
-            jobs = await _claim_jobs(owner)
-            for job_id, lease_owner, generation, storage_key in jobs:
-                try:
-                    path = rescue_storage.resolve_image_path(storage_key or "")
-                    if path is not None and path.exists():
-                        path.unlink()
-                    await _finish_job(job_id, lease_owner, generation, "DONE")
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    logger.warning("Rescue cleanup job %s deferred: %s", job_id, exc)
-                    await _finish_job(job_id, lease_owner, generation, "RETRY", type(exc).__name__)
+            await _run_cleanup_cycle(owner)
             await asyncio.sleep(interval)
         except asyncio.CancelledError:
             raise

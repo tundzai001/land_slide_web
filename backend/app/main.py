@@ -102,36 +102,44 @@ file_cleanup_task: Optional[asyncio.Task] = None
 backup_task: Optional[asyncio.Task] = None
 
 
+async def _fetch_failover_clusters() -> list[dict]:
+    async with ConfigSessionLocal() as db_config:
+        result = await db_config.execute(
+            select(model_config.Project).where(model_config.Project.is_active.is_(True))
+        )
+        clusters = []
+        for project in result.scalars().all():
+            for raw_cluster in project.gnss_clusters or []:
+                if isinstance(raw_cluster, dict) and raw_cluster.get("backup_base_station"):
+                    cluster = copy.deepcopy(raw_cluster)
+                    cluster["project_id"] = int(project.id)
+                    clusters.append(cluster)
+        return clusters
+
+
+def _log_failover_error(exc: Exception, now: float, last_error_kind: str | None, last_error_log_at: float, retry_seconds: float) -> tuple[str, float]:
+    detail = str(exc).strip() or type(exc).__name__
+    error_kind = detail.split(':', 1)[0]
+    if error_kind != last_error_kind or now - last_error_log_at >= 300.0:
+        logger.warning(
+            "CORS fixed-base failover unavailable; retry in %.0fs: %s",
+            retry_seconds,
+            detail.splitlines()[0][:240],
+        )
+        last_error_log_at = now
+    return error_kind, last_error_log_at
+
+
 async def run_cors_fixed_base_failover_daemon():
     """Continuously enforce configured cross-station S1/S2 failover pairs."""
-
-    poll_seconds = max(
-        2.0,
-        float(config.settings.GNSS_CORS_FAILOVER_POLL_SECONDS),
-    )
+    poll_seconds = max(2.0, float(config.settings.GNSS_CORS_FAILOVER_POLL_SECONDS))
     retry_seconds = poll_seconds
     last_error_kind = None
     last_error_log_at = 0.0
     while True:
         try:
-            async with ConfigSessionLocal() as db_config:
-                result = await db_config.execute(
-                    select(model_config.Project).where(
-                        model_config.Project.is_active.is_(True)
-                    )
-                )
-                clusters = []
-                for project in result.scalars().all():
-                    for raw_cluster in project.gnss_clusters or []:
-                        if isinstance(raw_cluster, dict) and raw_cluster.get(
-                            "backup_base_station"
-                        ):
-                            cluster = copy.deepcopy(raw_cluster)
-                            cluster["project_id"] = int(project.id)
-                            clusters.append(cluster)
-            cors_failover_status[:] = await (
-                mqtt_service.round_robin_manager.reconcile_cors_failover_pairs(clusters)
-            )
+            clusters = await _fetch_failover_clusters()
+            cors_failover_status[:] = await mqtt_service.round_robin_manager.reconcile_cors_failover_pairs(clusters)
             if last_error_kind is not None:
                 logger.info("CORS fixed-base failover connection recovered")
             retry_seconds = poll_seconds
@@ -143,14 +151,73 @@ async def run_cors_fixed_base_failover_daemon():
         except Exception as exc:
             retry_seconds = min(max(60.0, poll_seconds), retry_seconds * 2.0)
             now = time.monotonic()
-            detail = str(exc).strip() or type(exc).__name__
-            error_kind = detail.split(':', 1)[0]
-            if error_kind != last_error_kind or now - last_error_log_at >= 300.0:
-                logger.warning("CORS fixed-base failover unavailable; retry in %.0fs: %s",
-                               retry_seconds, detail.splitlines()[0][:240])
-                last_error_log_at = now
-            last_error_kind = error_kind
+            last_error_kind, last_error_log_at = _log_failover_error(exc, now, last_error_kind, last_error_log_at, retry_seconds)
             await asyncio.sleep(retry_seconds)
+
+
+async def _bootstrap_schemas_if_needed():
+    if not config.settings.RUN_SCHEMA_BOOTSTRAP:
+        return
+    for engine, metadata, label in (
+        (auth_engine, model_auth.BaseAuth.metadata, "auth"),
+        (config_engine, model_config.BaseConfig.metadata, "config"),
+        (data_engine, model_data.BaseData.metadata, "data"),
+    ):
+        async with engine.begin() as conn:
+            await conn.run_sync(metadata.create_all)
+        logger.info("Database schema bootstrap complete: %s", label)
+
+
+async def _bootstrap_admin_account():
+    async with asyncio.timeout(10), AuthSessionLocal() as db_auth:
+        result = await db_auth.execute(
+            select(model_auth.User).where(model_auth.User.username == "admin")
+        )
+        admin_user = result.scalar_one_or_none()
+        if not admin_user and config.settings.BOOTSTRAP_ADMIN_PASSWORD:
+            hashed_password = await auth.get_password_hash(config.settings.BOOTSTRAP_ADMIN_PASSWORD)
+            new_admin = model_auth.User(
+                username="admin",
+                hashed_password=hashed_password,
+                role="admin",
+                full_name="Administrator",
+                is_active=True,
+            )
+            db_auth.add(new_admin)
+            await db_auth.commit()
+            logger.info("Bootstrap admin user created")
+        elif not admin_user:
+            logger.warning("No admin user exists; set BOOTSTRAP_ADMIN_PASSWORD once to create it")
+
+
+async def _purge_retired_system_configs():
+    async with asyncio.timeout(10), ConfigSessionLocal() as db_config:
+        legacy_keys = {"system_password", "main_config", "confirmation_config", "save_intervals_config"}
+        result = await db_config.execute(
+            delete(model_config.GlobalConfig).where(model_config.GlobalConfig.key.in_(legacy_keys))
+        )
+        await db_config.commit()
+        if result.rowcount:
+            logger.warning("Removed %s retired System Access configuration record(s)", result.rowcount)
+
+
+async def _run_startup_database_tasks():
+    try:
+        from .shared.project_location import backfill_project_map_positions
+        async with asyncio.timeout(30), ConfigSessionLocal() as db_config:
+            await backfill_project_map_positions(db_config)
+
+        interrupted = await simulations_router.recover_interrupted_runs()
+        if interrupted:
+            logger.warning("Marked %s unfinished simulation run(s) as interrupted", interrupted)
+
+        await _bootstrap_admin_account()
+        await _purge_retired_system_configs()
+    except Exception as exc:
+        logger.warning(
+            "Database startup tasks skipped; service is degraded until DB recovers: %s",
+            exc,
+        )
 
 
 # ============================================================================
@@ -173,82 +240,9 @@ async def lifespan(_app: FastAPI):
             await asyncio.to_thread(operations_store.append, 'operation_log', 'service.starting')
         except Exception:
             logger.critical('Operations PostgreSQL store unavailable at startup', exc_info=True)
-        # Production startup must not acquire DDL locks. Fresh development
-        # environments can opt in; production schema changes use Alembic.
-        if config.settings.RUN_SCHEMA_BOOTSTRAP:
-            for engine, metadata, label in (
-                (auth_engine, model_auth.BaseAuth.metadata, "auth"),
-                (config_engine, model_config.BaseConfig.metadata, "config"),
-                (data_engine, model_data.BaseData.metadata, "data"),
-            ):
-                async with engine.begin() as conn:
-                    await conn.run_sync(metadata.create_all)
-                logger.info("Database schema bootstrap complete: %s", label)
 
-        try:
-            from .shared.project_location import backfill_project_map_positions
-            async with asyncio.timeout(30), ConfigSessionLocal() as db_config:
-                await backfill_project_map_positions(db_config)
-
-            interrupted = await simulations_router.recover_interrupted_runs()
-            if interrupted:
-                logger.warning("Marked %s unfinished simulation run(s) as interrupted", interrupted)
-
-            # 4. Tạo Admin mặc định
-            async with asyncio.timeout(10), AuthSessionLocal() as db_auth:
-                    result = await db_auth.execute(
-                        select(model_auth.User).where(model_auth.User.username == "admin")
-                    )
-                    admin_user = result.scalar_one_or_none()
-
-                    if not admin_user and config.settings.BOOTSTRAP_ADMIN_PASSWORD:
-                        hashed_password = await auth.get_password_hash(
-                            config.settings.BOOTSTRAP_ADMIN_PASSWORD
-                        )
-                        new_admin = model_auth.User(
-                            username="admin",
-                            hashed_password=hashed_password,
-                            role="admin",
-                            full_name="Administrator",
-                            is_active=True
-                        )
-                        db_auth.add(new_admin)
-                        await db_auth.commit()
-                        logger.info("Bootstrap admin user created")
-                    elif not admin_user:
-                        logger.warning(
-                            "No admin user exists; set BOOTSTRAP_ADMIN_PASSWORD once to create it"
-                        )
-
-            # System Access was retired: purge browser-managed credentials and
-            # global runtime overrides left by older deployments. Server settings
-            # are now sourced only from the deployment environment.
-            async with asyncio.timeout(10), ConfigSessionLocal() as db_config:
-                    legacy_keys = {
-                        "system_password",
-                        "main_config",
-                        "confirmation_config",
-                        "save_intervals_config",
-                    }
-                    result = await db_config.execute(
-                        delete(model_config.GlobalConfig).where(
-                            model_config.GlobalConfig.key.in_(legacy_keys)
-                        )
-                    )
-                    await db_config.commit()
-                    if result.rowcount:
-                        logger.warning(
-                            "Removed %s retired System Access configuration record(s)",
-                            result.rowcount,
-                        )
-        except Exception as exc:
-            # Keep liveness available while /api/health/ready reports the
-            # unavailable databases as degraded. A transient DB outage must not
-            # make the whole HTTP process exit during startup.
-            logger.warning(
-                "Database startup tasks skipped; service is degraded until DB recovers: %s",
-                exc,
-            )
+        await _bootstrap_schemas_if_needed()
+        await _run_startup_database_tasks()
 
         mqtt_service.start()
         logger.info("MQTT background workers scheduled; broker status is reported by connection callbacks")
@@ -257,9 +251,7 @@ async def lifespan(_app: FastAPI):
         await start_scheduler()
 
         gnss_rollup_task = asyncio.create_task(run_gnss_daily_rollup_daemon())
-        cors_failover_task = asyncio.create_task(
-            run_cors_fixed_base_failover_daemon()
-        )
+        cors_failover_task = asyncio.create_task(run_cors_fixed_base_failover_daemon())
         file_cleanup_task = asyncio.create_task(run_file_cleanup_daemon())
         backup_task = asyncio.create_task(run_backup_daemon())
         logger.info("✓ GNSS rollup daemon started")
