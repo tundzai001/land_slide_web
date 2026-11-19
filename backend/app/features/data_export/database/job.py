@@ -444,6 +444,19 @@ async def _export_sensor_stream_data(
     return records_processed, total_records, summary_rows
 
 
+def _open_alert_csv_file(archive, mapping, station_id, alert_headers, current_text_f):
+    if current_text_f:
+        current_text_f.close()
+    bin_f = archive.open(
+        station_export_path(mapping["project_code"], mapping["station_code"], station_id, "ALERTS.csv"),
+        "w",
+    )
+    text_f = io.TextIOWrapper(bin_f, encoding="utf-8-sig", newline='')
+    writer = csv.writer(text_f)
+    writer.writerow(alert_headers)
+    return text_f, writer
+
+
 async def _export_alerts_stream_data(
     archive, data_db, task_id: str, alert_query, total_expected_data: int,
     records_processed: int, station_mapping: dict, exported_at: str
@@ -454,7 +467,6 @@ async def _export_alerts_stream_data(
     ]
     alert_counts = {}
     current_alert_key = None
-    bin_f = None
     text_f = None
     writer = None
     total_records = 0
@@ -472,15 +484,7 @@ async def _export_alerts_stream_data(
         })
         alert_key = (mapping["project_code"], mapping["station_code"], alert.station_id)
         if current_alert_key != alert_key:
-            if text_f:
-                text_f.close()
-            bin_f = archive.open(
-                station_export_path(mapping["project_code"], mapping["station_code"], alert.station_id, "ALERTS.csv"),
-                "w",
-            )
-            text_f = io.TextIOWrapper(bin_f, encoding="utf-8-sig", newline='')
-            writer = csv.writer(text_f)
-            writer.writerow(alert_headers)
+            text_f, writer = _open_alert_csv_file(archive, mapping, alert.station_id, alert_headers, text_f)
             current_alert_key = alert_key
 
         writer.writerow([
