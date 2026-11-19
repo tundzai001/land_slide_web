@@ -2561,6 +2561,75 @@ NODATA_value -9999
         with self.assertRaises(requests.RequestException):
             cs._handle_cors_fetch_exception(requests.RequestException("timeout"), managed_key_url=False, cache_age=999999)
 
+    def test_station_query_router_create_and_validation(self):
+        from app.features.stations.query_router import (
+            _create_station_devices,
+            get_mqtt_topic_availability,
+            _validate_new_station_inputs,
+        )
+        import app.schemas as schemas
+
+        # 1. _create_station_devices empty vs with sensor
+        db = MagicMock()
+        st = MagicMock(id=5, station_code="ST05", name="Station 05")
+        _create_station_devices(db, st, {})
+        db.add.assert_not_called()
+
+        _create_station_devices(db, st, {"gnss": {"topic": "landslide/st05/gnss", "mqtt": {"qos": 1}}})
+        db.add.assert_called()
+
+        # 2. get_mqtt_topic_availability available
+        db_async = AsyncMock()
+        db_async.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+        res_avail = asyncio.run(get_mqtt_topic_availability(topic="topic/test", db=db_async, _user=MagicMock()))
+        self.assertTrue(res_avail["available"])
+
+        # 3. _validate_new_station_inputs duplicate code -> 400
+        db_async.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=st)))
+        sc_data = MagicMock(station_code="ST05", sensors={})
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(_validate_new_station_inputs(db_async, sc_data))
+        self.assertEqual(ctx.exception.status_code, 400)
+
+        # 4. _validate_new_station_inputs invalid sensor type -> 422
+        db_async.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+        sc_data2 = MagicMock(station_code="ST06", sensors={"rain": "invalid_not_dict"})
+        with self.assertRaises(HTTPException) as ctx2:
+            asyncio.run(_validate_new_station_inputs(db_async, sc_data2))
+        self.assertEqual(ctx2.exception.status_code, 422)
+
+    def test_gnss_origin_async_load_and_apply(self):
+        from processors.gnss.origin import GNSSOriginMixin, _query_origin_record
+        import numpy as np
+
+        proc = GNSSOriginMixin()
+        proc.device_id = 99
+        proc._log_prefix = MagicMock(return_value="[TestGNSS]")
+        proc._runtime_state_key = MagicMock(return_value="state_99")
+        proc._restore_runtime_state = MagicMock(return_value=True)
+        proc._validated_tracking_offset = MagicMock(return_value=np.array([0.0, 0.0, 0.0]))
+        proc.tracking_offset_enu = np.array([0.0, 0.0, 0.0])
+
+        # 1. _schedule_load_origin outside event loop
+        proc._schedule_load_origin()
+        self.assertTrue(proc._initialization_complete)
+
+        # 2. _apply_origin_record missing matrix
+        rec_empty = MagicMock(rotation_matrix=None, ecef_origin=None)
+        proc._apply_origin_record(rec_empty, None)
+
+        # 3. _apply_origin_record complete
+        rec_valid = MagicMock(
+            lat=21.0, lon=105.0, h=50.0,
+            rotation_matrix=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            ecef_origin=[1000, 2000, 3000],
+            locked_at=123456, id=1,
+            tracking_offset=[0.01, 0.02, 0.03]
+        )
+        proc._apply_origin_record(rec_valid, runtime_state={'version': 1})
+        self.assertEqual(proc.state, "ORIGIN_LOCKED")
+        self.assertEqual(proc.origin['lat'], 21.0)
+
 
 
 
