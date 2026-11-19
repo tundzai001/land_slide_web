@@ -943,6 +943,120 @@ class TestStationAnalysisAndRuntimeCoverage:
             assert res2["idempotent_replay"] is False
             assert res2["changed"] is True
 
+    def test_incident_read_conditions(self):
+        from app.features.incidents.read_router import (
+            IncidentQueryFilter, _build_incident_conditions, _apply_incident_ordering,
+        )
+        from app.models import data as model_data
+        from sqlalchemy import select
+
+        f1 = IncidentQueryFilter(
+            status_filter="new", priority="HIGH", source_severity="CRITICAL",
+            signal_state="ACTIVE", source_kind="AUTOMATED", project_id=1,
+            station_id=2, assigned_to=3, q="landslide"
+        )
+        conds = _build_incident_conditions(f1)
+        assert len(conds) == 9
+
+        with pytest.raises(HTTPException):
+            _build_incident_conditions(IncidentQueryFilter(status_filter="invalid_status"))
+
+        with pytest.raises(HTTPException):
+            _build_incident_conditions(IncidentQueryFilter(priority="INVALID_PRIORITY"))
+
+        stmt = select(model_data.IncidentCase)
+        rank_col = model_data.IncidentCase.id
+        s1 = _apply_incident_ordering(stmt, "attention", rank_col)
+        s2 = _apply_incident_ordering(stmt, "updated_at", rank_col)
+        s3 = _apply_incident_ordering(stmt, "opened_at", rank_col)
+        assert s1 is not None
+        assert s2 is not None
+        assert s3 is not None
+
+    def test_gnss_adjustment_runtime_and_agrica(self):
+        from processors.gnss_adjustment.runtime import (
+            _llh_to_ecef, _safe_float, _safe_int, _positive_std,
+            extract_agrica_sentences, _parse_single_agrica_sentence, parse_agrica,
+        )
+        x, y, z = _llh_to_ecef(21.0, 105.0, 50.0)
+        assert x != 0
+        assert y != 0
+        assert z != 0
+
+        assert _safe_float("123.45") == 123.45
+        assert _safe_float(None) is None
+        assert _safe_float("invalid") is None
+
+        assert _safe_int("123") == 123
+        assert _safe_int(None) is None
+        assert _safe_int("invalid") is None
+
+        assert _positive_std(0.05) == 0.05
+        assert _positive_std(None) == 0.02
+        assert _positive_std(-1.0) == 0.02
+
+        parts = ["GNSS"] + ["0"] * 54
+        parts[2:8] = ["2024", "5", "10", "12", "0", "0.0"]
+        parts[8] = "4"
+        parts[13:16] = ["1.2", "3.4", "5.6"]
+        parts[16:19] = ["0.01", "0.01", "0.02"]
+        parts[29:32] = ["21.0", "105.0", "50.0"]
+        parts[32:35] = ["100", "200", "300"]
+        parts[38:41] = ["0.01", "0.01", "0.02"]
+        parts[41:44] = ["21.01", "105.01", "50.1"]
+        raw = "#AGRICA,0;" + ",".join(parts) + "*00000000"
+
+        sentences = extract_agrica_sentences(raw)
+        assert len(sentences) == 1
+
+        obs = _parse_single_agrica_sentence(sentences[0], 1, 10, "Station10", 1700000000)
+        assert obs is not None
+        assert obs.rover_name == "Station10"
+        assert obs.baseline_neu == (1.2, 3.4, 5.6)
+
+        obs_list = parse_agrica(raw, project_id=1, station_id=10, rover_name="Station10")
+        assert len(obs_list) == 1
+
+    def test_gnss_adjustment_router_helpers(self):
+        from app.features.gnss_adjustment.router import (
+            _check_existing_adjustment_session, _resolve_online_station_ids,
+        )
+        with patch("app.features.gnss_adjustment.router.mqtt_service") as mock_mqtt:
+            mock_mqtt.adjustment_phase = {1: "COLLECTING_BASELINE"}
+            mock_mqtt.active_adjustment_clusters = {1: [{"stations": [10, 20]}]}
+            mock_mqtt.round_robin_manager.get_seed_collection_status.return_value = {"status": "ok"}
+            mock_mqtt.adjustment_run_rosters = {1: {}}
+
+            res = _check_existing_adjustment_session(1)
+            assert res["existing"] is True
+            assert res["expected_station_ids"] == [10, 20]
+
+            res_none = _check_existing_adjustment_session(999)
+            assert res_none is None
+
+            mock_station = MagicMock(id=10, config={})
+            mock_device = MagicMock(id=101, station_id=10, last_data_time=time.time())
+            online = _resolve_online_station_ids([mock_station], [mock_device], [])
+            assert 10 in online
+
+    def test_station_report_helpers(self):
+        from app.features.data_export.reports.station import (
+            _build_station_info_table, _build_sensor_cache_elements,
+        )
+        colors = MagicMock()
+        colors.HexColor = lambda c: c
+        table_cls = MagicMock()
+        table_style_cls = MagicMock()
+        paragraph_cls = MagicMock()
+
+        station = MagicMock(name="Station 1", station_code="S1", status="online", location={"lat": 21.0, "lon": 105.0}, last_update=1700000000)
+        _build_station_info_table(station, colors, 1, table_cls, table_style_cls)
+        table_cls.assert_called()
+
+        elems = _build_sensor_cache_elements([], colors, 1, table_cls, table_style_cls, paragraph_cls, MagicMock(), MagicMock())
+        assert len(elems) == 2
+
+
 
 
 
