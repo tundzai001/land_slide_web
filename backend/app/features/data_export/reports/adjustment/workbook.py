@@ -772,7 +772,7 @@ class AdjustmentReportMixin:
         # Defensive cleanup: only these two report tabs are valid.  An empty
         # default Sheet/Sheet1 must never sit between the compact result and raw
         # audit, otherwise Excel's tab strip makes RAW_AUDIT look absent.
-        for extra_sheet in list(workbook.worksheets):
+        for extra_sheet in [s for s in workbook.worksheets]:
             if extra_sheet.title not in {"Binh sai", "RAW_AUDIT"}:
                 workbook.remove(extra_sheet)
         workbook.active = 0

@@ -92,7 +92,7 @@ def _decode_cursor(value: str, *, scope_hash: str, filter_hash: str, sort: str) 
         ):
             raise ValueError
         return payload
-    except (ValueError, TypeError, json.JSONDecodeError, UnicodeError):
+    except (ValueError, TypeError):
         raise HTTPException(status_code=422, detail={"code": "INVALID_CURSOR", "message": "Cursor không hợp lệ hoặc đã hết hạn"})
 
 

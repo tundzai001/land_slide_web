@@ -24,6 +24,8 @@ from .public import public_clusters
 router = APIRouter(tags=["Projects"])
 logger = logging.getLogger(__name__)
 
+PROJECT_NOT_FOUND = "Project not found"
+
 
 def validate_project_fields(data, creating=False):
     for key, limit in (("project_code", 50), ("name", 255), ("description", 1000)):
@@ -219,7 +221,7 @@ async def update_project(
         project = result.scalar_one_or_none()
 
         if not project:
-            raise HTTPException(status_code=404, detail="Project not found")
+            raise HTTPException(status_code=404, detail=PROJECT_NOT_FOUND)
 
         validate_project_fields(project_data)
         position = validate_map_position(project_data['map_position']) if 'map_position' in project_data else None
@@ -299,7 +301,7 @@ async def get_project(
         )
         project = result.scalar_one_or_none()
         if not project:
-            raise HTTPException(status_code=404, detail="Project not found")
+            raise HTTPException(status_code=404, detail=PROJECT_NOT_FOUND)
         return {
             "id": project.id,
             "project_code": project.project_code,
@@ -329,7 +331,7 @@ async def delete_project(
         project = result.scalar_one_or_none()
 
         if not project:
-            raise HTTPException(status_code=404, detail="Project not found")
+            raise HTTPException(status_code=404, detail=PROJECT_NOT_FOUND)
 
         await db.delete(project)
         await delete_project_dem_catalog(db, project_id)

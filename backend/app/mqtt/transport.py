@@ -248,12 +248,11 @@ class MQTTTransportMixin:
                     logger.warning("[NTRIP COMMAND] Ignored start route missing station_code or mountpoint: %s", payload)
             elif msg.topic == "command/ntrip/route/stop":
                 station_code = payload.get("station_code")
-                if station_code:
-                    if self.loop and self.loop.is_running():
-                        self._submit_threadsafe(
-                            ntrip_manager.stop_pusher(station_code),
-                            "ntrip-route-stop",
-                        )
+                if station_code and self.loop and self.loop.is_running():
+                    self._submit_threadsafe(
+                        ntrip_manager.stop_pusher(station_code),
+                        "ntrip-route-stop",
+                    )
         except Exception as e:
             logger.exception(f"[NTRIP COMMAND] Error processing command: {e}")
 
@@ -308,14 +307,14 @@ class MQTTTransportMixin:
     async def _wait_round_robin_ntrip_route(
         self,
         station_code: str,
-        timeout: float = 25.0,
     ) -> None:
         """Require the first valid RTCM frame on every primed mountpoint."""
 
         from app.mqtt.ntrip_pusher import ntrip_manager
 
         try:
-            await ntrip_manager.wait_for_rtcm(station_code, timeout=timeout)
+            async with asyncio.timeout(25.0):
+                await ntrip_manager.wait_for_rtcm(station_code)
         except Exception:
             logger.exception(
                 "[Round-Robin RTCM] station=%s fanout verification failed diagnostics=%s",

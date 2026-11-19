@@ -286,11 +286,11 @@ class AgricaAdjustmentRuntime:
         
         if not clusters:
             # Fallback to single cluster
-            clusters = [set(obs.station_id for obs in observations)]
+            clusters = [{obs.station_id for obs in observations}]
         else:
             # Add any unassigned stations to a default cluster
             assigned = set().union(*clusters)
-            unassigned = set(obs.station_id for obs in observations if obs.station_id not in assigned)
+            unassigned = {obs.station_id for obs in observations if obs.station_id not in assigned}
             if unassigned:
                 clusters.append(unassigned)
         

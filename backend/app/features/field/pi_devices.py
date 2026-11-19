@@ -21,6 +21,8 @@ from ...shared.pagination import normalize_page, set_pagination_headers
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/field", tags=["Field Unit API"])
 
+PI_DEVICE_NOT_FOUND = "Pi device not found"
+
 def _get_license_code_from_string(string_number: str) -> str:
     try:
         length = len(string_number)
@@ -264,7 +266,7 @@ async def list_pi_devices(
             )
             stations = s_res.scalars().all()
             # Fetch project names
-            project_ids = list(set(s.project_id for s in stations if s.project_id))
+            project_ids = list({s.project_id for s in stations if s.project_id})
             project_names = {}
             if project_ids:
                 p_res = await db.execute(
@@ -351,7 +353,7 @@ async def activate_pi_device(
         res = await db.execute(select(PiDevice).where(PiDevice.id == pi_id))
         pi = res.scalar_one_or_none()
         if not pi:
-            raise HTTPException(status_code=404, detail="Pi device not found")
+            raise HTTPException(status_code=404, detail=PI_DEVICE_NOT_FOUND)
         if pi.status not in ("pending", "activating"):
             raise HTTPException(status_code=400, detail=f"Pi is already '{pi.status}'")
 
@@ -395,7 +397,7 @@ async def confirm_pi_activation(
         res = await db.execute(select(PiDevice).where(PiDevice.id == pi_id))
         pi = res.scalar_one_or_none()
         if not pi:
-            raise HTTPException(status_code=404, detail="Pi device not found")
+            raise HTTPException(status_code=404, detail=PI_DEVICE_NOT_FOUND)
 
         pi.last_seen = int(time.time())
 
@@ -431,7 +433,7 @@ async def assign_pi_to_station(
         res = await db.execute(select(PiDevice).where(PiDevice.id == pi_id))
         pi = res.scalar_one_or_none()
         if not pi:
-            raise HTTPException(status_code=404, detail="Pi device not found")
+            raise HTTPException(status_code=404, detail=PI_DEVICE_NOT_FOUND)
         if getattr(pi, 'device_type', '') == 'pi_point':
             raise HTTPException(status_code=400, detail="Pi Point phải được gán qua Pi Center, không gán trực tiếp vào trạm")
         if pi.status not in ("activated", "assigned"):
@@ -477,7 +479,7 @@ async def unassign_pi(
         res = await db.execute(select(PiDevice).where(PiDevice.id == pi_id))
         pi = res.scalar_one_or_none()
         if not pi:
-            raise HTTPException(status_code=404, detail="Pi device not found")
+            raise HTTPException(status_code=404, detail=PI_DEVICE_NOT_FOUND)
 
         old_station = pi.station_id
         pi.station_id = None
@@ -510,7 +512,7 @@ async def toggle_lock_pi_device(
         res = await db.execute(select(PiDevice).where(PiDevice.id == pi_id))
         pi = res.scalar_one_or_none()
         if not pi:
-            raise HTTPException(status_code=404, detail="Pi device not found")
+            raise HTTPException(status_code=404, detail=PI_DEVICE_NOT_FOUND)
 
         pi.is_locked = not getattr(pi, 'is_locked', False)
         await db.commit()
@@ -541,7 +543,7 @@ async def delete_pi_device(
         res = await db.execute(select(PiDevice).where(PiDevice.id == pi_id))
         pi = res.scalar_one_or_none()
         if not pi:
-            raise HTTPException(status_code=404, detail="Pi device not found")
+            raise HTTPException(status_code=404, detail=PI_DEVICE_NOT_FOUND)
 
         await db.delete(pi)
         await db.commit()
@@ -565,7 +567,7 @@ async def reset_pi_device(
         res = await db.execute(select(PiDevice).where(PiDevice.id == pi_id))
         pi = res.scalar_one_or_none()
         if not pi:
-            raise HTTPException(status_code=404, detail="Pi device not found")
+            raise HTTPException(status_code=404, detail=PI_DEVICE_NOT_FOUND)
 
         old_serial = pi.serial
         pi.status      = "pending"

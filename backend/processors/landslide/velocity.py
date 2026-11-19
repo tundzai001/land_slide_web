@@ -123,7 +123,7 @@ class VelocityAnalysisMixin:
 
                 if trend == "accelerating" and risk_level in ("LOW", "MEDIUM"):
                     risk_level = "HIGH"
-                    warning_message = f"⚠️ Chú ý: Xu hướng đang tăng tốc mạnh"
+                    warning_message = "⚠️ Chú ý: Xu hướng đang tăng tốc mạnh"
             else:
                 classification = "Chưa đủ thời lượng"
                 risk_level = "INFO"

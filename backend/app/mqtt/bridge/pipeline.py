@@ -34,7 +34,7 @@ class SensorPipelineMixin(
             station_id = int(info.get("station_id") or 0)
             parallel_run_ids = [
                 int(run_id)
-                for run_id, context in list(self.adjustment_run_contexts.items())
+                for run_id, context in self.adjustment_run_contexts.items()
                 if int(context.get("project_id") or 0) == public_project_id
                 and int(run_id) != public_project_id
                 and str(self.adjustment_phase.get(int(run_id)) or "").upper()

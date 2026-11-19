@@ -16,16 +16,17 @@ RESCUE_IMAGE_DIR = Path(__file__).resolve().parents[3] / "static" / "uploads" / 
 RESCUE_IMAGE_URL_PREFIX = "/api/admin/rescue-images/"
 LEGACY_RESCUE_IMAGE_URL_PREFIX = "/static/uploads/rescue/"
 MAX_RESCUE_IMAGE_BYTES = 400 * 1024
+EXT_WEBP = ".webp"
 IMAGE_EXTENSIONS = {
     "image/jpeg": ".jpg",
     "image/jpg": ".jpg",
     "image/png": ".png",
-    "image/webp": ".webp",
+    "image/webp": EXT_WEBP,
 }
 IMAGE_MIME_BY_EXTENSION = {
     ".jpg": "image/jpeg",
     ".png": "image/png",
-    ".webp": "image/webp",
+    EXT_WEBP: "image/webp",
 }
 SAFE_IMAGE_FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
@@ -40,7 +41,7 @@ def _validate_image(mime_type: str, image_bytes: bytes) -> str:
     signatures_valid = {
         ".jpg": image_bytes.startswith(b"\xff\xd8\xff"),
         ".png": image_bytes.startswith(b"\x89PNG\r\n\x1a\n"),
-        ".webp": (
+        EXT_WEBP: (
             len(image_bytes) >= 12
             and image_bytes.startswith(b"RIFF")
             and image_bytes[8:12] == b"WEBP"
@@ -66,7 +67,7 @@ def persist_data_url(image_data_url: Optional[str]) -> Optional[str]:
     mime_type = header.split(";", 1)[0].removeprefix("data:").lower()
     try:
         image_bytes = base64.b64decode(encoded, validate=True)
-    except (binascii.Error, ValueError) as exc:
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid image encoding") from exc
 
     extension = _validate_image(mime_type, image_bytes)
@@ -134,7 +135,7 @@ def unpack_message(raw_message: Optional[str]) -> dict:
             "image_url": str(value.get("image_url") or "") or None,
             "image_data_url": str(value.get("image_data_url") or "") or None,
         }
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         return empty
 
 

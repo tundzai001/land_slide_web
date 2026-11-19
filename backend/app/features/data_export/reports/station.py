@@ -88,7 +88,7 @@ async def export_station_pdf(
         elements = []
 
         # Header
-        elements.append(Paragraph(f"Landslide Monitor - Station Report", title_style))
+        elements.append(Paragraph("Landslide Monitor - Station Report", title_style))
         elements.append(Spacer(1, 4*mm))
 
         # Station info table
@@ -112,8 +112,7 @@ async def export_station_pdf(
             ('TOPPADDING', (0, 0), (-1, -1), 4),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
         ]))
-        elements.append(info_table)
-        elements.append(Spacer(1, 8*mm))
+        elements.extend([info_table, Spacer(1, 8*mm)])
 
         # Latest Sensor Readings
         elements.append(Paragraph("Latest Sensor Readings", subtitle_style))

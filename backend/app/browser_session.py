@@ -71,7 +71,7 @@ def request_token(request: Request, *, required=True):
 def set_cookies(response: Response, request: Request, token, jti, max_age=None):
     session_name, csrf_name = cookie_names()
     secure = settings.ENVIRONMENT.lower() == "production" or request.url.scheme == "https"
-    options = dict(path="/", secure=secure, samesite="lax", max_age=max_age)
+    options = {"path": "/", "secure": secure, "samesite": "lax", "max_age": max_age}
     response.set_cookie(session_name, token, httponly=True, **options)
     response.set_cookie(csrf_name, csrf_token(jti), httponly=False, **options)
     response.headers["Cache-Control"] = "private, no-store"

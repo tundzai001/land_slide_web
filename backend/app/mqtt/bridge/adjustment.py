@@ -295,8 +295,8 @@ class MQTTAdjustmentMixin:
                     "timestamp": current_timestamp,
                     "data": adjustment,
                 })
-            except Exception as exc:
-                logger.error("Could not publish GNSS adjustment for station %s: %s", station_id, exc)
+            except Exception:
+                logger.exception("Could not publish GNSS adjustment for station %s", station_id)
 
         await manager.broadcast({
             "type": "gnss_adjustment_progress",

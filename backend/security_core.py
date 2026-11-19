@@ -15,7 +15,7 @@ class SecurityState:
     def __init__(self):
         self.ip_records = {}  # { ip: [timestamp1, timestamp2, ...] }
         self.blocked_ips = {} # { ip: unban_time }
-        self.whitelisted_ips = set(["127.0.0.1", "::1"])
+        self.whitelisted_ips = {"127.0.0.1", "::1"}
         
         # Threat Feed Logging (Max 100 entries)
         self.event_log = deque(maxlen=100)
@@ -51,12 +51,12 @@ class SecurityState:
 
     def clean_old_records(self):
         now = time.time()
-        for ip in list(self.ip_records.keys()):
+        for ip in [k for k in self.ip_records]:
             self.ip_records[ip] = [ts for ts in self.ip_records[ip] if now - ts < self.RATE_LIMIT_WINDOW]
             if not self.ip_records[ip]:
                 del self.ip_records[ip]
                 
-        for ip in list(self.blocked_ips.keys()):
+        for ip in [k for k in self.blocked_ips]:
             if now > self.blocked_ips[ip]:
                 del self.blocked_ips[ip]
                 self.add_event("UNBAN", ip, "Ban duration expired.")

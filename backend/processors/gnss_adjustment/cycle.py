@@ -392,7 +392,7 @@ class RoundRobinCycleMixin:
                         reports = session.get("seed_station_reports", {})
                         verified_station_ids = {
                             int(station_id)
-                            for station_id, report in list(reports.items())
+                            for station_id, report in reports.items()
                             if report.get("base_identity_verified") is True
                         }
                         if expected_station_ids <= verified_station_ids:
@@ -1266,14 +1266,20 @@ class RoundRobinCycleMixin:
                                 eligible.append(record)
                             return eligible
 
-                        def monitoring_records() -> list:
-                            return eligible_records_from(
-                                attempt_start_index,
+                        def monitoring_records(
+                            start_idx: int = attempt_start_index,
+                            fn=eligible_records_from,
+                        ) -> list:
+                            return fn(
+                                start_idx,
                                 require_solver_eligible=False,
                             )
 
-                        def eligible_attempt_records() -> list:
-                            return eligible_records_from(solver_start_index)
+                        def eligible_attempt_records(
+                            start_idx: int = solver_start_index,
+                            fn=eligible_records_from,
+                        ) -> list:
+                            return fn(start_idx)
 
                         def mark_stable_collection_started(
                             *,

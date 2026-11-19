@@ -254,7 +254,7 @@ def prune_scheduled_backups(retention_count):
                 if (manifest.get('version') == 2 and manifest.get('trigger') == 'scheduled'
                         and hmac.compare_digest(sign(manifest), str(envelope.get('signature', '')))):
                     candidates.append((int(manifest['created_at']), path))
-        except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, json.JSONDecodeError):
+        except (OSError, ValueError, KeyError, TypeError):
             continue
     candidates.sort(reverse=True)
     removed = 0

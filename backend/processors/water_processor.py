@@ -7,6 +7,8 @@ from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+NUMBER_RE = r"-?\d+(?:\.\d+)?"
+
 class WaterEngine:
     def __init__(self, history_size: int = 36, valid_min: float = 0.0, valid_max: float = 50.0):
         self.history = deque(maxlen=history_size)
@@ -42,15 +44,15 @@ class WaterEngine:
                     parsed = json.loads(text)
                     if isinstance(parsed, list) and parsed:
                         return float(parsed[-1])
-                except (json.JSONDecodeError, TypeError, ValueError):
-                    numbers = re.findall(r"-?\d+(?:\.\d+)?", text)
+                except (TypeError, ValueError):
+                    numbers = re.findall(NUMBER_RE, text)
                     if numbers:
                         return float(numbers[-1])
 
             try:
                 return float(text)
             except ValueError:
-                numbers = re.findall(r"-?\d+(?:\.\d+)?", text)
+                numbers = re.findall(NUMBER_RE, text)
                 if numbers:
                     return float(numbers[-1])
 
@@ -178,14 +180,14 @@ class RainEngine:
                     parsed = json.loads(text)
                     if isinstance(parsed, list) and parsed:
                         return float(parsed[-1])
-                except (json.JSONDecodeError, TypeError, ValueError):
-                    numbers = re.findall(r"-?\d+(?:\.\d+)?", text)
+                except (TypeError, ValueError):
+                    numbers = re.findall(NUMBER_RE, text)
                     if numbers:
                         return float(numbers[-1])
             try:
                 return float(text)
             except ValueError:
-                numbers = re.findall(r"-?\d+(?:\.\d+)?", text)
+                numbers = re.findall(NUMBER_RE, text)
                 if numbers:
                     return float(numbers[-1])
 

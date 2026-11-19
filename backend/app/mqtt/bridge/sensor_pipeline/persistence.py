@@ -65,14 +65,13 @@ class SensorPersistenceMixin:
         elif is_dangerous:
             # ✅ ALERT → Lưu ngay lập tức / không quan tâm chu kỳ
             save_data_now = True
-            logger.warning(f"⚠️ [FORCED SAVE] Alert detected - saving immediately")
+            logger.warning("⚠️ [FORCED SAVE] Alert detected - saving immediately")
         elif is_just_resolved:
             # ✅ VỪA RESOLVE ALERT → Lưu ngay để DB có dữ liệu an toàn mới nhất
             save_data_now = True
             logger.info(f"💾 [RESOLVE SAVE] Alert just resolved - saving safe data for station {station_id}")
         else:
             # ✅ KIỂM TRA CHU KỲ LƯU
-            throttle_key_station = f"{station_id}_{sensor_type}"
             last_saved = self.last_save_time[station_id].get(sensor_type, 0)
 
             interval = self.runtime_save_intervals.get('default', settings.SAVE_INTERVAL_DEFAULT)

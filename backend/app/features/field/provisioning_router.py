@@ -12,6 +12,8 @@ from ...models import config as model_config
 
 router = APIRouter(tags=["Field Provisioning"])
 
+DEVICE_NOT_FOUND = "device not found"
+
 
 def _device_token(request: Request, payload: Optional[Dict[str, Any]] = None, query_token: Optional[str] = None) -> str:
     """Read the device credential without logging or echoing it."""
@@ -48,7 +50,7 @@ async def field_provision(payload: Dict[str, Any], db: AsyncSession = Depends(ge
     result = await db.execute(select(model_config.Device).where(model_config.Device.device_code == device_code))
     device = result.scalar_one_or_none()
     if not device:
-        raise HTTPException(status_code=404, detail="device not found")
+        raise HTTPException(status_code=404, detail=DEVICE_NOT_FOUND)
 
     cfg = device.config or {}
     if not cfg.get('enroll_token') or not hmac.compare_digest(str(cfg.get('enroll_token')), str(token)):
@@ -89,7 +91,7 @@ async def field_get_config(device_code: str, request: Request, token: Optional[s
     result = await db.execute(select(model_config.Device).where(model_config.Device.device_code == device_code))
     device = result.scalar_one_or_none()
     if not device:
-        raise HTTPException(status_code=404, detail="device not found")
+        raise HTTPException(status_code=404, detail=DEVICE_NOT_FOUND)
 
     cfg = device.config or {}
     _require_device_token(request, cfg, query_token=token)
@@ -102,7 +104,7 @@ async def field_status(device_code: str, payload: Dict[str, Any], request: Reque
     result = await db.execute(select(model_config.Device).where(model_config.Device.device_code == device_code))
     device = result.scalar_one_or_none()
     if not device:
-        raise HTTPException(status_code=404, detail="device not found")
+        raise HTTPException(status_code=404, detail=DEVICE_NOT_FOUND)
 
     _require_device_token(request, device.config or {}, payload)
 

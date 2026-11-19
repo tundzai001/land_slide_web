@@ -47,7 +47,7 @@ async def _start_normal_adjustment(
             source="automatic_scheduler" if run_id is not None else "manual",
         ),
         db=db,
-        current_user=SimpleNamespace(role="system", assigned_projects=[]),
+        current_user=model_auth.User(id=0, username="system", role="system", assigned_projects=[]),
     )
 
 
@@ -181,9 +181,8 @@ async def run_scheduled_adjustment(project_id: int):
                     [context.get("status") for context in active_existing],
                 )
                 return
-            for old_run_id, old_context in list(
-                getattr(mqtt_service, "adjustment_run_contexts", {}).items()
-            ):
+            stale_items = [(k, v) for k, v in getattr(mqtt_service, "adjustment_run_contexts", {}).items()]
+            for old_run_id, old_context in stale_items:
                 if (
                     int(old_context.get("project_id") or 0) == int(project_id)
                     and old_context.get("status")
@@ -223,12 +222,11 @@ async def run_scheduled_adjustment(project_id: int):
                     )
                     return response
                 except Exception as exc:
-                    logger.error(
+                    logger.exception(
                         "Scheduled cluster failed to start project=%s cluster=%s: %s",
                         project_code,
                         cluster_run["cluster_name"],
                         exc,
-                        exc_info=True,
                     )
                     failure_result = await write_adjustment_failure_report(
                         project_id,

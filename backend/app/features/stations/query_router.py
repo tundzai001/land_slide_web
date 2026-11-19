@@ -645,12 +645,12 @@ async def _fetch_gnss_adjusted_cached(db_data, station_id, include_adjustment_ob
                 "latest_timestamp": adj_cached.timestamp,
                 "history": []
             }
-    except Exception as adj_load_e:
-        logger.error("Error loading cached gnss_adjusted for station %s: %s", station_id, adj_load_e)
+    except Exception:
+        logger.exception("Error loading cached gnss_adjusted for station %s", station_id)
     return None
 
 
-@router.get("/api/stations/{station_id}/detail", responses={403: {"description": "Forbidden"}, 500: {"description": "Internal Server Error"}})
+@router.get("/api/stations/{station_id}/detail", responses={403: {"description": "Forbidden"}, 404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def get_station_detail(
     station_id: int,
     request: Request,

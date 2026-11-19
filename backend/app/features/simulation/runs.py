@@ -82,7 +82,7 @@ async def get_run(run_id: int, db: AsyncSession = Depends(get_data_db), _user: m
     return _run_view(run)
 
 
-@router.post("/runs/{run_id}/stop")
+@router.post("/runs/{run_id}/stop", responses={404: {"description": "Not Found"}})
 async def stop_run(run_id: int, db: AsyncSession = Depends(get_data_db), _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
     run = await db.get(model_data.SimulationRun, run_id)
     if not run:

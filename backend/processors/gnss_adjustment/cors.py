@@ -284,7 +284,6 @@ class RoundRobinCorsMixin:
                 serial = snapshot["serial"]
                 server_id = snapshot["server_id"]
                 original = copy.deepcopy(snapshot["service_config"])
-                disabled_server_ids = snapshot["disabled_server_ids"]
             else:
                 serial, server_id, original = await asyncio.to_thread(
                     self._find_cors_station_sync,

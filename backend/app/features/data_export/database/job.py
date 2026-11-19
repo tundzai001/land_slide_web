@@ -114,8 +114,6 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                     # Historical builds stored every successful 1 Hz GNSS forward
                     # as audit data. The filter that previously excluded routine noise
                     # has been removed as per user request to export everything.
-                    pass
-
 
                     sensor_type_filter = set(requested_sensor_types)
                     if sensor_type_filter:

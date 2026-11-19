@@ -122,7 +122,7 @@ class GNSSLiveFetcher:
         except Exception as e:
             logger.exception(f"[GNSSLiveFetcher] Exception processing message: {e}")
 
-    async def fetch_origin(self, topic: str, timeout: int = 30) -> Optional[dict]:
+    async def fetch_origin(self, topic: str) -> Optional[dict]:
         try:
             import paho.mqtt.client as mqtt
 
@@ -139,14 +139,15 @@ class GNSSLiveFetcher:
             client.connect(self.broker, self.port, 60)
             client.loop_start()
 
-            start_time = asyncio.get_event_loop().time()
-            while self.received_data is None:
-                if asyncio.get_event_loop().time() - start_time > timeout:
-                    logger.warning("[GNSSLiveFetcher] Timeout reached waiting for GNSS data.")
-                    client.loop_stop()
-                    client.disconnect()
-                    return None
-                await asyncio.sleep(0.5)
+            try:
+                async with asyncio.timeout(30.0):
+                    while self.received_data is None:
+                        await asyncio.sleep(0.5)
+            except TimeoutError:
+                logger.warning("[GNSSLiveFetcher] Timeout reached waiting for GNSS data.")
+                client.loop_stop()
+                client.disconnect()
+                return None
 
             client.loop_stop()
             return self.received_data

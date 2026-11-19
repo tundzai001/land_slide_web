@@ -32,6 +32,7 @@ INTERNAL_SENSOR_TYPES = (
 _STATS_CACHE_TTL_SECONDS = 5
 _stats_cache = None
 _stats_cache_expires_at = 0.0
+UNSUPPORTED_SORT_FIELD = "Unsupported sort field"
 
 def _sensor_data_preview(value):
     """Return a compact, bounded preview without database-specific JSON casts."""
@@ -141,7 +142,7 @@ async def admin_get_all_stations(
         if sort:
             field = sort.lstrip("-")
             if field not in sort_fields:
-                raise HTTPException(status_code=422, detail="Unsupported sort field")
+                raise HTTPException(status_code=422, detail=UNSUPPORTED_SORT_FIELD)
             column = sort_fields[field]
             query = query.order_by(column.desc() if sort.startswith("-") else column.asc())
         result = await db.execute(query)
@@ -225,7 +226,7 @@ async def admin_get_all_devices(
         if sort:
             field = sort.lstrip("-")
             if field not in sort_fields:
-                raise HTTPException(status_code=422, detail="Unsupported sort field")
+                raise HTTPException(status_code=422, detail=UNSUPPORTED_SORT_FIELD)
             column = sort_fields[field]
             query = query.order_by(column.desc() if sort.startswith("-") else column.asc())
         result = await db.execute(query)
@@ -321,7 +322,7 @@ async def admin_get_sensor_data(
         sort_fields = {"id": model_data.SensorData.id, "timestamp": model_data.SensorData.timestamp, "station_id": model_data.SensorData.station_id, "sensor_type": model_data.SensorData.sensor_type}
         field = sort.lstrip("-")
         if field not in sort_fields:
-            raise HTTPException(status_code=422, detail="Unsupported sort field")
+            raise HTTPException(status_code=422, detail=UNSUPPORTED_SORT_FIELD)
 
         if grouped_adjustments:
             summary_query = select(
@@ -479,7 +480,7 @@ async def admin_get_alerts(
         sort_fields = {"id": model_data.Alert.id, "timestamp": model_data.Alert.timestamp, "station_id": model_data.Alert.station_id, "level": model_data.Alert.level}
         field = sort.lstrip("-")
         if field not in sort_fields:
-            raise HTTPException(status_code=422, detail="Unsupported sort field")
+            raise HTTPException(status_code=422, detail=UNSUPPORTED_SORT_FIELD)
         page_offset, page_limit = normalize_page(offset, limit, max_limit=1000)
         total = int((await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0)
         column = sort_fields[field]
@@ -530,7 +531,7 @@ async def admin_get_simulations(
     fields = {"id": model_data.SimulationRun.id, "created_at": model_data.SimulationRun.created_at}
     field = sort.lstrip("-")
     if field not in fields:
-        raise HTTPException(status_code=422, detail="Unsupported sort field")
+        raise HTTPException(status_code=422, detail=UNSUPPORTED_SORT_FIELD)
     page_offset, page_limit = normalize_page(offset, limit, max_limit=500)
     total = int((await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0)
     column = fields[field]

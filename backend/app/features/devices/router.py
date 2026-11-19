@@ -59,10 +59,7 @@ async def get_station_devices(
                 select(model_config.GNSSOrigin.device_id, model_config.GNSSOrigin.tracking_offset)
                 .where(model_config.GNSSOrigin.device_id.in_(device_ids))
             )
-            tracking_offsets = {
-                device_id: tracking_offset
-                for device_id, tracking_offset in origin_result.all()
-            }
+            tracking_offsets = dict(origin_result.all())
 
         return [
             {

@@ -45,7 +45,7 @@ async def fetch_live_gnss_origin(
             use_tls=use_tls
         )
 
-        result = await fetcher.fetch_origin(topic, timeout=30)
+        result = await fetcher.fetch_origin(topic)
 
         if not result:
             raise HTTPException(status_code=408, detail="Timeout: Không nhận được dữ liệu GNSS")

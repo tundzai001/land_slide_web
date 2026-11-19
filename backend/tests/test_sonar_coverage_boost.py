@@ -1981,7 +1981,7 @@ class SonarCoverageBoostTests(unittest.TestCase):
         params, sources, warnings = _extract_profile_parameters({"cohesion_kpa": 12.5})
         self.assertEqual(params["cohesion"], 12.5)
         self.assertEqual(sources["cohesion"], "Hồ sơ trạm")
-        self.assertTrue(len(warnings) > 0)
+        self.assertGreater(len(warnings), 0)
 
         # 4. _process_sensor_snapshot & _apply_sensor_overrides
         mock_sensor_row = MagicMock(sensor_type="rain", timestamp=1000, data={"intensity_mm_h": 15.0})
@@ -1993,6 +1993,176 @@ class SonarCoverageBoostTests(unittest.TestCase):
         override_sources = {}
         _apply_sensor_overrides(valid_data, {}, overrides, override_sources, [])
         self.assertEqual(overrides["rainfall"], 15.0)
+
+    def test_station_configuration_extended(self):
+        from app.features.stations.configuration import (
+            _auto_compute_station_location, _sync_sensor_device, _sync_station_devices,
+            _merge_station_config, update_station_config, reset_station_config, get_station_config
+        )
+        from app.models import config as model_config
+
+        # 1. _auto_compute_station_location
+        st = MagicMock(id=1, config={'gnss_origin': {'lat': 21.0, 'lon': 105.0}, 'rain_origin': {'lat': 21.2, 'lon': 105.2}}, location=None)
+        _auto_compute_station_location(st)
+        self.assertEqual(st.location, {'lat': 21.1, 'lon': 105.1})
+
+        # dem-grid preserved
+        st_grid = MagicMock(id=2, config={'gnss_origin': {'lat': 21.0, 'lon': 105.0}}, location={'source': 'project-dem-grid'})
+        _auto_compute_station_location(st_grid)
+        self.assertEqual(st_grid.location, {'source': 'project-dem-grid'})
+
+        # 2. _sync_sensor_device
+        db = AsyncMock()
+        self.assertIsNone(asyncio.run(_sync_sensor_device(db, MagicMock(), 'rain', {'topic': ''}, {})))
+        mock_dev = MagicMock(is_active=True, config={})
+        res = asyncio.run(_sync_sensor_device(db, MagicMock(id=1, station_code='S1', name='S1'), 'rain', {'topic': 'a/b', 'mqtt': {}}, {'rain': mock_dev}))
+        self.assertEqual(res, 'rain')
+        self.assertEqual(mock_dev.mqtt_topic, 'a/b')
+
+        # 3. reset_station_config & get_station_config
+        db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+        with self.assertRaises(HTTPException):
+            asyncio.run(reset_station_config(999, db=db, _current_user=MagicMock()))
+
+        mock_st = MagicMock(id=1, station_code='S1', name='Station 1', config={'gnss_origin': {'lat': 21.0, 'lon': 105.0}})
+        db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=mock_st)))
+        reset_res = asyncio.run(reset_station_config(1, db=db, _current_user=MagicMock()))
+        self.assertEqual(reset_res['status'], 'success')
+
+        db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+        with self.assertRaises(HTTPException):
+            asyncio.run(get_station_config(999, db=db, _current_user=MagicMock()))
+
+        db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=mock_st)))
+        get_res = asyncio.run(get_station_config(1, db=db, _current_user=MagicMock()))
+        self.assertEqual(get_res['station_id'], 1)
+
+    def test_mqtt_topics_extended(self):
+        from app.mqtt.bridge.topics import MQTTTopicMixin
+
+        class TestBridge(MQTTTopicMixin):
+            def __init__(self):
+                self._diag_last_log_ts = {}
+                self.runtime_confirmation = {'gnss': 3, 'rain': 2, 'water': 2, 'imu': 2}
+                self.analyzer = MagicMock(alert_counters={1: 5}, gnss_recent_history={1: []})
+                self.runtime_mqtt = {'broker': 'localhost', 'port': 1883, 'user': 'u', 'password': 'p'}
+                self.processors_cache = {}
+                self._sub_clients = {}
+                self._client_topics = {}
+
+        b = TestBridge()
+        self.assertTrue(b._diag_should_log('test_key', 10))
+        self.assertFalse(b._diag_should_log('test_key', 10))
+
+        cfg = b._apply_runtime_defaults_to_station_config({})
+        self.assertTrue(cfg['alerting']['enabled'])
+        self.assertEqual(cfg['GnssAlerting']['gnss_confirm_steps'], 3)
+
+        self.assertTrue(b._is_station_alerting_enabled({'alerting': {'enabled': True}}))
+        self.assertFalse(b._is_station_alerting_enabled({'alerting': {'enabled': False}}))
+
+        b._reset_station_alert_state(1)
+        self.assertNotIn(1, b.analyzer.alert_counters)
+
+        host, port, user, pw, tls = b._resolve_device_broker_config(MagicMock(config={}), MagicMock(config={}))
+        self.assertEqual(host, 'localhost')
+        self.assertEqual(port, 1883)
+
+        # _resolve_device_processor
+        st = MagicMock(name='ST1', config={'ImuBaseline': {'baseline_roll': 1.0, 'baseline_pitch': 2.0, 'baseline_yaw': 3.0}})
+        self.assertTrue(b._resolve_device_processor(MagicMock(id=1, device_type='imu'), st, 'imu_1', 'ctx'))
+        self.assertTrue(b._resolve_device_processor(MagicMock(id=2, device_type='rain'), st, 'rain_2', 'ctx'))
+        self.assertTrue(b._resolve_device_processor(MagicMock(id=3, device_type='water'), st, 'water_3', 'ctx'))
+        self.assertFalse(b._resolve_device_processor(MagicMock(id=4, device_type='unknown_type'), st, 'unk_4', 'ctx'))
+
+        # _stop_unused_mqtt_clients
+        mock_cli = MagicMock()
+        b._sub_clients[('old_host', 1883, None, None, False)] = mock_cli
+        b._client_topics[('old_host', 1883, None, None, False)] = set()
+        b._stop_unused_mqtt_clients({})
+        mock_cli.loop_stop.assert_called_once()
+        self.assertNotIn(('old_host', 1883, None, None, False), b._sub_clients)
+
+    def test_landslide_velocity_and_alerts_extended(self):
+        from processors.landslide_analyzer import LandslideAnalyzer
+
+        analyzer = LandslideAnalyzer()
+        # 1. insufficient data
+        res1 = analyzer.analyze_long_term_velocity(1, [], {})
+        self.assertEqual(res1['status'], 'insufficient_data')
+        res2 = analyzer.analyze_long_term_velocity(1, [{'timestamp': 100, 'data': {}}], {})
+        self.assertEqual(res2['status'], 'insufficient_data')
+
+        # 2. valid data points
+        pts = [
+            {'timestamp': 1000 + i * 86400, 'data': {'pos_e': 0.005 * i, 'pos_n': 0.01 * i, 'pos_u': 0.001 * i, 'fix_quality': 4}}
+            for i in range(12)
+        ]
+        res3 = analyzer.analyze_long_term_velocity(1, pts, {})
+        self.assertEqual(res3['status'], 'success')
+        self.assertIn('velocity_mm_year', res3['analysis'])
+
+        # 3. accelerating trend
+        pts_acc = [
+            {'timestamp': 1000 + i * 86400, 'data': {'pos_e': 0.002 * (i ** 2), 'pos_n': 0.003 * (i ** 2), 'pos_u': 0.0, 'fix_quality': 4}}
+            for i in range(15)
+        ]
+        res4 = analyzer.analyze_long_term_velocity(1, pts_acc, {})
+        self.assertEqual(res4['status'], 'success')
+
+    def test_simulation_runs_endpoints_extended(self):
+        from app.features.simulation.runs import stop_run, rerun
+
+        db = AsyncMock()
+        # stop_run not found
+        db.get = AsyncMock(return_value=None)
+        with self.assertRaises(HTTPException):
+            asyncio.run(stop_run(999, db=db, _user=MagicMock()))
+
+        # stop_run running
+        mock_run = MagicMock(status='running', finished_at=None, updated_at=None)
+        db.get = AsyncMock(return_value=mock_run)
+        asyncio.run(stop_run(1, db=db, _user=MagicMock()))
+        self.assertEqual(mock_run.status, 'stopped')
+
+        # rerun not found
+        db.get = AsyncMock(return_value=None)
+        with self.assertRaises(HTTPException):
+            asyncio.run(rerun(999, db=db, current_user=MagicMock()))
+
+    def test_cors_stations_helpers(self):
+        from app.features.projects.cors_stations import _resolve_cors_online_status, _parse_cors_stream_entry
+
+        self.assertTrue(_resolve_cors_online_status({'is_online': True}, ''))
+        self.assertFalse(_resolve_cors_online_status({'is_online': False}, ''))
+        self.assertTrue(_resolve_cors_online_status({}, 'online'))
+        self.assertTrue(_resolve_cors_online_status({}, 'active'))
+        self.assertFalse(_resolve_cors_online_status({}, 'disconnected'))
+        self.assertTrue(_resolve_cors_online_status({'ntrip_connected': True}, ''))
+
+        self.assertIsNone(_parse_cors_stream_entry(None, 1))
+        self.assertIsNone(_parse_cors_stream_entry("not_dict", 1))
+
+        entry1 = _parse_cors_stream_entry({'server_id': 10, 'stream_id': 's1', 'host': 'h', 'port': 2101, 'mountpoint': 'm', 'enabled': True}, 1)
+        self.assertEqual(entry1['server_id'], 10)
+
+        entry2 = _parse_cors_stream_entry({'stream_id': 'stream_42', 'host': 'h'}, 5)
+        self.assertEqual(int(entry2['server_id']), 42)
+
+    def test_station_analysis_risk_assessment_helpers(self):
+        from app.features.stations.analysis_router import _calculate_station_risk_assessment
+
+        db = AsyncMock()
+        # Disabled alerting returns LOW
+        res_disabled = asyncio.run(_calculate_station_risk_assessment(db, 1, {'alerting': {'enabled': False}}))
+        self.assertEqual(res_disabled['overall_risk'], 'LOW')
+        self.assertEqual(res_disabled['active_alerts'], [])
+
+        # Empty alerts returns LOW
+        db.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+        res_empty = asyncio.run(_calculate_station_risk_assessment(db, 1, {'alerting': {'enabled': True}}))
+        self.assertEqual(res_empty['overall_risk'], 'LOW')
+
 
 
 

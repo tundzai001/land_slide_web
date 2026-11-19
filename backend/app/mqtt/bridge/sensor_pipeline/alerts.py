@@ -92,7 +92,6 @@ class SensorAlertMixin:
     async def _auto_resolve_sensor_alerts(
         self,
         station_id: int,
-        station_name: str,
         sensor_type: str,
         station_config: dict,
         project_id: int | None,
@@ -205,7 +204,7 @@ class SensorAlertMixin:
             await self._broadcast_dangerous_alert(station_id, station_name, sensor_type, alert, project_id)
         elif not is_pending:
             is_just_resolved = await self._auto_resolve_sensor_alerts(
-                station_id, station_name, sensor_type, station_config, project_id
+                station_id, sensor_type, station_config, project_id
             )
             try:
                 summary = await self._get_station_active_alert_summary(station_id, station_config)

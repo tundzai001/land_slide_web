@@ -18,10 +18,10 @@ from ...websocket import manager as websocket_manager
 router = APIRouter(tags=["Health"])
 
 
-async def _probe_engine(engine, timeout: float = 2.0) -> dict[str, Any]:
+async def _probe_engine(engine) -> dict[str, Any]:
     started = time.perf_counter()
     try:
-        async with asyncio.timeout(timeout), engine.connect() as connection:
+        async with asyncio.timeout(2.0), engine.connect() as connection:
             await connection.execute(text("SELECT 1"))
         return {"ok": True, "duration_ms": round((time.perf_counter() - started) * 1000, 1)}
     except Exception as exc:

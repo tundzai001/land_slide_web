@@ -233,12 +233,6 @@ async def update_station_config(
 
         return {"status": "success", "message": f"Updated station {station_id}"}
 
-        station.updated_at = int(time.time())
-        await refresh_project_map_position(db, station.project_id)
-        await db.commit()
-
-        return {"status": "success", "message": f"Updated station {station_id}"}
-
     except HTTPException:
         await db.rollback()
         raise
