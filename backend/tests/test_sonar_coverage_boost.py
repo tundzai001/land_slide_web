@@ -2678,6 +2678,29 @@ NODATA_value -9999
         self.assertEqual(ctx_err.exception.status_code, 500)
         db_err.rollback.assert_called()
 
+    def test_get_public_dashboard_summary_branches(self):
+        import time
+        from app.features.stations.query_router import get_public_dashboard_summary
+        from unittest.mock import patch
+
+        db_config = AsyncMock()
+        st1 = MagicMock(id=1, config={})
+        st2 = MagicMock(id=2, config={"offline_display_enabled": True})
+        db_config.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[st1, st2])))))
+
+        devices_map = {
+            1: [MagicMock(device_type="gnss")],
+            2: [MagicMock(device_type="rain")]
+        }
+        latest_map = {(1, "gnss"): int(time.time())}
+
+        with patch("app.features.stations.query_router._load_station_runtime_maps", new=AsyncMock(return_value=(devices_map, latest_map, {}))):
+            res = asyncio.run(get_public_dashboard_summary(db_config, db_data=AsyncMock()))
+            self.assertEqual(res["stations"]["total"], 2)
+            self.assertEqual(res["stations"]["online"], 1)
+            self.assertEqual(res["stations"]["stale"], 1)
+            self.assertEqual(res["stations"]["offline"], 0)
+
 
 
 
