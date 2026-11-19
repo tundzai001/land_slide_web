@@ -275,6 +275,53 @@ class RoundRobinResultsMixin:
             sample for sample in samples if id(sample) not in rejected_ids
         ], diagnostics
 
+    def _accumulate_session_summaries(
+        self, contiguous_sessions: List[List[dict]]
+    ) -> List[dict]:
+        session_summaries = []
+        for session_index, session_rows in enumerate(contiguous_sessions, 1):
+            session_state = _InformationAccumulator()
+            for session_row in session_rows:
+                session_state.add(
+                    int(session_row.get("observation_epoch") or 0),
+                    session_row["delta"],
+                    session_row["covariance"],
+                    fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
+                    slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
+                    retention_seconds=1,
+                )
+            session_mean = np.asarray(session_state.mean, dtype=float)
+            session_summaries.append({
+                "session": session_index,
+                "session_id": session_rows[0].get("session_id"),
+                "observation_count": len(session_rows),
+                "mean_xyz": tuple(float(value) for value in session_mean),
+            })
+        return session_summaries
+
+    @staticmethod
+    def _find_max_session_mean_separation(
+        session_summaries: List[dict],
+    ) -> tuple[float, Optional[tuple[float, ...]], Optional[tuple[Any, Any]]]:
+        max_separation = 0.0
+        max_difference = None
+        max_pair = None
+        for left in range(len(session_summaries)):
+            for right in range(left + 1, len(session_summaries)):
+                difference = (
+                    np.asarray(session_summaries[right]["mean_xyz"], dtype=float)
+                    - np.asarray(session_summaries[left]["mean_xyz"], dtype=float)
+                )
+                separation = float(np.linalg.norm(difference))
+                if separation > max_separation:
+                    max_separation = separation
+                    max_difference = tuple(float(v) for v in difference)
+                    max_pair = (
+                        session_summaries[left]["session_id"] or session_summaries[left]["session"],
+                        session_summaries[right]["session_id"] or session_summaries[right]["session"],
+                    )
+        return max_separation, max_difference, max_pair
+
     def _weighted_edges(self, samples: List[dict]) -> List[dict]:
         groups: Dict[tuple[str, str], List[dict]] = {}
         for sample in samples:
@@ -311,48 +358,12 @@ class RoundRobinResultsMixin:
             )
             contiguous_sessions = _split_effective_sample_sessions(rows)
             effective_sample_size = float(len(contiguous_sessions))
-            session_summaries = []
-            for session_index, session_rows in enumerate(contiguous_sessions, 1):
-                session_state = _InformationAccumulator()
-                for session_row in session_rows:
-                    session_state.add(
-                        int(session_row.get("observation_epoch") or 0),
-                        session_row["delta"],
-                        session_row["covariance"],
-                        fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
-                        slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
-                        retention_seconds=1,
-                    )
-                session_mean = np.asarray(session_state.mean, dtype=float)
-                session_summary = {
-                    "session": session_index,
-                    "session_id": session_rows[0].get("session_id"),
-                    "observation_count": len(session_rows),
-                    "mean_xyz": tuple(float(value) for value in session_mean),
-                }
-                session_summaries.append(session_summary)
-
-            max_session_mean_separation = 0.0
-            max_session_mean_difference = None
-            max_session_mean_pair = None
-            for left in range(len(session_summaries)):
-                for right in range(left + 1, len(session_summaries)):
-                    difference = (
-                        np.asarray(session_summaries[right]["mean_xyz"], dtype=float)
-                        - np.asarray(session_summaries[left]["mean_xyz"], dtype=float)
-                    )
-                    separation = float(np.linalg.norm(difference))
-                    if separation > max_session_mean_separation:
-                        max_session_mean_separation = separation
-                        max_session_mean_difference = tuple(
-                            float(value) for value in difference
-                        )
-                        max_session_mean_pair = (
-                            session_summaries[left]["session_id"]
-                            or session_summaries[left]["session"],
-                            session_summaries[right]["session_id"]
-                            or session_summaries[right]["session"],
-                        )
+            session_summaries = self._accumulate_session_summaries(contiguous_sessions)
+            (
+                max_session_mean_separation,
+                max_session_mean_difference,
+                max_session_mean_pair,
+            ) = self._find_max_session_mean_separation(session_summaries)
 
             for session_diagnostic, session_summary in zip(
                 ess_sessions, session_summaries, strict=True

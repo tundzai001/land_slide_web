@@ -1543,8 +1543,10 @@ class SonarCoverageBoostTests(unittest.TestCase):
         ))
         self.assertFalse(res_save)
 
-        with self.assertRaises(RuntimeError):
-            asyncio.run(receiver_inst._handle_rover_restore_failure(
+        self.assertRaises(
+            RuntimeError,
+            asyncio.run,
+            receiver_inst._handle_rover_restore_failure(
                 rover_code="ROV1",
                 command_text="mode rover",
                 command_index=1,
@@ -1552,10 +1554,13 @@ class SonarCoverageBoostTests(unittest.TestCase):
                 project_id=1,
                 attempt=1,
                 set_transport_failure=False,
-            ))
+            ),
+        )
 
-        with self.assertRaises(RuntimeError):
-            asyncio.run(receiver_inst._handle_rover_restore_failure(
+        self.assertRaises(
+            RuntimeError,
+            asyncio.run,
+            receiver_inst._handle_rover_restore_failure(
                 rover_code="ROV1",
                 command_text="mode rover",
                 command_index=1,
@@ -1563,7 +1568,101 @@ class SonarCoverageBoostTests(unittest.TestCase):
                 project_id=1,
                 attempt=1,
                 set_transport_failure=True,
-            ))
+            ),
+        )
+
+        # 6. _build_unicore_base_config & _build_unicore_rover_config
+        base_cmds_survey = receiver_inst._build_unicore_base_config(
+            setup_method="SURVEY_IN", duration=120
+        )
+        self.assertIn(b"mode base time 120\r\n", base_cmds_survey)
+
+        base_cmds_ecef = receiver_inst._build_unicore_base_config(
+            setup_method="FIXED", ecef_xyz=(-1234567.89, 4567890.12, 3456789.01)
+        )
+        self.assertTrue(any(b"mode base -1234567.8900" in cmd for cmd in base_cmds_ecef))
+
+        self.assertRaises(
+            ValueError,
+            receiver_inst._build_unicore_base_config,
+            "FIXED",
+            60,
+            0,
+            0,
+            0,
+            (1.0, 2.0, 3.0),
+        )
+
+        base_cmds_llh = receiver_inst._build_unicore_base_config(
+            setup_method="FIXED", lat=21.0, lon=105.0, alt=50.0
+        )
+        self.assertIn(b"config undulation 0.0\r\n", base_cmds_llh)
+
+        rover_cmds_auto = RoundRobinReceiverMixin._build_unicore_rover_config()
+        self.assertIn(b"config undulation auto\r\n", rover_cmds_auto)
+
+        rover_cmds_val = RoundRobinReceiverMixin._build_unicore_rover_config(restore_undulation=2.5)
+        self.assertIn(b"config undulation 2.5000\r\n", rover_cmds_val)
+
+        # 7. NTRIP route control methods
+        receiver_inst.source_host = "127.0.0.1"
+        receiver_inst.source_port = 2101
+        receiver_inst.source_password = "pass"
+        receiver_inst.mqtt_client = MagicMock()
+        receiver_inst.route_start_callback = None
+        receiver_inst.route_wait_callback = None
+        receiver_inst.route_stop_callback = None
+
+        asyncio.run(receiver_inst._start_ntrip_route("STA1", "STA1_BASE"))
+        receiver_inst.mqtt_client.publish.assert_called_with(
+            "command/ntrip/route/start", unittest.mock.ANY
+        )
+
+        asyncio.run(receiver_inst._wait_for_ntrip_route("STA1"))
+
+        asyncio.run(receiver_inst._stop_ntrip_route("STA1"))
+        receiver_inst.mqtt_client.publish.assert_called_with(
+            "command/ntrip/route/stop", unittest.mock.ANY
+        )
+
+        # NTRIP route with callbacks
+        mock_start = AsyncMock(return_value=True)
+        mock_wait = AsyncMock()
+        mock_stop = AsyncMock()
+        receiver_inst.route_start_callback = mock_start
+        receiver_inst.route_wait_callback = mock_wait
+        receiver_inst.route_stop_callback = mock_stop
+
+        asyncio.run(receiver_inst._start_ntrip_route("STA1", "STA1_BASE"))
+        mock_start.assert_called_once()
+        asyncio.run(receiver_inst._wait_for_ntrip_route("STA1"))
+        mock_wait.assert_called_once()
+        asyncio.run(receiver_inst._stop_ntrip_route("STA1"))
+        mock_stop.assert_called_once()
+
+        # 8. _refresh_rover_restore_session
+        receiver_inst._find_client_info = AsyncMock(return_value={"Username": "u", "receiverID": "r", "Mountpoint": "MP"})
+        new_client, new_mp = asyncio.run(
+            receiver_inst._refresh_rover_restore_session(
+                "ROV1", 1, {}, "old_mp", "test_cmd"
+            )
+        )
+        self.assertEqual(new_mp, "MP")
+        self.assertEqual(new_client["Username"], "u")
+
+        # 9. _accumulate_session_summaries & _find_max_session_mean_separation
+        mock_session_rows = [[
+            {
+                "observation_epoch": 100,
+                "delta": [1.0, 2.0, 3.0],
+                "covariance": np.eye(3) * 0.0001,
+                "session_id": "sess1",
+            }
+        ]]
+        summaries = results_inst._accumulate_session_summaries(mock_session_rows)
+        self.assertEqual(len(summaries), 1)
+        sep, diff, pair = RoundRobinResultsMixin._find_max_session_mean_separation(summaries)
+        self.assertEqual(sep, 0.0)
 
 
 

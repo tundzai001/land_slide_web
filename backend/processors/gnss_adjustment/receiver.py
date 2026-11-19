@@ -1309,6 +1309,47 @@ class RoundRobinReceiverMixin:
             f"{self._last_set_error or NO_RECEIVER_RESPONSE}"
         )
 
+    async def _refresh_rover_restore_session(
+        self,
+        rover_code: str,
+        project_id: Optional[int],
+        client_info: Dict[str, Any],
+        mountpoint: str,
+        command_text: str,
+    ) -> tuple[Dict[str, Any], str]:
+        """Attempt to refresh AICaster client session during transport retry."""
+        try:
+            refreshed_client = await self._find_client_info(
+                rover_code,
+                project_id=project_id,
+                log_missing=False,
+            )
+        except Exception as refresh_exc:
+            logger.warning(
+                "Could not refresh AICaster client session while restoring %s: %s",
+                rover_code,
+                str(refresh_exc) or refresh_exc.__class__.__name__,
+            )
+            return client_info, mountpoint
+
+        if not refreshed_client:
+            return client_info, mountpoint
+
+        client_info = refreshed_client
+        refreshed_mountpoint = str(refreshed_client.get("Mountpoint") or "").strip()
+        if refreshed_mountpoint:
+            mountpoint = refreshed_mountpoint
+        await self._emit_progress(
+            project_id,
+            (
+                f"{rover_code}: refreshed AICaster SET session "
+                f"username={client_info.get('Username')} "
+                f"receiverID={client_info.get('receiverID')} "
+                f"mountpoint={mountpoint}; retrying {command_text}."
+            ),
+        )
+        return client_info, mountpoint
+
     async def _attempt_rover_restore_command(
         self,
         *,
@@ -1390,36 +1431,13 @@ class RoundRobinReceiverMixin:
             if attempt < attempt_limit:
                 await asyncio.sleep(self.ROVER_RESTORE_RETRY_SECONDS)
                 if set_transport_failure:
-                    try:
-                        refreshed_client = await self._find_client_info(
-                            rover_code,
-                            project_id=project_id,
-                            log_missing=False,
-                        )
-                    except Exception as refresh_exc:
-                        logger.warning(
-                            "Could not refresh AICaster client session while restoring "
-                            "%s: %s",
-                            rover_code,
-                            str(refresh_exc) or refresh_exc.__class__.__name__,
-                        )
-                    else:
-                        if refreshed_client:
-                            client_info = refreshed_client
-                            refreshed_mountpoint = str(
-                                refreshed_client.get("Mountpoint") or ""
-                            ).strip()
-                            if refreshed_mountpoint:
-                                mountpoint = refreshed_mountpoint
-                            await self._emit_progress(
-                                project_id,
-                                (
-                                    f"{rover_code}: refreshed AICaster SET session "
-                                    f"username={client_info.get('Username')} "
-                                    f"receiverID={client_info.get('receiverID')} "
-                                    f"mountpoint={mountpoint}; retrying {command_text}."
-                                ),
-                            )
+                    client_info, mountpoint = await self._refresh_rover_restore_session(
+                        rover_code,
+                        project_id,
+                        client_info,
+                        mountpoint,
+                        command_text,
+                    )
         return False, mountpoint, client_info, attempt, set_transport_failure
 
     async def _restore_rover_output_sequence(
