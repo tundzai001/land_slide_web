@@ -2743,6 +2743,53 @@ NODATA_value -9999
         self.assertEqual(res_water['level'], 'CRITICAL')
         self.assertEqual(res_water['audio_code'], 'water_critical')
 
+    def test_incident_query_filter_and_list_incidents(self):
+        from app.features.incidents.read_router import IncidentQueryFilter, list_incidents
+
+        # 1. Test IncidentQueryFilter init
+        f = IncidentQueryFilter(
+            status_filter="active",
+            priority="HIGH",
+            source_severity="CRITICAL",
+            signal_state="ACTIVE",
+            source_kind="SENSOR_ALERT",
+            project_id=1,
+            station_id=2,
+            assigned_to=3,
+            q="test"
+        )
+        self.assertEqual(f.status_filter, "active")
+        self.assertEqual(f.priority, "HIGH")
+
+        # 2. Test list_incidents invalid sort -> 422
+        resp = MagicMock()
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(list_incidents(
+                response=resp,
+                filters=f,
+                sort="invalid_sort",
+                db=AsyncMock(),
+                current_user=MagicMock(role="admin", is_admin=True)
+            ))
+        self.assertEqual(ctx.exception.status_code, 422)
+
+    def test_alert_persistence_suppression_incidents(self):
+        from app.mqtt.persistence.alerts import _resolve_suppression_incidents
+
+        db = AsyncMock()
+        # Empty alert_ids
+        res_empty = asyncio.run(_resolve_suppression_incidents(db, []))
+        self.assertEqual(res_empty, [])
+
+        # Non-empty alert_ids with active case
+        case = MagicMock(status="open", version=1)
+        db.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[case])))))
+        with patch("app.mqtt.persistence.alerts.append_event", new=AsyncMock(return_value=MagicMock())):
+            res = asyncio.run(_resolve_suppression_incidents(db, [1, 2]))
+            self.assertEqual(len(res), 1)
+            self.assertEqual(case.status, "resolved")
+            self.assertEqual(case.signal_state, "RETURNED")
+
 
 
 
