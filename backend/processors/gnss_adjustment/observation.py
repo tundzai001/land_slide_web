@@ -135,20 +135,35 @@ class RoundRobinObservationMixin:
             }
         return None
 
+    def _scan_command_lines(
+        self, waiter: Any, lines: list[str], incoming_topic: str
+    ) -> Any:
+        for line in lines:
+            framed_res = self._process_framed_command_line(waiter, line, incoming_topic)
+            if framed_res is not None:
+                return framed_res
+            unframed_res = self._process_unframed_command_line(waiter, line, incoming_topic)
+            if unframed_res is not None:
+                return unframed_res
+        return None
+
+    @staticmethod
+    def _deliver_command_result(waiter: Any, result: Any) -> None:
+        loop = waiter.future.get_loop()
+
+        def deliver() -> None:
+            if not waiter.future.done():
+                waiter.future.set_result(result)
+
+        loop.call_soon_threadsafe(deliver)
+
     def add_receiver_command_payload(
         self,
         raw_payload: str,
         info: Dict[str, Any],
         topic: str,
     ) -> bool:
-        """Feed receiver echo/response text from the rover's subscribed MQTT topic.
-
-        A response is accepted only after the same MQTT topic first emits a line
-        exactly equal to the command sent to that rover.  This deliberately
-        rejects socket echoes, unrelated ``OK`` text, and replies from another
-        station/topic.
-        """
-
+        """Feed receiver echo/response text from the rover's subscribed MQTT topic."""
         station_code = str((info or {}).get("station_code") or "").strip()
         key = self._command_station_key(station_code)
         if not key or not raw_payload:
@@ -171,27 +186,12 @@ class RoundRobinObservationMixin:
                 for line in re.split(r"[\r\n]+", payload_text)
                 if line.strip()
             ]
-            for line in lines:
-                framed_res = self._process_framed_command_line(waiter, line, incoming_topic)
-                if framed_res is not None:
-                    result = framed_res
-                    break
-                unframed_res = self._process_unframed_command_line(waiter, line, incoming_topic)
-                if unframed_res is not None:
-                    result = unframed_res
-                    break
-
+            result = self._scan_command_lines(waiter, lines, incoming_topic)
             if result is not None:
                 self._command_ack_waiters.pop(key, None)
 
         if result is not None and waiter is not None:
-            loop = waiter.future.get_loop()
-
-            def deliver() -> None:
-                if not waiter.future.done():
-                    waiter.future.set_result(result)
-
-            loop.call_soon_threadsafe(deliver)
+            self._deliver_command_result(waiter, result)
             return True
         return bool(waiter and waiter.echo_seen)
 
@@ -667,6 +667,33 @@ class RoundRobinObservationMixin:
         return [], len(pending)
 
 
+    def _record_unconfirmed_base_observation(
+        self, session: dict, cluster_index: int, active_base: str,
+        observation: Any, base_diagnostic: str, project_id: int, station_id: int
+    ) -> None:
+        cluster = session["clusters"][cluster_index]
+        cluster["observations"].append(
+            _CollectedObservation(
+                active_base,
+                observation,
+                solver_eligible=False,
+                quality_flags=("EXCLUDE_UNCONFIRMED_SOURCE",),
+                source_diagnostic=base_diagnostic,
+                rotation_index=cluster.get("current_rotation_index", 0),
+                stable_window_index=None,
+            )
+        )
+        session["seed_station_reports"][int(observation.station_id)]["reason"] = base_diagnostic
+        warning_key = (int(project_id), int(cluster_index), int(station_id))
+        now_monotonic = time.monotonic()
+        last_logged = self._ingest_warning_last_logged.get(warning_key, 0.0)
+        if (now_monotonic - last_logged) >= 30.0:
+            self._ingest_warning_last_logged[warning_key] = now_monotonic
+            logger.warning(
+                "Round-Robin project=%s cluster=%s station=%s: %s",
+                project_id, cluster_index, station_id, base_diagnostic,
+            )
+
     def _admit_agrica_observation(
         self,
         session: dict,
@@ -694,27 +721,9 @@ class RoundRobinObservationMixin:
             cluster, active_base, observation
         )
         if not base_matches:
-            session["clusters"][cluster_index]["observations"].append(
-                _CollectedObservation(
-                    active_base,
-                    observation,
-                    solver_eligible=False,
-                    quality_flags=("EXCLUDE_UNCONFIRMED_SOURCE",),
-                    source_diagnostic=base_diagnostic,
-                    rotation_index=cluster.get("current_rotation_index", 0),
-                    stable_window_index=None,
-                )
+            self._record_unconfirmed_base_observation(
+                session, cluster_index, active_base, observation, base_diagnostic, project_id, station_id
             )
-            session["seed_station_reports"][int(observation.station_id)]["reason"] = base_diagnostic
-            warning_key = (int(project_id), int(cluster_index), int(station_id))
-            now_monotonic = time.monotonic()
-            last_logged = self._ingest_warning_last_logged.get(warning_key, 0.0)
-            if (now_monotonic - last_logged) >= 30.0:
-                self._ingest_warning_last_logged[warning_key] = now_monotonic
-                logger.warning(
-                    "Round-Robin project=%s cluster=%s station=%s: %s",
-                    project_id, cluster_index, station_id, base_diagnostic,
-                )
             return False, None, base_diagnostic
 
         session["seed_station_reports"][int(observation.station_id)].update({
@@ -747,9 +756,67 @@ class RoundRobinObservationMixin:
             self._update_rover_llh_from_observation(observation)
         return True, base_diagnostic, None
 
+    def _process_single_observation(
+        self, session: dict, observation: Any, project_id: int, station_id: int
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        cluster_index = self._cluster_index_for_station(session, observation.station_id)
+        if cluster_index is not None:
+            session.setdefault("seed_station_reports", {})[int(observation.station_id)] = {
+                "position_type": int(observation.position_type),
+                "epoch_ts": int(observation.epoch_ts or 0),
+                "station_id": int(observation.station_id),
+                "rover": str(observation.rover_name),
+                "raw_payload": str(observation.raw or ""),
+                "received_monotonic": time.monotonic(),
+                "base_identity_verified": False,
+                "solver_eligible": False,
+                "reason": "awaiting baseline validation",
+            }
+        return self._admit_agrica_observation(session, observation, project_id, station_id, cluster_index)
+
+    def _ingest_parsed_observations(
+        self, session: dict, observations: List[Any], project_id: int, station_id: int
+    ) -> List[Any]:
+        valid_obs = []
+        ignored = []
+        accepted_diags = []
+        for obs in observations:
+            is_valid, accepted_diag, ignored_reason = self._process_single_observation(
+                session, obs, project_id, station_id
+            )
+            if is_valid:
+                valid_obs.append(obs)
+                if accepted_diag:
+                    accepted_diags.append(accepted_diag)
+            elif ignored_reason:
+                ignored.append(ignored_reason)
+
+        if valid_obs:
+            rejection_note = f" Rejected: {'; '.join(dict.fromkeys(ignored))}." if ignored else ""
+            self._last_ingest_diagnostics[project_id] = {
+                "level": "success",
+                "message": (
+                    f"Accepted {len(valid_obs)} valid AGRICA baseline(s)."
+                    f" {'; '.join(dict.fromkeys(accepted_diags))}."
+                    f"{rejection_note}"
+                ),
+                "station_id": station_id,
+                "position_types": [obs.position_type for obs in valid_obs],
+            }
+        else:
+            self._last_ingest_diagnostics[project_id] = {
+                "level": "warning",
+                "message": (
+                    "; ".join(dict.fromkeys(ignored))
+                    if ignored
+                    else "No complete AGRICA observation was parsed from this payload."
+                ),
+                "station_id": station_id,
+            }
+        return valid_obs
+
     def add_agrica_payload(self, raw_payload: str, info: Dict[str, Any]) -> List[Any]:
         """Store valid AGRICA measurements in the active project's cluster only."""
-
         try:
             from backend.processors.gnss_adjustment.runtime import parse_agrica
         except ModuleNotFoundError:
@@ -768,9 +835,7 @@ class RoundRobinObservationMixin:
         station_id = int(info.get("station_id") or 0)
         rover_name = str(info.get("station_code") or info.get("station_name") or f"station_{station_id}")
         completed_sentences, buffered_length = self._consume_agrica_fragments(
-            project_id,
-            station_id,
-            raw_payload,
+            project_id, station_id, raw_payload
         )
         if not completed_sentences:
             self._last_ingest_diagnostics[project_id] = {
@@ -799,63 +864,7 @@ class RoundRobinObservationMixin:
             }
             return []
 
-        valid_observations = []
-        ignored_reasons = []
-        accepted_diagnostics = []
-        for observation in observations:
-            cluster_index = self._cluster_index_for_station(
-                session, observation.station_id
-            )
-            if cluster_index is not None:
-                session.setdefault("seed_station_reports", {})[
-                    int(observation.station_id)
-                ] = {
-                    "position_type": int(observation.position_type),
-                    "epoch_ts": int(observation.epoch_ts or 0),
-                    "station_id": int(observation.station_id),
-                    "rover": str(observation.rover_name),
-                    "raw_payload": str(observation.raw or ""),
-                    "received_monotonic": time.monotonic(),
-                    "base_identity_verified": False,
-                    "solver_eligible": False,
-                    "reason": "awaiting baseline validation",
-                }
-            is_valid, accepted_diag, ignored_reason = self._admit_agrica_observation(
-                session, observation, project_id, station_id, cluster_index
-            )
-            if is_valid:
-                valid_observations.append(observation)
-                if accepted_diag:
-                    accepted_diagnostics.append(accepted_diag)
-            elif ignored_reason:
-                ignored_reasons.append(ignored_reason)
-        if valid_observations:
-            rejection_note = (
-                f" Rejected: {'; '.join(dict.fromkeys(ignored_reasons))}."
-                if ignored_reasons
-                else ""
-            )
-            self._last_ingest_diagnostics[project_id] = {
-                "level": "success",
-                "message": (
-                    f"Accepted {len(valid_observations)} valid AGRICA baseline(s)."
-                    f" {'; '.join(dict.fromkeys(accepted_diagnostics))}."
-                    f"{rejection_note}"
-                ),
-                "station_id": station_id,
-                "position_types": [obs.position_type for obs in valid_observations],
-            }
-        else:
-            self._last_ingest_diagnostics[project_id] = {
-                "level": "warning",
-                "message": (
-                    "; ".join(dict.fromkeys(ignored_reasons))
-                    if ignored_reasons
-                    else "No complete AGRICA observation was parsed from this payload."
-                ),
-                "station_id": station_id,
-            }
-        return valid_observations
+        return self._ingest_parsed_observations(session, observations, project_id, station_id)
 
 
     def get_last_ingest_diagnostic(self, project_id: int) -> Optional[dict]:
@@ -879,6 +888,71 @@ class RoundRobinObservationMixin:
         return session.get("active_bases", {}).get(cluster_index, "BASE")
 
 
+    def _collect_source_valid_indexed(self, cluster: dict, fixed_base_llh: tuple) -> list[tuple[int, Any]]:
+        return [
+            (record_index, record)
+            for record_index, record in enumerate(cluster["observations"])
+            if record.base_name == "BASE"
+            and "EXCLUDE_UNCONFIRMED_SOURCE" not in tuple(getattr(record, "quality_flags", ()) or ())
+            and max(float(value) for value in record.observation.std_neu) <= _BASELINE_STD_REJECTION_THRESHOLD_M
+            and _vector_length(self._baseline_ecef(record.observation, fixed_base_llh)) >= 1.0
+        ]
+
+    def _quarantine_drifting_records(
+        self, state: dict, station_id: int, source_valid_indexed: list, cluster: dict, latest_epoch: Any
+    ) -> None:
+        start_idx = int(state.get("solver_start_index") or 0)
+        for record_index, record in source_valid_indexed:
+            if (
+                record_index >= start_idx
+                and int(record.observation.station_id) == station_id
+                and getattr(record, "solver_eligible", True)
+            ):
+                record.solver_eligible = False
+                record.quality_flags = tuple(dict.fromkeys((*tuple(getattr(record, "quality_flags", ()) or ()), "EXCLUDE_STABILITY_LOST")))
+                record.source_diagnostic = "Fixed-BASE solver session lost stationarity according to the rolling-window/EWMA abort envelope; the complete continuous seed session was reset."
+        state["solver_start_index"] = len(cluster["observations"])
+        state["reset_count"] = int(state.get("reset_count") or 0) + 1
+        state["drift_failure_count"] = 0
+        state["last_drift_evaluation_epoch"] = latest_epoch
+
+    def _update_station_drift_and_window(
+        self, state: dict, diagnostic: dict, warmup_ready: bool,
+        station_id: int, source_valid_indexed: list, cluster: dict
+    ) -> None:
+        latest_epoch = diagnostic.get("latest_epoch")
+        abort_exceeded = _rolling_drift_exceeds_abort_limits(
+            diagnostic,
+            horizontal_component_limit_m=self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M,
+            up_component_limit_m=self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M,
+        )
+        if state["open"] and latest_epoch is not None and latest_epoch != state.get("last_drift_evaluation_epoch"):
+            state["last_drift_evaluation_epoch"] = latest_epoch
+            state["drift_failure_count"] = int(state.get("drift_failure_count") or 0) + 1 if abort_exceeded else 0
+
+        if state["open"] and int(state.get("drift_failure_count") or 0) >= self.STABILITY_ABORT_CONSECUTIVE_EPOCHS:
+            self._quarantine_drifting_records(state, station_id, source_valid_indexed, cluster, latest_epoch)
+
+        if not state["open"] and warmup_ready:
+            state["open"] = True
+            state["drift_failure_count"] = 0
+            state["last_drift_evaluation_epoch"] = latest_epoch
+
+    @staticmethod
+    def _compute_station_solver_epochs(cluster: dict, state: dict, station_id: int) -> tuple[int, int]:
+        solver_epochs = {
+            int(record.observation.epoch_ts)
+            for record_index, record in enumerate(cluster["observations"])
+            if record_index >= int(state["solver_start_index"])
+            and record.base_name == "BASE"
+            and int(record.observation.station_id) == station_id
+            and getattr(record, "solver_eligible", True)
+            and max(float(value) for value in record.observation.std_neu) <= _BASELINE_STD_REJECTION_THRESHOLD_M
+        }
+        solver_count = len(solver_epochs)
+        solver_duration = max(solver_epochs) - min(solver_epochs) if solver_epochs else 0
+        return solver_count, solver_duration
+
     def _evaluate_seed_cluster_status(
         self,
         session: dict,
@@ -886,19 +960,7 @@ class RoundRobinObservationMixin:
         cluster: dict,
     ) -> dict:
         fixed_base_llh = self._cluster_base_llh(cluster)
-        source_valid_indexed = [
-            (record_index, record)
-            for record_index, record in enumerate(cluster["observations"])
-            if record.base_name == "BASE"
-            and "EXCLUDE_UNCONFIRMED_SOURCE"
-            not in tuple(getattr(record, "quality_flags", ()) or ())
-            and max(
-                float(value) for value in record.observation.std_neu
-            ) <= _BASELINE_STD_REJECTION_THRESHOLD_M
-            and _vector_length(
-                self._baseline_ecef(record.observation, fixed_base_llh)
-            ) >= 1.0
-        ]
+        source_valid_indexed = self._collect_source_valid_indexed(cluster, fixed_base_llh)
         epochs_by_station: Dict[int, set[int]] = {}
         vectors_by_station: Dict[int, list[tuple[int, tuple[float, float, float]]]] = {}
         for _record_index, record in source_valid_indexed:
@@ -913,9 +975,7 @@ class RoundRobinObservationMixin:
         for station_id, rover_code in zip(
             cluster["stations"], cluster["rovers"], strict=True
         ):
-            online_state = online_states.get(self._online_baseline_key(
-                index, "BASE", rover_code
-            ))
+            online_state = online_states.get(self._online_baseline_key(index, "BASE", rover_code))
             if online_state is not None:
                 vectors_by_station[int(station_id)] = online_state.recent_samples()
 
@@ -942,18 +1002,15 @@ class RoundRobinObservationMixin:
         }
         durations_by_station = {
             station_id: (
-                max(epochs_by_station[station_id])
-                - min(epochs_by_station[station_id])
+                max(epochs_by_station[station_id]) - min(epochs_by_station[station_id])
                 if epochs_by_station.get(station_id) else 0
             )
             for station_id in expected
         }
         warmup_ready_by_station = {
             station_id: bool(
-                sample_counts_by_station[station_id]
-                >= self.SEED_COLLECTION_MIN_DISTINCT_EPOCHS
-                and durations_by_station[station_id]
-                >= self.SEED_COLLECTION_MIN_DURATION_SECONDS
+                sample_counts_by_station[station_id] >= self.SEED_COLLECTION_MIN_DISTINCT_EPOCHS
+                and durations_by_station[station_id] >= self.SEED_COLLECTION_MIN_DURATION_SECONDS
             )
             for station_id in expected
         }
@@ -961,53 +1018,22 @@ class RoundRobinObservationMixin:
             station_id: _rolling_mean_stability(
                 vectors_by_station.get(station_id, ()),
                 window_seconds=self.STABILITY_WINDOW_SECONDS,
-                min_samples_per_window=(
-                    self.STABILITY_MIN_SAMPLES_PER_WINDOW
-                ),
-                max_sample_gap_seconds=(
-                    self.STABILITY_MAX_SAMPLE_GAP_SECONDS
-                ),
-                horizontal_component_limit_m=(
-                    self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M
-                ),
+                min_samples_per_window=self.STABILITY_MIN_SAMPLES_PER_WINDOW,
+                max_sample_gap_seconds=self.STABILITY_MAX_SAMPLE_GAP_SECONDS,
+                horizontal_component_limit_m=self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M,
                 up_component_limit_m=self.STABILITY_UP_COMPONENT_LIMIT_M,
                 horizontal_std_limit_m=self.STABILITY_HORIZONTAL_STD_LIMIT_M,
                 up_std_limit_m=self.STABILITY_UP_STD_LIMIT_M,
-                horizontal_slope_limit_mps=(
-                    self.STABILITY_HORIZONTAL_SLOPE_LIMIT_MPS
-                ),
+                horizontal_slope_limit_mps=self.STABILITY_HORIZONTAL_SLOPE_LIMIT_MPS,
                 up_slope_limit_mps=self.STABILITY_UP_SLOPE_LIMIT_MPS,
                 ewma_fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
                 ewma_slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
-                ewma_horizontal_limit_m=(
-                    self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M
-                ),
+                ewma_horizontal_limit_m=self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M,
                 ewma_up_limit_m=self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M,
             )
             for station_id in expected
         }
         window_states = session.setdefault("seed_window_states", {})
-
-        def quarantine_seed_window(
-            station_id: int,
-            start_index: int,
-            flag: str,
-            diagnostic_message: str,
-        ) -> None:
-            for record_index, record in source_valid_indexed:
-                if (
-                    record_index < start_index
-                    or int(record.observation.station_id) != station_id
-                    or not getattr(record, "solver_eligible", True)
-                ):
-                    continue
-                flags = tuple(dict.fromkeys((
-                    *tuple(getattr(record, "quality_flags", ()) or ()),
-                    flag,
-                )))
-                record.solver_eligible = False
-                record.quality_flags = flags
-                record.source_diagnostic = diagnostic_message
 
         ready = set()
         solver_counts_by_station: Dict[int, int] = {}
@@ -1016,84 +1042,24 @@ class RoundRobinObservationMixin:
         reset_counts_by_station: Dict[int, int] = {}
         drift_failure_counts_by_station: Dict[int, int] = {}
         for station_id in expected:
-            diagnostic = stability_by_station[station_id]
-            state_key = (index, station_id)
-            state = window_states.setdefault(state_key, {
+            state = window_states.setdefault((index, station_id), {
                 "open": False,
                 "solver_start_index": 0,
                 "reset_count": 0,
                 "drift_failure_count": 0,
                 "last_drift_evaluation_epoch": None,
             })
-            state.setdefault("drift_failure_count", 0)
-            state.setdefault("last_drift_evaluation_epoch", None)
-            latest_epoch = diagnostic.get("latest_epoch")
-            abort_exceeded = _rolling_drift_exceeds_abort_limits(
-                diagnostic,
-                horizontal_component_limit_m=(
-                    self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M
-                ),
-                up_component_limit_m=(
-                    self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M
-                ),
+            self._update_station_drift_and_window(
+                state, stability_by_station[station_id], warmup_ready_by_station[station_id],
+                station_id, source_valid_indexed, cluster
             )
-            if (
-                state["open"]
-                and latest_epoch is not None
-                and latest_epoch != state.get("last_drift_evaluation_epoch")
-            ):
-                state["last_drift_evaluation_epoch"] = latest_epoch
-                state["drift_failure_count"] = (
-                    int(state.get("drift_failure_count") or 0) + 1
-                    if abort_exceeded else 0
-                )
-            if (
-                state["open"]
-                and int(state.get("drift_failure_count") or 0)
-                >= self.STABILITY_ABORT_CONSECUTIVE_EPOCHS
-            ):
-                quarantine_seed_window(
-                    station_id,
-                    int(state.get("solver_start_index") or 0),
-                    "EXCLUDE_STABILITY_LOST",
-                    "Fixed-BASE solver session lost stationarity according to "
-                    "the rolling-window/EWMA abort envelope; the complete "
-                    "continuous seed session was reset.",
-                )
-                state["solver_start_index"] = len(cluster["observations"])
-                state["reset_count"] = int(state.get("reset_count") or 0) + 1
-                state["drift_failure_count"] = 0
-                state["last_drift_evaluation_epoch"] = latest_epoch
 
-            if (
-                not state["open"]
-                and warmup_ready_by_station[station_id]
-            ):
-                state["open"] = True
-                state["drift_failure_count"] = 0
-                state["last_drift_evaluation_epoch"] = latest_epoch
-
-            solver_epochs = {
-                int(record.observation.epoch_ts)
-                for record_index, record in enumerate(cluster["observations"])
-                if record_index >= int(state["solver_start_index"])
-                and record.base_name == "BASE"
-                and int(record.observation.station_id) == station_id
-                and getattr(record, "solver_eligible", True)
-                and max(float(value) for value in record.observation.std_neu)
-                <= _BASELINE_STD_REJECTION_THRESHOLD_M
-            }
-            solver_count = len(solver_epochs)
-            solver_duration = (
-                max(solver_epochs) - min(solver_epochs) if solver_epochs else 0
-            )
+            solver_count, solver_duration = self._compute_station_solver_epochs(cluster, state, station_id)
             solver_counts_by_station[station_id] = solver_count
             solver_durations_by_station[station_id] = solver_duration
             window_open_by_station[station_id] = bool(state["open"])
             reset_counts_by_station[station_id] = int(state.get("reset_count") or 0)
-            drift_failure_counts_by_station[station_id] = int(
-                state.get("drift_failure_count") or 0
-            )
+            drift_failure_counts_by_station[station_id] = int(state.get("drift_failure_count") or 0)
             if (
                 state["open"]
                 and solver_count >= self.SEED_SOLVER_MIN_DISTINCT_EPOCHS
@@ -1134,9 +1100,7 @@ class RoundRobinObservationMixin:
             "solver_sample_counts_by_station": solver_counts_by_station,
             "solver_durations_by_station_seconds": solver_durations_by_station,
             "solver_window_reset_counts_by_station": reset_counts_by_station,
-            "solver_drift_failure_counts_by_station": (
-                drift_failure_counts_by_station
-            ),
+            "solver_drift_failure_counts_by_station": drift_failure_counts_by_station,
         }
         return {
             "status_dict": status_dict,
@@ -1149,27 +1113,9 @@ class RoundRobinObservationMixin:
             "available": available,
         }
 
-    def get_seed_collection_status(self, project_id: int) -> dict:
-        """Return fixed-base window readiness and offline-rover fallback state."""
-        session = self._sessions.get(project_id)
-        if session is None:
-            return {"complete": False, "fallback_ready": False, "step_count": 0,
-                    "max_steps": self.SEED_COLLECTION_MAX_STEPS,
-                    "missing_station_ids": [], "warming_station_ids": [],
-                    "clusters": []}
-
-        steps = min(len(session["seed_collection_steps"]), self.SEED_COLLECTION_MAX_STEPS)
-        seed_elapsed = max(
-            0.0,
-            time.monotonic() - float(session.get("seed_started_monotonic") or 0.0),
-        )
-        elapsed_timeout = seed_elapsed >= self.SEED_STABILITY_TIMEOUT_SECONDS
-
+    def _aggregate_seed_cluster_statuses(self, session: dict, elapsed_timeout: bool) -> tuple:
         cluster_statuses = []
-        missing_all = []
-        silent_all = []
-        invalid_fix_all = []
-        warming_all = []
+        missing_all, silent_all, invalid_fix_all, warming_all = [], [], [], []
         timeout_skippable_all = []
         timeout_fallback_blocked = False
         complete = True
@@ -1190,21 +1136,35 @@ class RoundRobinObservationMixin:
             if len(c_res["available"]) < 2:
                 can_continue = False
             cluster_statuses.append(c_res["status_dict"])
+        return (
+            cluster_statuses, missing_all, silent_all, invalid_fix_all, warming_all,
+            timeout_skippable_all, timeout_fallback_blocked, complete, can_continue
+        )
+
+    def get_seed_collection_status(self, project_id: int) -> dict:
+        """Return fixed-base window readiness and offline-rover fallback state."""
+        session = self._sessions.get(project_id)
+        if session is None:
+            return {"complete": False, "fallback_ready": False, "step_count": 0,
+                    "max_steps": self.SEED_COLLECTION_MAX_STEPS,
+                    "missing_station_ids": [], "warming_station_ids": [],
+                    "clusters": []}
+
+        steps = min(len(session["seed_collection_steps"]), self.SEED_COLLECTION_MAX_STEPS)
+        seed_elapsed = max(0.0, time.monotonic() - float(session.get("seed_started_monotonic") or 0.0))
+        elapsed_timeout = seed_elapsed >= self.SEED_STABILITY_TIMEOUT_SECONDS
+
+        (
+            cluster_statuses, missing_all, silent_all, invalid_fix_all, warming_all,
+            timeout_skippable_all, timeout_fallback_blocked, complete, can_continue
+        ) = self._aggregate_seed_cluster_statuses(session, elapsed_timeout)
 
         stability_timeout = not complete and elapsed_timeout
         timeout_fallback_ready = (
-            not complete
-            and stability_timeout
-            and bool(timeout_skippable_all)
-            and not timeout_fallback_blocked
+            not complete and stability_timeout and bool(timeout_skippable_all) and not timeout_fallback_blocked
         )
         return {
             "complete": complete,
-            # Initially skip only truly silent stations after enough fixed-base
-            # seed epochs exist.  If the hard stability timeout is reached,
-            # stations that are still not ready are treated as degraded and may
-            # be excluded, but only when each cluster still has at least two
-            # ready rovers left for the network solve.
             "fallback_ready": bool(
                 (bool(missing_all) and can_continue and steps >= self.SEED_COLLECTION_MAX_STEPS)
                 or timeout_fallback_ready
@@ -1220,18 +1180,13 @@ class RoundRobinObservationMixin:
             "stability_elapsed_seconds": seed_elapsed,
             "stability_timeout_seconds": self.SEED_STABILITY_TIMEOUT_SECONDS,
             "stability_window_seconds": self.STABILITY_WINDOW_SECONDS,
-            "stability_min_samples_per_window": (
-                self.STABILITY_MIN_SAMPLES_PER_WINDOW
-            ),
+            "stability_min_samples_per_window": self.STABILITY_MIN_SAMPLES_PER_WINDOW,
             "stability_hold_seconds": self.STABILITY_HOLD_SECONDS,
-            "seed_warmup_min_distinct_epochs": (
-                self.SEED_COLLECTION_MIN_DISTINCT_EPOCHS
-            ),
-            "seed_warmup_min_duration_seconds": (
-                self.SEED_COLLECTION_MIN_DURATION_SECONDS
-            ),
+            "seed_warmup_min_distinct_epochs": self.SEED_COLLECTION_MIN_DISTINCT_EPOCHS,
+            "seed_warmup_min_duration_seconds": self.SEED_COLLECTION_MIN_DURATION_SECONDS,
             "solver_min_distinct_epochs": self.SEED_SOLVER_MIN_DISTINCT_EPOCHS,
             "solver_min_duration_seconds": self.SEED_SOLVER_MIN_DURATION_SECONDS,
+            "timeout_fallback_ready": timeout_fallback_ready,
             "clusters": cluster_statuses,
         }
 
