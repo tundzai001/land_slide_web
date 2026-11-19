@@ -16,6 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 class MQTTAdjustmentMixin:
+    def _matches_gnss_target(self, info: dict, station_ids: set, station_codes: set, project_id) -> bool:
+        if info.get("type") != "gnss":
+            return False
+        st_id = int(info.get("station_id") or 0)
+        st_code = str(info.get("station_code") or "").strip()
+        if st_id not in station_ids and st_code not in station_codes:
+            return False
+        if project_id is not None and int(info.get("project_id") or 0) != int(project_id):
+            return False
+        return True
+
     def _handle_gnss_reference_change(self, cluster: dict, timestamp: float, source: str):
         """Forward confirmed CORS operations to the affected monitoring devices."""
         station_ids = set()
@@ -28,14 +39,7 @@ class MQTTAdjustmentMixin:
         project_id = cluster.get("project_id")
         notified = set()
         for info in self.topic_map.values():
-            if (
-                info.get("type") != "gnss"
-                or (
-                    int(info.get("station_id") or 0) not in station_ids
-                    and str(info.get("station_code") or "").strip() not in station_codes
-                )
-                or (project_id is not None and int(info.get("project_id") or 0) != int(project_id))
-            ):
+            if not self._matches_gnss_target(info, station_ids, station_codes, project_id):
                 continue
             processor = info.get("processor")
             if processor is not None and id(processor) not in notified:
@@ -238,65 +242,47 @@ class MQTTAdjustmentMixin:
         phase, summary = self._refresh_project_adjustment_state(public_project_id)
         self.adjustment_message[public_project_id] = f"{cluster_name}: {completed_message}"
 
-        representative_pending = True
-        for point in adjustment.get("points", {}).values():
-            station_id = point.get("station_id")
-            if not station_id:
-                continue
-            adjustment_project_id = None
-            adjustment_cluster_index = None
-            if representative_pending:
-                row_adjustment_key = adjustment_key
-                adjustment_project_id = public_project_id
-                adjustment_cluster_index = cluster_index
-                representative_pending = False
-                stored_data = adjustment
-            else:
-                # Keep one complete network result; station history only needs
-                # the point belonging to that station.
-                stored_data = {
-                    "type": "gnss_adjusted_station",
-                    "adjustment_key": adjustment_key,
-                    "project_id": public_project_id,
-                    "cluster_index": cluster_index,
-                    "point": point,
-                }
-                row_adjustment_key = None
-            payload = {
-                "station_id": station_id,
-                "timestamp": current_timestamp,
-                "sensor_type": "gnss_adjusted",
-                "ingest_id": self._make_ingest_id(
-                    0, station_id, "gnss_adjusted", current_timestamp, adjustment
-                ),
-                "adjustment_key": row_adjustment_key,
-                "adjustment_project_id": adjustment_project_id,
-                "adjustment_cluster_index": adjustment_cluster_index,
-                "data": stored_data,
-                "value_1": None,
-                "value_2": None,
-                "value_3": None,
-                "value_4": None,
-                "value_5": None,
+        await self._persist_all_adjustment_points(
+            adjustment, adjustment_key, public_project_id, cluster_index, current_timestamp
+        )
+
+    async def _persist_single_point(self, point: dict, rep_pending: bool, adjustment: dict, adj_key: str, pub_id: int, c_idx: int, ts: int) -> bool:
+        station_id = point.get("station_id")
+        if not station_id:
+            return rep_pending
+        if rep_pending:
+            row_adj_key, proj_id, cluster_idx = adj_key, pub_id, c_idx
+            stored_data = adjustment
+            rep_pending = False
+        else:
+            row_adj_key, proj_id, cluster_idx = None, None, None
+            stored_data = {
+                "type": "gnss_adjusted_station", "adjustment_key": adj_key,
+                "project_id": pub_id, "cluster_index": c_idx, "point": point,
             }
-            async with self._buffer_lock:
-                self._sensor_buffer.append(payload)
-            try:
-                await self._upsert_latest_sensor_cache(
-                    station_id,
-                    "gnss_adjusted",
-                    current_timestamp,
-                    stored_data,
-                )
-                await manager.broadcast({
-                    "type": "sensor_status",
-                    "station_id": station_id,
-                    "sensor_type": "gnss_adjusted",
-                    "timestamp": current_timestamp,
-                    "data": adjustment,
-                })
-            except Exception:
-                logger.exception("Could not publish GNSS adjustment for station %s", station_id)
+        payload = {
+            "station_id": station_id, "timestamp": ts, "sensor_type": "gnss_adjusted",
+            "ingest_id": self._make_ingest_id(0, station_id, "gnss_adjusted", ts, adjustment),
+            "adjustment_key": row_adj_key, "adjustment_project_id": proj_id,
+            "adjustment_cluster_index": cluster_idx, "data": stored_data,
+            "value_1": None, "value_2": None, "value_3": None, "value_4": None, "value_5": None,
+        }
+        async with self._buffer_lock:
+            self._sensor_buffer.append(payload)
+        try:
+            await self._upsert_latest_sensor_cache(station_id, "gnss_adjusted", ts, stored_data)
+            await manager.broadcast({
+                "type": "sensor_status", "station_id": station_id,
+                "sensor_type": "gnss_adjusted", "timestamp": ts, "data": adjustment,
+            })
+        except Exception:
+            logger.exception("Could not publish GNSS adjustment for station %s", station_id)
+        return rep_pending
+
+    async def _persist_all_adjustment_points(self, adjustment: dict, adj_key: str, pub_id: int, c_idx: int, ts: int):
+        rep_pending = True
+        for point in adjustment.get("points", {}).values():
+            rep_pending = await self._persist_single_point(point, rep_pending, adjustment, adj_key, pub_id, c_idx, ts)
 
         await manager.broadcast({
             "type": "gnss_adjustment_progress",

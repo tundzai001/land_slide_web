@@ -40,6 +40,72 @@ class SensorPersistenceMixin:
         except Exception as e:
             logger.exception(f"❌ LatestSensorCache upsert error: {e}")
 
+    def _resolve_save_interval(self, sensor_type: str, station_config: dict) -> int:
+        if sensor_type == "gnss":
+            try:
+                return int(station_config.get("gnss_save_interval", self.runtime_save_intervals.get("gnss", settings.SAVE_INTERVAL_GNSS)))
+            except (ValueError, TypeError):
+                return self.runtime_save_intervals.get("gnss", settings.SAVE_INTERVAL_GNSS)
+        return self.runtime_save_intervals.get(sensor_type, settings.SAVE_INTERVAL_DEFAULT)
+
+    def _should_save_gnss(self, last_saved: int, current_timestamp: int, interval: int, station_name: str) -> bool:
+        from datetime import datetime
+        last_dt = datetime.fromtimestamp(last_saved)
+        curr_dt = datetime.fromtimestamp(current_timestamp)
+        if curr_dt.date() > last_dt.date():
+            logger.info(f"💾 [CALENDAR START DAY SAVE - GNSS] {station_name} ({curr_dt.date()})")
+            return True
+        if interval < 86400 and (current_timestamp - last_saved) >= interval:
+            logger.info(f"💾 [PERIODIC SAVE - GNSS] {station_name} (Interval: {interval}s)")
+            return True
+        return False
+
+    def _should_save_now(self, last_saved: int, current_timestamp: int, sensor_type: str, interval: int, station_name: str) -> bool:
+        if last_saved == 0:
+            logger.info(f"💾 [FIRST SAVE] {station_name} - {sensor_type.upper()}")
+            return True
+        if sensor_type == "gnss":
+            return self._should_save_gnss(last_saved, current_timestamp, interval, station_name)
+        time_since = current_timestamp - last_saved
+        if time_since >= interval:
+            logger.info(f"💾 [PERIODIC SAVE] {station_name} - {sensor_type.upper()} (Interval: {interval}s)")
+            return True
+        logger.debug(f"⏭️ [SKIP SAVE] {station_name} - {sensor_type.upper()} ({time_since}/{interval}s)")
+        return False
+
+    def _determine_save_needed(self, is_waveform: bool, is_dangerous: bool, is_just_resolved: bool, station_id: int, station_name: str, sensor_type: str, station_config: dict, current_timestamp: int, processed_data: dict) -> bool:
+        if is_waveform or is_dangerous or is_just_resolved:
+            return True
+        last_saved = self.last_save_time[station_id].get(sensor_type, 0)
+        interval = self._resolve_save_interval(sensor_type, station_config)
+        save_now = self._should_save_now(last_saved, current_timestamp, sensor_type, interval, station_name)
+        if save_now and sensor_type == "gnss":
+            only_fix = station_config.get("gnss_save_only_fix", False)
+            if only_fix and processed_data and processed_data.get("fix_quality", 0) < 4:
+                logger.info(f"⏭️ [SKIP SAVE] {station_name} - GNSS (Not fixed, quality={processed_data.get('fix_quality')})")
+                return False
+        return save_now
+
+    async def _persist_urgent_or_normal(self, is_dangerous: bool, is_just_resolved: bool, device_id: int, station_id: int, station_name: str, sensor_type: str, current_timestamp: int, processed_data: dict, raw_payload: str, alert: dict | None):
+        if is_dangerous:
+            val_1, val_2 = _extract_metric_values(sensor_type, processed_data)
+            sensor_record = {
+                "station_id": station_id, "timestamp": current_timestamp, "sensor_type": sensor_type,
+                "ingest_id": self._make_ingest_id(device_id, station_id, sensor_type, current_timestamp, processed_data, raw_payload),
+                "data": processed_data, "value_1": val_1, "value_2": val_2,
+                "value_3": 0.0 if sensor_type != "imu" else processed_data.get("yaw", 0.0),
+                "value_4": 0.0 if sensor_type != "imu" else processed_data.get("total_accel", 0.0),
+                "value_5": 0.0 if sensor_type != "imu" else processed_data.get("battery", 0.0),
+            }
+            self.last_save_time[station_id][sensor_type] = current_timestamp
+            await self._save_alert_immediate(device_id, station_id, sensor_record, alert, current_timestamp)
+        elif is_just_resolved:
+            await self._buffer_sensor_record(device_id, station_id, sensor_type, current_timestamp, processed_data, raw_payload)
+            await self._flush_write_buffer()
+            logger.info(f"💾 [RESOLVE FLUSH] {station_name} - {sensor_type.upper()} ts={current_timestamp} written immediately")
+        else:
+            await self._buffer_sensor_record(device_id, station_id, sensor_type, current_timestamp, processed_data, raw_payload)
+
     async def _save_processed_data(
         self,
         info: dict,
@@ -56,106 +122,17 @@ class SensorPersistenceMixin:
         current_timestamp: int,
     ) -> None:
         _ = info
-        save_data_now = False
-        is_waveform = sensor_type == 'accelerometer' and bool(processed_data.get('waveform'))
-
-        if is_waveform:
-            # Preserve every waveform chunk, including pre/post-trigger samples.
-            save_data_now = True
-        elif is_dangerous:
-            # ✅ ALERT → Lưu ngay lập tức / không quan tâm chu kỳ
-            save_data_now = True
-            logger.warning("⚠️ [FORCED SAVE] Alert detected - saving immediately")
-        elif is_just_resolved:
-            # ✅ VỪA RESOLVE ALERT → Lưu ngay để DB có dữ liệu an toàn mới nhất
-            save_data_now = True
-            logger.info(f"💾 [RESOLVE SAVE] Alert just resolved - saving safe data for station {station_id}")
-        else:
-            # ✅ KIỂM TRA CHU KỲ LƯU
-            last_saved = self.last_save_time[station_id].get(sensor_type, 0)
-
-            interval = self.runtime_save_intervals.get('default', settings.SAVE_INTERVAL_DEFAULT)
-            if sensor_type == 'gnss':
-                try:
-                    interval = int(station_config.get("gnss_save_interval", self.runtime_save_intervals.get('gnss', settings.SAVE_INTERVAL_GNSS)))
-                except (ValueError, TypeError):
-                    interval = self.runtime_save_intervals.get('gnss', settings.SAVE_INTERVAL_GNSS)
-            elif sensor_type == 'imu': interval = self.runtime_save_intervals.get('imu', settings.SAVE_INTERVAL_IMU)
-            elif sensor_type == 'rain': interval = self.runtime_save_intervals.get('rain', settings.SAVE_INTERVAL_RAIN)
-            elif sensor_type == 'water': interval = self.runtime_save_intervals.get('water', settings.SAVE_INTERVAL_WATER)
-
-            time_since_last_save = current_timestamp - last_saved
-
-            if last_saved == 0:
-                # Lần đầu tiên → Lưu luôn
-                save_data_now = True
-                logger.info(f"💾 [FIRST SAVE] {station_name} - {sensor_type.upper()}")
-            elif sensor_type == 'gnss':
-                # GNSS: Logic lưu điểm đầu tiên của ngày (bao hàm cả điểm đầu tuần, tháng, năm)
-                from datetime import datetime
-                last_dt = datetime.fromtimestamp(last_saved)
-                curr_dt = datetime.fromtimestamp(current_timestamp)
-
-                if curr_dt.date() > last_dt.date():
-                    save_data_now = True
-                    logger.info(f"💾 [CALENDAR START DAY SAVE - GNSS] {station_name} ({curr_dt.date()})")
-                elif interval < 86400 and time_since_last_save >= interval:
-                    # Nếu Admin cố tình set sys-save-gnss nhỏ hơn 1 ngày (vd: 1 tiếng) thì vẫn tuân thủ
-                    save_data_now = True
-                    logger.info(f"💾 [PERIODIC SAVE - GNSS] {station_name} (Interval: {interval}s)")
-            elif time_since_last_save >= interval:
-                # Đã đủ chu kỳ → Lưu (Dành cho IMU, Rain, Water)
-                save_data_now = True
-                logger.info(f"💾 [PERIODIC SAVE] {station_name} - {sensor_type.upper()} (Interval: {interval}s)")
-            else:
-                # Chưa đủ chu kỳ → Skip
-                logger.debug(f"⏭️ [SKIP SAVE] {station_name} - {sensor_type.upper()} ({time_since_last_save}/{interval}s)")
-
-        if save_data_now and sensor_type == 'gnss':
-            # Option gnss_save_only_fix trong station_config (mặc định False để tương thích ngược, có thể set True để bật)
-            only_save_fix = station_config.get("gnss_save_only_fix", False)
-            if only_save_fix and processed_data and processed_data.get('fix_quality', 0) < 4:
-                save_data_now = False
-                logger.info(f"⏭️ [SKIP SAVE] {station_name} - GNSS (Not fixed, quality={processed_data.get('fix_quality')})")
-
+        is_waveform = sensor_type == "accelerometer" and bool(processed_data.get("waveform"))
+        save_data_now = self._determine_save_needed(
+            is_waveform, is_dangerous, is_just_resolved, station_id, station_name,
+            sensor_type, station_config, current_timestamp, processed_data
+        )
+        if not save_data_now:
+            return
         try:
-            if save_data_now:
-                if is_dangerous:
-                    val_1, val_2 = _extract_metric_values(sensor_type, processed_data)
-                    sensor_record = {
-                        "station_id": station_id,
-                        "timestamp": current_timestamp,
-                        "sensor_type": sensor_type,
-                        "ingest_id": self._make_ingest_id(
-                            device_id,
-                            station_id,
-                            sensor_type,
-                            current_timestamp,
-                            processed_data,
-                            raw_payload,
-                        ),
-                        "data": processed_data,
-                        "value_1": val_1,
-                        "value_2": val_2,
-                        "value_3": 0.0 if sensor_type != 'imu' else processed_data.get('yaw', 0.0),
-                        "value_4": 0.0 if sensor_type != 'imu' else processed_data.get('total_accel', 0.0),
-                        "value_5": 0.0 if sensor_type != 'imu' else processed_data.get('battery', 0.0),
-                    }
-                    self.last_save_time[station_id][sensor_type] = current_timestamp
-                    # ✅ ALERT → Ghi thẳng xuống DB, không qua buffer
-                    await self._save_alert_immediate(device_id, station_id, sensor_record, alert, current_timestamp)
-                elif is_just_resolved:
-                    # ✅ RESOLVE → Buffer rồi flush ngay, tránh mất dữ liệu khi server restart
-                    await self._buffer_sensor_record(
-                        device_id, station_id, sensor_type, current_timestamp, processed_data, raw_payload
-                    )
-                    await self._flush_write_buffer()
-                    logger.info(f"💾 [RESOLVE FLUSH] {station_name} - {sensor_type.upper()} ts={current_timestamp} written immediately")
-                else:
-                    # ✅ BÌNH THƯỜNG → Đưa vào buffer, flush theo chu kỳ
-                    await self._buffer_sensor_record(
-                        device_id, station_id, sensor_type, current_timestamp, processed_data, raw_payload
-                    )
-
+            await self._persist_urgent_or_normal(
+                is_dangerous, is_just_resolved, device_id, station_id, station_name,
+                sensor_type, current_timestamp, processed_data, raw_payload, alert
+            )
         except Exception as e:
             logger.exception(f"❌ DB Error: {e}")

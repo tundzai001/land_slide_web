@@ -267,30 +267,24 @@ class NtripPusher:
             ),
             "elapsed_s": round(time.monotonic() - self._created_at, 3),
         })
-        if result["sent_bytes"] > 0:
-            result["likely_cause"] = "RTCM fanout was written to the caster"
-        elif result["mqtt_chunks"] == 0:
-            result["likely_cause"] = "no MQTT payload reached the pusher for this station"
-        elif result["d3_preambles"] == 0 and result["last_gga_fix_quality"] == 0:
-            satellite_detail = (
-                f", satellites={result['last_gga_satellites']}"
-                if result["last_gga_satellites"] is not None
-                else ""
-            )
-            result["likely_cause"] = (
-                "receiver emitted GGA with no GNSS fix (quality=0"
-                f"{satellite_detail}) and no RTCM3; verify antenna/satellite "
-                "visibility plus the station COM2-to-MQTT binary mapping"
-            )
-        elif result["d3_preambles"] == 0:
-            result["likely_cause"] = "MQTT payloads arrived but contained no RTCM3 0xD3 preamble"
-        elif result["valid_frames"] == 0 and result["crc_failures"]:
-            result["likely_cause"] = "RTCM-like data arrived but failed CRC-24Q validation"
-        elif result["valid_frames"] == 0 and result["partial_buffer_bytes"]:
-            result["likely_cause"] = "only an incomplete RTCM3 frame arrived before timeout"
-        else:
-            result["likely_cause"] = "valid RTCM was queued but not confirmed written to the caster"
+        result["likely_cause"] = self._diagnose_likely_cause(result)
         return result
+
+    def _diagnose_likely_cause(self, result: dict) -> str:
+        if result["sent_bytes"] > 0:
+            return "RTCM fanout was written to the caster"
+        if result["mqtt_chunks"] == 0:
+            return "no MQTT payload reached the pusher for this station"
+        if result["d3_preambles"] == 0 and result["last_gga_fix_quality"] == 0:
+            sat_detail = f", satellites={result['last_gga_satellites']}" if result["last_gga_satellites"] is not None else ""
+            return f"receiver emitted GGA with no GNSS fix (quality=0{sat_detail}) and no RTCM3; verify antenna/satellite visibility plus the station COM2-to-MQTT binary mapping"
+        if result["d3_preambles"] == 0:
+            return "MQTT payloads arrived but contained no RTCM3 0xD3 preamble"
+        if result["valid_frames"] == 0 and result["crc_failures"]:
+            return "RTCM-like data arrived but failed CRC-24Q validation"
+        if result["valid_frames"] == 0 and result["partial_buffer_bytes"]:
+            return "only an incomplete RTCM3 frame arrived before timeout"
+        return "valid RTCM was queued but not confirmed written to the caster" 
 
     async def stop(self):
         self.is_running = False
@@ -347,36 +341,45 @@ class NtripPusherManager:
             await asyncio.gather(*(pusher.wait_for_rtcm(timeout=timeout) for pusher in pushers))
 
     @classmethod
+    def _enqueue_rtcm(cls, pusher: NtripPusher, rtcm_data: bytes, station_code: str):
+        if not rtcm_data or not pusher._loop or not pusher._loop.is_running():
+            return
+        def enqueue() -> None:
+            try:
+                pusher.queue.put_nowait(rtcm_data)
+                pusher._queued_frame_batches += 1
+            except asyncio.QueueFull:
+                logger.warning(f"[NTRIP Pusher] {station_code}: Queue full for {pusher.mountpoint}, dropping data.")
+        pusher._loop.call_soon_threadsafe(enqueue)
+
+    @classmethod
+    def _feed_pusher_instance(cls, pusher: NtripPusher, data: bytes, sample_hex: str, rtcm_data: bytes | None, station_code: str) -> bytes | None:
+        if not pusher.is_running:
+            return rtcm_data
+        pusher._last_chunk_at = time.monotonic()
+        if pusher._first_chunk_hex is None:
+            pusher._first_chunk_hex = sample_hex
+        pusher._last_chunk_hex = sample_hex
+        pusher.observe_gnss_chunk(data)
+        if rtcm_data is None:
+            rtcm_data = pusher._rtcm_filter.feed(data)
+        cls._enqueue_rtcm(pusher, rtcm_data, station_code)
+        return rtcm_data
+
+    @classmethod
     def feed_data(cls, station_code: str, data: bytes):
-        if station_code in cls._instances:
-            pushers = cls._instances[station_code]
-            # Since all pushers for a station process the exact same RTCM, we only need to filter once.
-            if pushers and pushers[0].is_running:
-                try:
-                    sample_hex = bytes(data[:24]).hex()
-                    rtcm_data = None
-                    for pusher in pushers:
-                        if pusher.is_running:
-                            pusher._last_chunk_at = time.monotonic()
-                            if pusher._first_chunk_hex is None:
-                                pusher._first_chunk_hex = sample_hex
-                            pusher._last_chunk_hex = sample_hex
-                            pusher.observe_gnss_chunk(data)
-                            if rtcm_data is None:
-                                rtcm_data = pusher._rtcm_filter.feed(data)
-                            
-                            if rtcm_data and pusher._loop and pusher._loop.is_running():
-                                def enqueue(p=pusher, rd=rtcm_data) -> None:
-                                    try:
-                                        p.queue.put_nowait(rd)
-                                        p._queued_frame_batches += 1
-                                    except asyncio.QueueFull:
-                                        logger.warning(
-                                            f"[NTRIP Pusher] {station_code}: Queue full for {p.mountpoint}, dropping data."
-                                        )
-                                pusher._loop.call_soon_threadsafe(enqueue)
-                except Exception as exc:
-                    logger.exception(f"[NTRIP Pusher] {station_code}: Could not queue RTCM data: {exc}")
+        if station_code not in cls._instances:
+            return
+        pushers = cls._instances[station_code]
+        if not pushers or not pushers[0].is_running:
+            return
+        try:
+            sample_hex = bytes(data[:24]).hex()
+            rtcm_data = None
+            for pusher in pushers:
+                rtcm_data = cls._feed_pusher_instance(pusher, data, sample_hex, rtcm_data, station_code)
+        except Exception as exc:
+            logger.exception(f"[NTRIP Pusher] {station_code}: Could not queue RTCM data: {exc}")
 
     @classmethod
     def get_diagnostics(cls, station_code: str) -> dict:

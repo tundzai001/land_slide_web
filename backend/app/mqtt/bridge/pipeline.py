@@ -18,6 +18,20 @@ class SensorPipelineMixin(
     SensorAlertMixin,
     SensorPersistenceMixin,
 ):
+    def _is_parallel_run_matching(self, run_id: int, context: dict, public_project_id: int, station_id: int) -> bool:
+        if int(context.get("project_id") or 0) != public_project_id or int(run_id) == public_project_id:
+            return False
+        if str(self.adjustment_phase.get(int(run_id)) or "").upper() not in {"COLLECTING_BASELINE", "FREE_NETWORK", "PAUSED"}:
+            return False
+        clusters = self.active_adjustment_clusters.get(int(run_id), [])
+        return any(station_id in [int(v) for v in c.get("stations", [])] for c in clusters)
+
+    def _find_parallel_adjustment_run_ids(self, public_project_id: int, station_id: int) -> list[int]:
+        return [
+            int(run_id) for run_id, ctx in self.adjustment_run_contexts.items()
+            if self._is_parallel_run_matching(run_id, ctx, public_project_id, station_id)
+        ]
+
     async def process_pipeline(self, info: dict, raw_payload: str):
         if not info: return
 
@@ -32,19 +46,7 @@ class SensorPipelineMixin(
 
         if not adjustment_only and info.get("type") == "gnss":
             station_id = int(info.get("station_id") or 0)
-            parallel_run_ids = [
-                int(run_id)
-                for run_id, context in self.adjustment_run_contexts.items()
-                if int(context.get("project_id") or 0) == public_project_id
-                and int(run_id) != public_project_id
-                and str(self.adjustment_phase.get(int(run_id)) or "").upper()
-                    in {"COLLECTING_BASELINE", "FREE_NETWORK", "PAUSED"}
-                and any(
-                    station_id in [int(value) for value in cluster.get("stations", [])]
-                    for cluster in self.active_adjustment_clusters.get(int(run_id), [])
-                )
-            ]
-            for run_id in parallel_run_ids:
+            for run_id in self._find_parallel_adjustment_run_ids(public_project_id, station_id):
                 await self.process_pipeline(
                     {
                         **info,

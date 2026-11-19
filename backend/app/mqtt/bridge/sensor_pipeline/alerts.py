@@ -40,6 +40,14 @@ async def _resolve_incident_cases_for_alerts(db_data, alert_ids: list[int]) -> l
     return incident_events
 
 
+def _upgrade_imu_alert_to_critical(alert: dict) -> None:
+    alert["level"] = "CRITICAL"
+    if alert.get("category") == "tilt_warning":
+        alert["category"] = "tilt_critical"
+    if not alert.get("audio_code") or alert.get("audio_code") == "imu_warning":
+        alert["audio_code"] = "imu_critical"
+
+
 class SensorAlertMixin:
     def _run_sensor_analyzer(self, sensor_type: str, station_id: int, data_wrapper: list, station_config: dict) -> dict | None:
         try:
@@ -169,6 +177,18 @@ class SensorAlertMixin:
             logger.exception(f"❌ Error auto-resolving alerts: {e}")
         return False
 
+    async def _resolve_and_broadcast_station_status(self, station_id: int, sensor_type: str, station_config: dict, project_id: int | None) -> bool:
+        just_resolved = await self._auto_resolve_sensor_alerts(station_id, sensor_type, station_config, project_id)
+        try:
+            summary = await self._get_station_active_alert_summary(station_id, station_config)
+            await manager.broadcast({
+                "type": "station_status", "project_id": project_id,
+                "station_id": station_id, "risk_level": summary["risk_level"]
+            })
+        except Exception as e:
+            logger.exception(f"❌ WS Station Status Error: {e}")
+        return just_resolved
+
     async def _analyze_and_alert(
         self,
         station_id: int,
@@ -192,29 +212,15 @@ class SensorAlertMixin:
         is_dangerous = bool(alert and str(alert.get('level', '')).upper() in self.DANGEROUS_ALERT_LEVELS)
         is_pending = bool(alert and alert.get('level') == 'PENDING')
 
-        if is_dangerous and sensor_type == 'imu' and alert:
-            alert['level'] = 'CRITICAL'
-            if alert.get('category') == 'tilt_warning':
-                alert['category'] = 'tilt_critical'
-            if not alert.get('audio_code') or alert.get('audio_code') == 'imu_warning':
-                alert['audio_code'] = 'imu_critical'
+        if is_dangerous and sensor_type == "imu" and alert:
+            _upgrade_imu_alert_to_critical(alert)
 
         is_just_resolved = False
         if is_dangerous:
             await self._broadcast_dangerous_alert(station_id, station_name, sensor_type, alert, project_id)
         elif not is_pending:
-            is_just_resolved = await self._auto_resolve_sensor_alerts(
+            is_just_resolved = await self._resolve_and_broadcast_station_status(
                 station_id, sensor_type, station_config, project_id
             )
-            try:
-                summary = await self._get_station_active_alert_summary(station_id, station_config)
-                await manager.broadcast({
-                    "type": "station_status",
-                    "project_id": project_id,
-                    "station_id": station_id,
-                    "risk_level": summary['risk_level']
-                })
-            except Exception as e:
-                logger.exception(f"❌ WS Station Status Error: {e}")
 
         return alert, is_dangerous, is_just_resolved

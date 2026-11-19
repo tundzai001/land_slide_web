@@ -27,6 +27,21 @@ class OtherSensorPayloadMixin:
             self._baseline_save_tasks.add(task)
             task.add_done_callback(self._baseline_save_tasks.discard)
 
+    def _dispatch_sensor_processing(self, sensor_type: str, payload_json: dict, processor: Any, station_config: dict, station_id: int, current_timestamp: int):
+        if is_monitoring_type(sensor_type):
+            custom_unit = (station_config.get("custom_sensors") or {}).get(sensor_type, {}).get("unit") if is_custom_sensor(sensor_type) else None
+            data = process_monitoring_payload(sensor_type, payload_json, custom_unit)
+            if data is not None:
+                data["received_at"] = current_timestamp
+            return data
+        if sensor_type in ("rain", "water"):
+            return processor.process(payload_json, current_timestamp)
+        if sensor_type == "imu":
+            data = processor.process(payload_json, station_config)
+            self._handle_imu_baseline_lock(station_id, processor, data)
+            return data
+        return None
+
     async def _process_other_sensor_payload(
         self,
         info: dict,
@@ -42,24 +57,16 @@ class OtherSensorPayloadMixin:
     ) -> dict | None:
         _ = (public_project_id, station_name, device_id, adjustment_only)
         sensor_type = info["type"]
-        processed_data = None
         try:
-            if is_monitoring_type(sensor_type) and len(raw_payload.encode('utf-8')) > 256 * 1024:
-                logger.warning('Monitoring payload exceeds 256 KiB: station=%s type=%s', station_id, sensor_type)
+            if is_monitoring_type(sensor_type) and len(raw_payload.encode("utf-8")) > 256 * 1024:
+                logger.warning("Monitoring payload exceeds 256 KiB: station=%s type=%s", station_id, sensor_type)
                 return None
             payload_json = json.loads(raw_payload)
-            if is_monitoring_type(sensor_type):
-                custom_unit = (station_config.get('custom_sensors') or {}).get(sensor_type, {}).get('unit') if is_custom_sensor(sensor_type) else None
-                processed_data = process_monitoring_payload(sensor_type, payload_json, custom_unit)
-                if processed_data is not None:
-                    processed_data['received_at'] = current_timestamp
-            elif sensor_type == 'rain': processed_data = processor.process(payload_json, current_timestamp)
-            elif sensor_type == 'water': processed_data = processor.process(payload_json, current_timestamp)
-            elif sensor_type == 'imu': 
-                processed_data = processor.process(payload_json, station_config)
-                self._handle_imu_baseline_lock(station_id, processor, processed_data)
+            processed_data = self._dispatch_sensor_processing(
+                sensor_type, payload_json, processor, station_config, station_id, current_timestamp
+            )
         except json.JSONDecodeError:
-            return
+            return None
         except Exception as e:
             logger.exception(f"Processing error ({sensor_type}): {e}")
             return None

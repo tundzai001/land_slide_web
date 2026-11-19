@@ -229,16 +229,85 @@ class SensorIngestPersistenceMixin:
             "metrics": metrics,
             "spool": spool,
         }
+    async def _flush_sensor_batch(self, sensor_batch: list):
+        if not sensor_batch:
+            return
+        try:
+            lock = getattr(self, "_sensor_db_lock", None)
+            if lock is None:
+                lock = self._sensor_db_lock = asyncio.Lock()
+            async with lock:
+                metrics = await self._persist_sensor_batch(sensor_batch)
+            self._ingest_metrics["inserted"] += metrics["inserted"]
+            self._ingest_metrics["deduped"] += metrics["deduped"]
+            self._ingest_metrics["null_identity"] += metrics["null_identity"]
+            self._ingest_metrics["last_success_at"] = int(time.time())
+            await self._get_ingest_spool().acknowledge(
+                *(str(row.get("_spool_id")) for row in sensor_batch if row.get("_spool_id"))
+            )
+            logger.debug(f"💾 [BULK FLUSH] {len(sensor_batch)} sensor records saved (inserted={metrics['inserted']} deduped={metrics['deduped']})")
+        except Exception as e:
+            logger.exception(f"❌ Bulk sensor flush error: {e}")
+            self._ingest_metrics["commit_unknown_retries"] += 1
+            durable_ids = await self._spool_failed_sensor_batch(sensor_batch, type(e).__name__)
+            async with self._buffer_lock:
+                self._sensor_buffer[0:0] = [row for row in sensor_batch if row.get("_spool_id") not in durable_ids]
+
+    async def _flush_latest_cache_batch(self, latest_cache_batch: list):
+        if not latest_cache_batch:
+            return
+        try:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            async with DataSessionLocal() as db:
+                for offset in range(0, len(latest_cache_batch), 256):
+                    stmt = pg_insert(model_data.LatestSensorCache).values(latest_cache_batch[offset:offset + 256])
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["station_id", "sensor_type"],
+                        set_={"timestamp": stmt.excluded.timestamp, "data": stmt.excluded.data},
+                        where=(model_data.LatestSensorCache.timestamp <= stmt.excluded.timestamp),
+                    )
+                    await db.execute(stmt)
+                await db.commit()
+        except Exception as exc:
+            logger.exception("Latest sensor cache bulk UPSERT failed: %s", exc)
+            async with self._buffer_lock:
+                for row in latest_cache_batch:
+                    key = (int(row["station_id"]), str(row["sensor_type"]))
+                    pending = self._latest_cache_buffer.get(key)
+                    if not pending or int(row["timestamp"]) > int(pending["timestamp"]):
+                        self._latest_cache_buffer[key] = row
+
+    async def _rollback_config_batches(self, station_batch: dict, device_batch: dict):
+        async with self._buffer_lock:
+            for sid, values in station_batch.items():
+                prev = self._station_update_buffer.get(sid)
+                if prev is None or int(values.get("last_update", 0)) >= int(prev.get("last_update", 0)):
+                    self._station_update_buffer[sid] = values
+            for did, ts in device_batch.items():
+                if int(ts) >= int(self._device_update_buffer.get(did, 0)):
+                    self._device_update_buffer[did] = int(ts)
+
+    async def _flush_station_and_device_batches(self, station_batch: dict, device_batch: dict):
+        if not station_batch and not device_batch:
+            return
+        try:
+            from app.models.config import Station, Device
+            async with ConfigSessionLocal() as db:
+                for sid, vals in station_batch.items():
+                    await db.execute(Station.__table__.update().where(Station.id == sid).values(**vals))
+                for did, ts in device_batch.items():
+                    await db.execute(Device.__table__.update().where(Device.id == did).values(last_data_time=ts))
+                await db.commit()
+            logger.debug(f"✅ [BATCH CONFIG] {len(station_batch)} stations, {len(device_batch)} devices updated")
+        except Exception as e:
+            logger.exception(f"❌ Batch config update error: {e}")
+            await self._rollback_config_batches(station_batch, device_batch)
+
     async def _flush_write_buffer(self):
         """Flush toàn bộ buffer ra DB bằng bulk insert / batch update."""
         self._ensure_ingest_metrics()
         async with self._buffer_lock:
-            if (
-                not self._sensor_buffer
-                and not self._station_update_buffer
-                and not self._device_update_buffer
-                and not self._latest_cache_buffer
-            ):
+            if not self._sensor_buffer and not self._station_update_buffer and not self._device_update_buffer and not self._latest_cache_buffer:
                 return
             sensor_batch = [clean_null_bytes(r) for r in self._sensor_buffer]
             station_batch = dict(self._station_update_buffer)
@@ -249,91 +318,43 @@ class SensorIngestPersistenceMixin:
             self._device_update_buffer.clear()
             self._latest_cache_buffer.clear()
 
-        logger.debug(
-            f"[FLUSH] Flushing: {len(sensor_batch)} sensor records, "
-            f"{len(station_batch)} station updates, {len(device_batch)} device updates"
+        logger.debug(f"[FLUSH] Flushing: {len(sensor_batch)} sensor records, {len(station_batch)} station updates, {len(device_batch)} device updates")
+        await self._flush_sensor_batch(sensor_batch)
+        await self._flush_latest_cache_batch(latest_cache_batch)
+        await self._flush_station_and_device_batches(station_batch, device_batch)
+
+    def _extract_monitoring_values(self, sensor_type: str, processed_data: dict) -> tuple:
+        if sensor_type == "extensometer":
+            values = list(processed_data["points"].values())
+        else:
+            fields = ["value"] if is_custom_sensor(sensor_type) else SENSOR_CATALOG[sensor_type]["fields"]
+            values = [processed_data.get(field) for field in fields]
+        if processed_data.get("quality") == "invalid":
+            values = []
+        return tuple((values + [None] * 5)[:5])
+
+    def _extract_imu_values(self, processed_data: dict) -> tuple:
+        return (
+            float(processed_data.get("roll", 0.0) or 0.0), float(processed_data.get("pitch", 0.0) or 0.0),
+            float(processed_data.get("yaw", 0.0) or 0.0), float(processed_data.get("total_accel", 0.0) or 0.0),
+            float(processed_data.get("battery", 0.0) or 0.0)
         )
 
-        # 1. Bulk insert sensor data (1 INSERT nhiều rows thay vì nhiều INSERT)
-        if sensor_batch:
-            try:
-                lock = getattr(self, "_sensor_db_lock", None)
-                if lock is None:
-                    lock = self._sensor_db_lock = asyncio.Lock()
-                async with lock:
-                    metrics = await self._persist_sensor_batch(sensor_batch)
-                self._ingest_metrics["inserted"] += metrics["inserted"]
-                self._ingest_metrics["deduped"] += metrics["deduped"]
-                self._ingest_metrics["null_identity"] += metrics["null_identity"]
-                self._ingest_metrics["last_success_at"] = int(time.time())
-                await self._get_ingest_spool().acknowledge(
-                    *(str(row.get("_spool_id")) for row in sensor_batch if row.get("_spool_id"))
-                )
-                logger.debug(
-                    f"💾 [BULK FLUSH] {len(sensor_batch)} sensor records saved "
-                    f"(inserted={metrics['inserted']} deduped={metrics['deduped']})"
-                )
-            except Exception as e:
-                logger.exception(f"❌ Bulk sensor flush error: {e}")
-                # The batch is removed from RAM before the transaction so the
-                # MQTT callback can keep accepting data. Hand failures to disk,
-                # retaining RAM only when that durable handoff is unavailable.
-                self._ingest_metrics["commit_unknown_retries"] += 1
-                durable_ids = await self._spool_failed_sensor_batch(sensor_batch, type(e).__name__)
-                async with self._buffer_lock:
-                    # The drain loop owns durable batches. Keep only records
-                    # that could not reach disk; duplicating spool data in RAM
-                    # makes long DB outages exhaust server memory.
-                    self._sensor_buffer[0:0] = [row for row in sensor_batch if row.get('_spool_id') not in durable_ids]
+    def _extract_sensor_values(self, sensor_type: str, processed_data: dict) -> tuple:
+        if is_monitoring_type(sensor_type):
+            return self._extract_monitoring_values(sensor_type, processed_data)
+        if sensor_type == "gnss":
+            v1 = processed_data.get("speed_2d_mm_s") if "speed_2d_mm_s" in processed_data else None
+            v2 = processed_data.get("total_displacement_mm") if "total_displacement_mm" in processed_data else None
+            return v1, v2, 0.0, 0.0, 0.0
+        if sensor_type == "rain":
+            return float(processed_data.get("intensity_mm_h", 0.0) or 0.0), float(processed_data.get("accumulated_mm", 0.0) or 0.0), 0.0, 0.0, 0.0
+        if sensor_type == "water":
+            return float(processed_data.get("water_level", 0.0) or 0.0), float(processed_data.get("intensity_mm_h", 0.0) or 0.0), 0.0, 0.0, 0.0
+        if sensor_type == "imu":
+            return self._extract_imu_values(processed_data)
+        return 0.0, 0.0, 0.0, 0.0, 0.0
 
-        # 2. Batch update Device.last_data_time + Station.last_update / status
-        if latest_cache_batch:
-            try:
-                from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-                async with DataSessionLocal() as db:
-                    for offset in range(0, len(latest_cache_batch), 256):
-                        stmt = pg_insert(model_data.LatestSensorCache).values(latest_cache_batch[offset:offset + 256])
-                        stmt = stmt.on_conflict_do_update(
-                            index_elements=["station_id", "sensor_type"],
-                            set_={"timestamp": stmt.excluded.timestamp, "data": stmt.excluded.data},
-                            where=(model_data.LatestSensorCache.timestamp <= stmt.excluded.timestamp),
-                        )
-                        await db.execute(stmt)
-                    await db.commit()
-            except Exception as exc:
-                logger.exception("Latest sensor cache bulk UPSERT failed: %s", exc)
-                async with self._buffer_lock:
-                    for row in latest_cache_batch:
-                        key = (int(row["station_id"]), str(row["sensor_type"]))
-                        pending = self._latest_cache_buffer.get(key)
-                        if not pending or int(row["timestamp"]) > int(pending["timestamp"]):
-                            self._latest_cache_buffer[key] = row
-
-        if station_batch or device_batch:
-            try:
-                from app.models.config import Station, Device
-                async with ConfigSessionLocal() as db:
-                    for sid, vals in station_batch.items():
-                        await db.execute(
-                            Station.__table__.update().where(Station.id == sid).values(**vals)
-                        )
-                    for did, ts in device_batch.items():
-                        await db.execute(
-                            Device.__table__.update().where(Device.id == did).values(last_data_time=ts)
-                        )
-                    await db.commit()
-                logger.debug(f"✅ [BATCH CONFIG] {len(station_batch)} stations, {len(device_batch)} devices updated")
-            except Exception as e:
-                logger.exception(f"❌ Batch config update error: {e}")
-                async with self._buffer_lock:
-                    for sid, values in station_batch.items():
-                        previous = self._station_update_buffer.get(sid)
-                        if previous is None or int(values.get("last_update", 0)) >= int(previous.get("last_update", 0)):
-                            self._station_update_buffer[sid] = values
-                    for did, timestamp in device_batch.items():
-                        if int(timestamp) >= int(self._device_update_buffer.get(did, 0)):
-                            self._device_update_buffer[did] = int(timestamp)
     async def _buffer_sensor_record(
         self,
         device_id: int,
@@ -343,52 +364,16 @@ class SensorIngestPersistenceMixin:
         processed_data: dict,
         source_payload: str | None = None,
     ):
-        val_1, val_2, val_3, val_4, val_5 = 0.0, 0.0, 0.0, 0.0, 0.0
-
-        if sensor_type == 'gnss':
-            val_1 = processed_data.get('speed_2d_mm_s') if 'speed_2d_mm_s' in processed_data else None
-            val_2 = processed_data.get('total_displacement_mm') if 'total_displacement_mm' in processed_data else None
-        elif sensor_type == 'rain':
-            val_1 = processed_data.get('intensity_mm_h', 0.0) or 0.0
-            val_2 = processed_data.get('accumulated_mm', 0.0) or 0.0
-        elif sensor_type == 'water':
-            val_1 = processed_data.get('water_level', 0.0) or 0.0
-            val_2 = processed_data.get('intensity_mm_h', 0.0) or 0.0
-        elif sensor_type == 'imu':
-            val_1 = processed_data.get('roll', 0.0) or 0.0
-            val_2 = processed_data.get('pitch', 0.0) or 0.0
-            val_3 = processed_data.get('yaw', 0.0) or 0.0
-            val_4 = processed_data.get('total_accel', 0.0) or 0.0
-            val_5 = processed_data.get('battery', 0.0) or 0.0
-
-        if is_monitoring_type(sensor_type):
-            if sensor_type == 'extensometer':
-                values = list(processed_data['points'].values())
-            else:
-                fields = ['value'] if is_custom_sensor(sensor_type) else SENSOR_CATALOG[sensor_type]['fields']
-                values = [processed_data.get(field) for field in fields]
-            if processed_data.get('quality') == 'invalid':
-                values = []  # Keep evidence in JSON, exclude invalid values from numeric summaries.
-            val_1, val_2, val_3, val_4, val_5 = (values + [None] * 5)[:5]
-
+        val_1, val_2, val_3, val_4, val_5 = self._extract_sensor_values(sensor_type, processed_data)
         sensor_record = {
             "station_id": station_id,
             "timestamp": current_timestamp,
             "sensor_type": sensor_type,
             "ingest_id": self._make_ingest_id(
-                device_id,
-                station_id,
-                sensor_type,
-                current_timestamp,
-                processed_data,
-                source_payload,
+                device_id, station_id, sensor_type, current_timestamp, processed_data, source_payload,
             ),
             "data": processed_data,
-            "value_1": val_1,
-            "value_2": val_2,
-            "value_3": val_3,
-            "value_4": val_4,
-            "value_5": val_5,
+            "value_1": val_1, "value_2": val_2, "value_3": val_3, "value_4": val_4, "value_5": val_5,
         }
         self.last_save_time[station_id][sensor_type] = current_timestamp
 
@@ -398,7 +383,7 @@ class SensorIngestPersistenceMixin:
                 "status": "online",
                 "last_update": current_timestamp
             }
-            self._device_update_buffer[device_id] = current_timestamp
+
     async def _touch_online_heartbeat(self, device_id: int, station_id: int, current_timestamp: int):
         """Mark device/station alive even when payload is not persisted in this cycle."""
         async with self._buffer_lock:

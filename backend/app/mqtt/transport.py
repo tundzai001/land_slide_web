@@ -206,53 +206,47 @@ class MQTTTransportMixin:
         except Exception as e:
             logger.exception(f"Error in on_message: {e}")
 
+    def _handle_ntrip_route_start(self, payload: dict):
+        from app.mqtt.ntrip_pusher import ntrip_manager
+        route_payload = payload.get("ntrip_route") if isinstance(payload.get("ntrip_route"), dict) else payload
+        station_code = route_payload.get("station_code")
+        mountpoint = route_payload.get("mountpoint")
+        if not station_code and isinstance(mountpoint, str) and mountpoint.endswith("_BASE"):
+            station_code = mountpoint[:-5]
+        host = (
+            route_payload.get("host") or route_payload.get("target_host")
+            or next((item.strip() for item in settings.NTRIP_HOSTS.split(",") if item.strip()), "")
+        )
+        port = int(route_payload.get("port") or route_payload.get("target_port") or settings.NTRIP_PORT)
+        password = route_payload.get("password")
+        if password is None:
+            password = settings.NTRIP_PASSWORD
+        if station_code and mountpoint and host:
+            if self.loop and self.loop.is_running():
+                self._submit_threadsafe(
+                    ntrip_manager.start_pusher(station_code, host, port, mountpoint, password),
+                    "ntrip-route-start",
+                )
+        else:
+            logger.warning("[NTRIP COMMAND] Ignored start route missing station_code or mountpoint: %s", payload)
+
+    def _handle_ntrip_route_stop(self, payload: dict):
+        from app.mqtt.ntrip_pusher import ntrip_manager
+        station_code = payload.get("station_code")
+        if station_code and self.loop and self.loop.is_running():
+            self._submit_threadsafe(
+                ntrip_manager.stop_pusher(station_code),
+                "ntrip-route-stop",
+            )
+
     def _handle_ntrip_command(self, msg):
         try:
             import json
-            payload = json.loads(msg.payload.decode('utf-8'))
-            from app.mqtt.ntrip_pusher import ntrip_manager
-            import asyncio
+            payload = json.loads(msg.payload.decode("utf-8"))
             if msg.topic == "command/ntrip/route/start":
-                route_payload = payload.get("ntrip_route") if isinstance(payload.get("ntrip_route"), dict) else payload
-                station_code = route_payload.get("station_code")
-                mountpoint = route_payload.get("mountpoint")
-                if not station_code and isinstance(mountpoint, str) and mountpoint.endswith("_BASE"):
-                    station_code = mountpoint[:-5]
-                host = (
-                    route_payload.get("host")
-                    or route_payload.get("target_host")
-                    or next(
-                        (
-                            item.strip()
-                            for item in settings.NTRIP_HOSTS.split(",")
-                            if item.strip()
-                        ),
-                        "",
-                    )
-                )
-                port = int(
-                    route_payload.get("port")
-                    or route_payload.get("target_port")
-                    or settings.NTRIP_PORT
-                )
-                password = route_payload.get("password")
-                if password is None:
-                    password = settings.NTRIP_PASSWORD
-                if station_code and mountpoint and host:
-                    if self.loop and self.loop.is_running():
-                        self._submit_threadsafe(
-                            ntrip_manager.start_pusher(station_code, host, port, mountpoint, password),
-                            "ntrip-route-start",
-                        )
-                else:
-                    logger.warning("[NTRIP COMMAND] Ignored start route missing station_code or mountpoint: %s", payload)
+                self._handle_ntrip_route_start(payload)
             elif msg.topic == "command/ntrip/route/stop":
-                station_code = payload.get("station_code")
-                if station_code and self.loop and self.loop.is_running():
-                    self._submit_threadsafe(
-                        ntrip_manager.stop_pusher(station_code),
-                        "ntrip-route-stop",
-                    )
+                self._handle_ntrip_route_stop(payload)
         except Exception as e:
             logger.exception(f"[NTRIP COMMAND] Error processing command: {e}")
 

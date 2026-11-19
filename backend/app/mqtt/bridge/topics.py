@@ -101,36 +101,40 @@ class MQTTTopicMixin:
         broker_tls = bool(mqtt_cfg.get("use_tls", False))
         return (broker_host, broker_port, broker_user, broker_pass, broker_tls)
 
+    def _create_imu_engine(self, station):
+        imu_engine = IMUEngine()
+        imu_baseline = (station.config or {}).get("ImuBaseline", {})
+        if imu_baseline.get("baseline_roll") is not None:
+            imu_engine.set_baseline(
+                float(imu_baseline.get("baseline_roll", 0)),
+                float(imu_baseline.get("baseline_pitch", 0)),
+                float(imu_baseline.get("baseline_yaw", 0))
+            )
+            logger.info(f"🎯 [IMU] Loaded baseline for station {station.name} from config")
+        return imu_engine
+
+    def _create_device_processor(self, sensor_type: str, device, station, device_context: str):
+        if sensor_type == "gnss":
+            return GNSSVelocityProcessor(device.id, ConfigSessionLocal, context_label=device_context)
+        if sensor_type == "rain":
+            return RainEngine()
+        if sensor_type == "water":
+            return WaterEngine()
+        if sensor_type == "imu":
+            return self._create_imu_engine(station)
+        if is_monitoring_type(sensor_type):
+            return None
+        return False
+
     def _resolve_device_processor(self, device, station, proc_key: str, device_context: str):
         sensor_type = device.device_type
         if proc_key not in self.processors_cache:
-            if sensor_type == 'gnss':
-                self.processors_cache[proc_key] = GNSSVelocityProcessor(
-                    device.id,
-                    ConfigSessionLocal,
-                    context_label=device_context
-                )
-            elif sensor_type == 'rain':
-                self.processors_cache[proc_key] = RainEngine()
-            elif sensor_type == 'water':
-                self.processors_cache[proc_key] = WaterEngine()
-            elif sensor_type == 'imu':
-                imu_engine = IMUEngine()
-                imu_baseline = (station.config or {}).get('ImuBaseline', {})
-                if imu_baseline.get('baseline_roll') is not None:
-                    imu_engine.set_baseline(
-                        float(imu_baseline.get('baseline_roll', 0)),
-                        float(imu_baseline.get('baseline_pitch', 0)),
-                        float(imu_baseline.get('baseline_yaw', 0))
-                    )
-                    logger.info(f"🎯 [IMU] Loaded baseline for station {station.name} from config")
-                self.processors_cache[proc_key] = imu_engine
-            elif is_monitoring_type(sensor_type):
-                self.processors_cache[proc_key] = None
-            else:
-                logger.warning('Unsupported sensor type %s for device %s', sensor_type, device.id)
+            proc = self._create_device_processor(sensor_type, device, station, device_context)
+            if proc is False:
+                logger.warning("Unsupported sensor type %s for device %s", sensor_type, device.id)
                 return False
-        elif sensor_type == 'gnss' and hasattr(self.processors_cache[proc_key], 'set_context'):
+            self.processors_cache[proc_key] = proc
+        elif sensor_type == "gnss" and hasattr(self.processors_cache[proc_key], "set_context"):
             self.processors_cache[proc_key].set_context(device_context)
         return True
 
