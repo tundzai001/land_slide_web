@@ -41,6 +41,16 @@ from .statistics import (
     _split_effective_sample_sessions,
 )
 
+from .models import Baseline, Network, Point
+from .solver import adjust_network
+from .transforms import (
+    covariance_standard_deviation,
+    ecef_to_enu_rotation,
+    ecef_point_covariance_to_enu,
+    neu_standard_deviation_to_ecef_covariance,
+)
+from .runtime import _llh_to_ecef
+
 class RoundRobinResultsMixin:
     @staticmethod
     def _cluster_base_llh(cluster: dict) -> tuple[float, float, float]:
@@ -322,6 +332,149 @@ class RoundRobinResultsMixin:
                     )
         return max_separation, max_difference, max_pair
 
+    @staticmethod
+    def _compute_edge_covariances(
+        rows: List[dict],
+        mean: np.ndarray,
+        mean_covariance: np.ndarray,
+        effective_sample_size: float,
+    ) -> tuple[float, float, np.ndarray, np.ndarray]:
+        temporal_inflation = len(rows) / effective_sample_size
+        scatter_scale = 1.0
+        if len(rows) > 1:
+            scatter = sum(
+                float(
+                    (row["delta"] - mean).T
+                    @ _spd_solve(row["covariance"], np.eye(3, dtype=float))
+                    @ (row["delta"] - mean)
+                )
+                for row in rows
+            )
+            scatter_scale = max(1.0, scatter / (3.0 * (len(rows) - 1)))
+        covariance = mean_covariance * temporal_inflation * scatter_scale
+        covariance = 0.5 * (covariance + covariance.T)
+        independent_covariance = mean_covariance * scatter_scale
+        independent_covariance = 0.5 * (
+            independent_covariance + independent_covariance.T
+        )
+        return temporal_inflation, scatter_scale, covariance, independent_covariance
+
+    @staticmethod
+    def _compute_position_type_separation(rows: List[dict]) -> tuple[list[int], float]:
+        position_types = sorted({
+            int(row["position_type"])
+            for row in rows
+            if row.get("position_type") is not None
+        })
+        type_means = []
+        for position_type in position_types:
+            type_rows = [
+                row
+                for row in rows
+                if int(row.get("position_type") or 0) == position_type
+            ]
+            if not type_rows:
+                continue
+            type_precision_sum = np.zeros((3, 3), dtype=float)
+            type_weighted_sum = np.zeros(3, dtype=float)
+            for row in type_rows:
+                type_precision = _spd_solve(
+                    row["covariance"], np.eye(3, dtype=float)
+                )
+                type_precision_sum += type_precision
+                type_weighted_sum += type_precision @ row["delta"]
+            type_means.append(
+                np.linalg.solve(type_precision_sum, type_weighted_sum)
+            )
+        position_type_separation = max(
+            (
+                float(np.linalg.norm(type_means[left] - type_means[right]))
+                for left in range(len(type_means))
+                for right in range(left + 1, len(type_means))
+            ),
+            default=0.0,
+        )
+        return position_types, position_type_separation
+
+    def _build_single_weighted_edge(
+        self,
+        key: tuple[str, str],
+        rows: List[dict],
+        pooled_lag_one: dict,
+    ) -> Optional[dict]:
+        information_state = _InformationAccumulator()
+        for row in rows:
+            information_state.add(
+                int(row.get("observation_epoch") or 0),
+                row["delta"],
+                row["covariance"],
+                fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
+                slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
+                retention_seconds=1,
+            )
+        mean_covariance = information_state.formal_covariance
+        mean = information_state.mean
+        if mean_covariance is None or mean is None:
+            return None
+
+        acf_effective_sample_size, ess_sessions = _edge_effective_sample_size(
+            rows,
+            pooled_lag_one,
+        )
+        contiguous_sessions = _split_effective_sample_sessions(rows)
+        effective_sample_size = float(len(contiguous_sessions))
+        session_summaries = self._accumulate_session_summaries(contiguous_sessions)
+        (
+            max_session_mean_separation,
+            max_session_mean_difference,
+            max_session_mean_pair,
+        ) = self._find_max_session_mean_separation(session_summaries)
+
+        for session_diagnostic, session_summary in zip(
+            ess_sessions, session_summaries, strict=True
+        ):
+            session_diagnostic["acf_estimated_effective_sample_size"] = (
+                session_diagnostic.pop("effective_sample_size")
+            )
+            session_diagnostic["published_effective_sample_size"] = 1.0
+            session_diagnostic["session_id"] = session_summary["session_id"]
+            session_diagnostic["mean_xyz"] = session_summary["mean_xyz"]
+
+        temporal_inflation, scatter_scale, covariance, independent_covariance = (
+            self._compute_edge_covariances(rows, mean, mean_covariance, effective_sample_size)
+        )
+        position_types, position_type_separation = self._compute_position_type_separation(rows)
+
+        velocity_std_vals = [row["velocity_up_std"] for row in rows if row["velocity_up_std"] is not None]
+        avg_velocity_std = sum(velocity_std_vals) / len(velocity_std_vals) if velocity_std_vals else None
+
+        return {
+            "from": key[0],
+            "to": key[1],
+            "delta": tuple(float(value) for value in mean),
+            "covariance": covariance,
+            "formal_covariance": mean_covariance,
+            "session_covariance_used": covariance,
+            "independent_covariance": independent_covariance,
+            "effective_sample_size": effective_sample_size,
+            "acf_estimated_effective_sample_size": acf_effective_sample_size,
+            "temporal_scale_factor": temporal_inflation,
+            "scatter_scale_factor": scatter_scale,
+            "effective_sample_size_sessions": ess_sessions,
+            "session_count": len(session_summaries),
+            "max_session_mean_separation_m": max_session_mean_separation,
+            "max_session_mean_difference_xyz": max_session_mean_difference,
+            "max_session_mean_pair": max_session_mean_pair,
+            "pooled_lag_one_autocorrelations": pooled_lag_one,
+            "observation_count": len(rows),
+            "raw_indices": [row["raw_index"] for row in rows],
+            "directions": [row["direction"] for row in rows],
+            "position_types": position_types,
+            "position_type_mean_separation_m": position_type_separation,
+            "ratio": next((row["ratio"] for row in reversed(rows) if row["ratio"] is not None), None),
+            "velocity_up_std": avg_velocity_std,
+        }
+
     def _weighted_edges(self, samples: List[dict]) -> List[dict]:
         groups: Dict[tuple[str, str], List[dict]] = {}
         for sample in samples:
@@ -337,158 +490,14 @@ class RoundRobinResultsMixin:
         pooled_lag_one = _pooled_lag_one_autocorrelations(groups)
         result = []
         for key, rows in groups.items():
-            information_state = _InformationAccumulator()
-            for row in rows:
-                information_state.add(
-                    int(row.get("observation_epoch") or 0),
-                    row["delta"],
-                    row["covariance"],
-                    fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
-                    slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
-                    retention_seconds=1,
-                )
-            mean_covariance = information_state.formal_covariance
-            mean = information_state.mean
-            if mean_covariance is None or mean is None:
-                continue
-
-            acf_effective_sample_size, ess_sessions = _edge_effective_sample_size(
-                rows,
-                pooled_lag_one,
-            )
-            contiguous_sessions = _split_effective_sample_sessions(rows)
-            effective_sample_size = float(len(contiguous_sessions))
-            session_summaries = self._accumulate_session_summaries(contiguous_sessions)
-            (
-                max_session_mean_separation,
-                max_session_mean_difference,
-                max_session_mean_pair,
-            ) = self._find_max_session_mean_separation(session_summaries)
-
-            for session_diagnostic, session_summary in zip(
-                ess_sessions, session_summaries, strict=True
-            ):
-                session_diagnostic["acf_estimated_effective_sample_size"] = (
-                    session_diagnostic.pop("effective_sample_size")
-                )
-                session_diagnostic["published_effective_sample_size"] = 1.0
-                session_diagnostic["session_id"] = session_summary["session_id"]
-                session_diagnostic["mean_xyz"] = session_summary["mean_xyz"]
-            temporal_inflation = len(rows) / effective_sample_size
-            scatter_scale = 1.0
-            if len(rows) > 1:
-                scatter = sum(
-                    float(
-                        (row["delta"] - mean).T
-                        @ _spd_solve(row["covariance"], np.eye(3, dtype=float))
-                        @ (row["delta"] - mean)
-                    )
-                    for row in rows
-                )
-                scatter_scale = max(1.0, scatter / (3.0 * (len(rows) - 1)))
-            covariance = mean_covariance * temporal_inflation * scatter_scale
-            covariance = 0.5 * (covariance + covariance.T)
-            independent_covariance = mean_covariance * scatter_scale
-            independent_covariance = 0.5 * (
-                independent_covariance + independent_covariance.T
-            )
-            position_types = sorted({
-                int(row["position_type"])
-                for row in rows
-                if row.get("position_type") is not None
-            })
-            type_means = []
-            for position_type in position_types:
-                type_rows = [
-                    row
-                    for row in rows
-                    if int(row.get("position_type") or 0) == position_type
-                ]
-                if not type_rows:
-                    continue
-                type_precision_sum = np.zeros((3, 3), dtype=float)
-                type_weighted_sum = np.zeros(3, dtype=float)
-                for row in type_rows:
-                    type_precision = _spd_solve(
-                        row["covariance"], np.eye(3, dtype=float)
-                    )
-                    type_precision_sum += type_precision
-                    type_weighted_sum += type_precision @ row["delta"]
-                type_means.append(
-                    np.linalg.solve(type_precision_sum, type_weighted_sum)
-                )
-            position_type_separation = max(
-                (
-                    float(np.linalg.norm(type_means[left] - type_means[right]))
-                    for left in range(len(type_means))
-                    for right in range(left + 1, len(type_means))
-                ),
-                default=0.0,
-            )
-            result.append({
-                "from": key[0],
-                "to": key[1],
-                "delta": tuple(float(value) for value in mean),
-                "covariance": covariance,
-                "formal_covariance": mean_covariance,
-                "session_covariance_used": covariance,
-                "independent_covariance": independent_covariance,
-                "effective_sample_size": effective_sample_size,
-                "acf_estimated_effective_sample_size": acf_effective_sample_size,
-                "temporal_scale_factor": temporal_inflation,
-                "scatter_scale_factor": scatter_scale,
-                "effective_sample_size_sessions": ess_sessions,
-                "session_count": len(session_summaries),
-                "max_session_mean_separation_m": max_session_mean_separation,
-                "max_session_mean_difference_xyz": max_session_mean_difference,
-                "max_session_mean_pair": max_session_mean_pair,
-                "pooled_lag_one_autocorrelations": pooled_lag_one,
-                "observation_count": len(rows),
-                "raw_indices": [row["raw_index"] for row in rows],
-                "directions": [row["direction"] for row in rows],
-                "position_types": position_types,
-                "position_type_mean_separation_m": position_type_separation,
-                "ratio": next((row["ratio"] for row in reversed(rows) if row["ratio"] is not None), None),
-                "velocity_up_std": (
-                    sum(row["velocity_up_std"] for row in rows if row["velocity_up_std"] is not None)
-                    / sum(row["velocity_up_std"] is not None for row in rows)
-                    if any(row["velocity_up_std"] is not None for row in rows)
-                    else None
-                ),
-            })
+            edge = self._build_single_weighted_edge(key, rows, pooled_lag_one)
+            if edge is not None:
+                result.append(edge)
         return result
 
-    def _build_cluster_result(self, project_id: int, cluster_index: int, cluster: dict) -> dict:
-        """Adjust one network using exactly one weighted-mean value per edge."""
-
-        try:
-            from backend.processors.gnss_adjustment.models import Baseline, Network, Point
-            from backend.processors.gnss_adjustment.solver import adjust_network
-            from backend.processors.gnss_adjustment.transforms import (
-                covariance_standard_deviation,
-                ecef_to_enu_rotation,
-                ecef_point_covariance_to_enu,
-                neu_standard_deviation_to_ecef_covariance,
-            )
-            from backend.processors.gnss_adjustment.runtime import _llh_to_ecef
-        except ModuleNotFoundError:
-            from processors.gnss_adjustment.models import Baseline, Network, Point
-            from processors.gnss_adjustment.solver import adjust_network
-            from processors.gnss_adjustment.transforms import (
-                covariance_standard_deviation,
-                ecef_to_enu_rotation,
-                ecef_point_covariance_to_enu,
-                neu_standard_deviation_to_ecef_covariance,
-            )
-            from processors.gnss_adjustment.runtime import _llh_to_ecef
-
-        std_warning_threshold = _BASELINE_STD_REJECTION_THRESHOLD_M
-        raw_ecef_tolerance = 0.05
-        high_std_fallback_min_samples = 3
-        high_std_fallback_max_repeatability_m = 0.05
-        vector_outlier_min_samples = 5
-        vector_outlier_absolute_floor_m = 0.25
-        vector_outlier_sigma_multiplier = 8.0
+    def _resolve_cluster_records(
+        self, cluster: dict
+    ) -> tuple[List[_CollectedObservation], dict[int, str], tuple[float, float, float], tuple[float, float, float]]:
         fixed_base_llh = self._cluster_base_llh(cluster)
         fixed_base_ecef = _llh_to_ecef(*fixed_base_llh)
         live_records: List[_CollectedObservation] = cluster["observations"]
@@ -496,90 +505,54 @@ class RoundRobinResultsMixin:
         if isinstance(seed_snapshot, list):
             seed_cutoff = int(cluster.get("fixed_base_seed_cutoff_index", len(seed_snapshot)))
             if seed_cutoff < 0 or seed_cutoff > len(live_records):
-                raise ValueError(
-                    "fixed-base seed cutoff is outside the collected observation range"
-                )
-            # Use the exact seed state that produced the frozen rover coordinates.
-            # Post-seed records remain present for transition audit and cross-edge
-            # solving, but can never rewrite or invalidate this authoritative seed.
-            records: List[_CollectedObservation] = [
-                *seed_snapshot,
-                *live_records[seed_cutoff:],
-            ]
+                raise ValueError("fixed-base seed cutoff is outside the collected observation range")
+            records: List[_CollectedObservation] = [*seed_snapshot, *live_records[seed_cutoff:]]
         else:
-            # Backward compatibility for direct/unit callers that build a result
-            # without running the production freeze step first.
             records = live_records
 
         configured_names = dict(zip(cluster["stations"], cluster["rovers"], strict=True))
         station_names = {
             station_id: next(
-                (
-                    record.observation.rover_name
-                    for record in records
-                    if record.observation.station_id == station_id
-                ),
+                (rec.observation.rover_name for rec in records if rec.observation.station_id == station_id),
                 configured_names[station_id],
             )
             for station_id in cluster["stations"]
         }
         if len(set(station_names.values())) != len(station_names):
             raise ValueError("duplicate rover name in adjustment cluster")
+        return records, station_names, fixed_base_llh, fixed_base_ecef
 
-        filter_vector_outliers = lambda samples: self._filter_vector_outliers(
-            samples,
-            min_samples=vector_outlier_min_samples,
-            absolute_floor_m=vector_outlier_absolute_floor_m,
-            sigma_multiplier=vector_outlier_sigma_multiplier,
-        )
-
-        filter_position_type_mixes = self._filter_position_type_mixes
-
-        weighted_edges = self._weighted_edges
-
+    def _prepare_cluster_seed_edges(
+        self, records: List[_CollectedObservation], station_names: dict[int, str],
+        fixed_base_llh: tuple, fixed_base_ecef: tuple, cluster_index: int,
+        std_warning_threshold: float, filter_vector_outliers: Callable
+    ) -> tuple[Dict[str, Point], dict]:
         seed_samples = []
         for record in records:
             observation = record.observation
             rover_name = station_names.get(observation.station_id)
-            if record.base_name != "BASE" or rover_name is None:
-                continue
-            if not getattr(record, "solver_eligible", True):
+            if record.base_name != "BASE" or rover_name is None or not getattr(record, "solver_eligible", True):
                 continue
             delta = self._baseline_ecef(observation, fixed_base_llh)
-            if _vector_length(delta) < 1.0:
-                continue
-            if max(float(value) for value in observation.std_neu) > std_warning_threshold:
+            if _vector_length(delta) < 1.0 or max(float(value) for value in observation.std_neu) > std_warning_threshold:
                 continue
             seed_samples.append({
-                "from": "BASE",
-                "to": rover_name,
-                "delta": delta,
+                "from": "BASE", "to": rover_name, "delta": delta,
                 "covariance": neu_standard_deviation_to_ecef_covariance(
                     observation.std_neu, fixed_base_llh[0], fixed_base_llh[1]
                 ),
-                "raw_index": -1,
-                "session_id": str(cluster_index),
-                "observation_epoch": observation.epoch_ts,
-                "position_type": observation.position_type,
-                "ratio": observation.full_data.get("ratio"),
+                "raw_index": -1, "session_id": str(cluster_index), "observation_epoch": observation.epoch_ts,
+                "position_type": observation.position_type, "ratio": observation.full_data.get("ratio"),
                 "velocity_up_std": observation.full_data.get("velocity_up_std"),
             })
-        filtered_seed_samples, _seed_position_type_diagnostics = (
-            filter_position_type_mixes(seed_samples)
-        )
-        filtered_seed_samples, _seed_outliers = filter_vector_outliers(
-            filtered_seed_samples
-        )
+        filtered_seed_samples, _ = self._filter_position_type_mixes(seed_samples)
+        filtered_seed_samples, _ = filter_vector_outliers(filtered_seed_samples)
         seed_edges = {
             edge["to"]: edge
-            for edge in weighted_edges(filtered_seed_samples)
+            for edge in self._weighted_edges(filtered_seed_samples)
             if edge["from"] == "BASE"
         }
-        missing_seed = [
-            station_id
-            for station_id, name in station_names.items()
-            if name not in seed_edges
-        ]
+        missing_seed = [sid for sid, name in station_names.items() if name not in seed_edges]
         if missing_seed:
             raise ValueError(f"missing valid fixed-base observations for stations {missing_seed}")
 
@@ -588,156 +561,221 @@ class RoundRobinResultsMixin:
             delta = seed_edges[name]["delta"]
             approximate = tuple(fixed_base_ecef[axis] + delta[axis] for axis in range(3))
             points[name] = Point(name, approximate, fixed=False, identifier=station_id)
+        return points, seed_edges
 
+    def _resolve_cluster_base_llh_ecef(
+        self, from_name: str, points: dict, fixed_base_llh: tuple,
+        fixed_base_ecef: tuple, cluster: dict
+    ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+        if from_name == "BASE":
+            return fixed_base_llh, fixed_base_ecef
+        cached = (
+            cluster.get("temporary_base_llh_by_rover", {}).get(from_name)
+            or self.rover_llh_cache.get(from_name)
+        )
+        if cached:
+            base_llh = (float(cached["lat"]), float(cached["lon"]), float(cached["alt"]))
+        else:
+            base_llh = _ecef_to_llh(*points[from_name].approximate)
+        return base_llh, points[from_name].approximate
+
+    @staticmethod
+    def _check_ecef_consistency(
+        rover_ecef: Optional[tuple], base_ecef: tuple, delta: tuple, base_llh: tuple,
+        raw_ecef_tolerance: float, flags: list
+    ) -> tuple[Optional[float], Optional[tuple]]:
+        if not rover_ecef:
+            return None, None
+        expected = tuple(base_ecef[axis] + delta[axis] for axis in range(3))
+        consistency_residual_ecef = tuple(
+            rover_ecef[axis] - expected[axis] for axis in range(3)
+        )
+        consistency_error = _vector_length(consistency_residual_ecef)
+        consistency_residual_enu_array = (
+            ecef_to_enu_rotation(base_llh[0], base_llh[1])
+            @ np.asarray(consistency_residual_ecef, dtype=float)
+        )
+        consistency_residual_enu = tuple(
+            float(value) for value in consistency_residual_enu_array
+        )
+        if consistency_error > raw_ecef_tolerance:
+            horizontal_error = math.hypot(
+                consistency_residual_enu[0], consistency_residual_enu[1]
+            )
+            if (
+                horizontal_error <= raw_ecef_tolerance
+                and abs(consistency_residual_enu[2]) > raw_ecef_tolerance
+            ):
+                flags.append("ROVER_ECEF_VERTICAL_DATUM_OFFSET_DIAGNOSTIC")
+            else:
+                flags.append("BASELINE_POSITION_INCONSISTENT")
+        return consistency_error, consistency_residual_enu
+
+    @staticmethod
+    def _build_raw_row_record(
+        from_name: str, rover_name: str, cluster_index: int,
+        observation: Any, delta: tuple, base_llh: tuple,
+        consistency_error: Optional[float], consistency_residual_enu: Optional[tuple],
+        flags: list, record: Any
+    ) -> dict:
+        eff_session_id = (
+            f"R{getattr(record, 'rotation_index'):03d}-W{getattr(record, 'stable_window_index'):02d}-{from_name}>{rover_name}"
+            if getattr(record, "rotation_index", None) is not None
+            and getattr(record, "stable_window_index", None) is not None
+            else None
+        )
+        return {
+            "from": from_name,
+            "to": rover_name,
+            "session_id": str(cluster_index),
+            "observation_epoch": observation.epoch_ts,
+            "position_type": observation.position_type,
+            "gps_satellites": observation.full_data.get("gps_satellites"),
+            "bds_satellites": observation.full_data.get("bds_satellites"),
+            "glonass_satellites": observation.full_data.get("glonass_satellites"),
+            "galileo_satellites": observation.full_data.get("galileo_satellites"),
+            "diff_age": observation.full_data.get("diff_age"),
+            "baseline_neu": observation.baseline_neu,
+            "baseline_ecef_xyz": delta,
+            "raw_base_llh": observation.base_llh,
+            "base_llh": base_llh,
+            "baseline_std_neu_raw": observation.std_neu_raw,
+            "baseline_std_neu": observation.std_neu,
+            "velocity_up_std": observation.full_data.get("velocity_up_std"),
+            "rover_ecef": observation.rover_ecef,
+            "rover_position_std_ecef_raw": observation.rover_position_std_ecef_raw,
+            "rover_position_std_ecef": observation.rover_position_std_ecef,
+            "raw_ecef_consistency_error_m": consistency_error,
+            "raw_ecef_consistency_residual_enu_m": consistency_residual_enu,
+            "quality_flags": flags,
+            "source_validation_diagnostic": getattr(record, "source_diagnostic", None),
+            "rotation_index": getattr(record, "rotation_index", None),
+            "stable_window_index": getattr(record, "stable_window_index", None),
+            "effective_session_id": eff_session_id,
+            "raw_payload": observation.raw,
+            "vector_deviation_from_edge_m": None,
+            "vector_outlier_threshold_m": None,
+            "vector_filter_status": "SKIPPED_PRIOR_FILTER",
+            "residual_xyz": None,
+            "standardized_residual": None,
+        }
+
+    def _compute_record_observation(
+        self, record: Any, station_names: dict, points: dict,
+        fixed_base_llh: tuple, fixed_base_ecef: tuple, cluster: dict,
+        std_warning_threshold: float, raw_ecef_tolerance: float
+    ) -> Optional[tuple]:
+        obs = record.observation
+        rover_name = station_names.get(obs.station_id)
+        if rover_name is None:
+            return None
+        from_name = "BASE" if record.base_name == "BASE" else record.base_name
+        if from_name != "BASE" and (from_name not in points or from_name == rover_name):
+            return None
+        base_llh, base_ecef = self._resolve_cluster_base_llh_ecef(
+            from_name, points, fixed_base_llh, fixed_base_ecef, cluster
+        )
+        delta = self._baseline_ecef(obs, base_llh)
+        covariance = neu_standard_deviation_to_ecef_covariance(
+            obs.std_neu, base_llh[0], base_llh[1]
+        )
+        flags = list(getattr(record, "quality_flags", ()) or ())
+        if _vector_length(delta) < 1.0:
+            flags.append("REJECTED_TOO_SHORT")
+        if max(float(value) for value in obs.std_neu) > std_warning_threshold:
+            flags.append("BASELINE_STD_WARNING")
+            flags.append("REJECTED_BASELINE_STD")
+
+        consistency_error, consistency_residual_enu = self._check_ecef_consistency(
+            obs.rover_ecef, base_ecef, delta, base_llh, raw_ecef_tolerance, flags
+        )
+        return rover_name, from_name, base_llh, delta, covariance, flags, consistency_error, consistency_residual_enu
+
+    def _process_cluster_records(
+        self, records: List[_CollectedObservation], station_names: dict[int, str],
+        points: dict, fixed_base_llh: tuple, fixed_base_ecef: tuple,
+        cluster: dict, cluster_index: int, std_warning_threshold: float, raw_ecef_tolerance: float
+    ) -> tuple[List[dict], List[dict], List[dict], dict]:
         raw_rows: List[dict] = []
         solver_samples: List[dict] = []
         high_std_cross_candidates: List[dict] = []
         raw_ecef_candidates: Dict[str, list[tuple[int, tuple[float, float, float]]]] = {
             name: [] for name in station_names.values()
         }
-
         for record in records:
-            observation = record.observation
-            rover_name = station_names.get(observation.station_id)
-            if rover_name is None:
-                continue
-            from_name = "BASE" if record.base_name == "BASE" else record.base_name
-            if from_name != "BASE" and (from_name not in points or from_name == rover_name):
-                continue
-
-            if from_name == "BASE":
-                base_llh = fixed_base_llh
-                base_ecef = fixed_base_ecef
-            else:
-                cached = (
-                    cluster.get("temporary_base_llh_by_rover", {}).get(from_name)
-                    or self.rover_llh_cache.get(from_name)
-                )
-                if cached:
-                    base_llh = (float(cached["lat"]), float(cached["lon"]), float(cached["alt"]))
-                else:
-                    base_llh = _ecef_to_llh(*points[from_name].approximate)
-                base_ecef = points[from_name].approximate
-
-            delta = self._baseline_ecef(observation, base_llh)
-            covariance = neu_standard_deviation_to_ecef_covariance(
-                observation.std_neu, base_llh[0], base_llh[1]
+            res = self._compute_record_observation(
+                record, station_names, points, fixed_base_llh, fixed_base_ecef,
+                cluster, std_warning_threshold, raw_ecef_tolerance
             )
-            length = _vector_length(delta)
-            flags = list(getattr(record, "quality_flags", ()) or ())
-            if length < 1.0:
-                flags.append("REJECTED_TOO_SHORT")
-            if max(float(value) for value in observation.std_neu) > std_warning_threshold:
-                flags.append("BASELINE_STD_WARNING")
-                flags.append("REJECTED_BASELINE_STD")
-
-            consistency_error = None
-            consistency_residual_enu = None
-            if observation.rover_ecef:
-                expected = tuple(base_ecef[axis] + delta[axis] for axis in range(3))
-                consistency_residual_ecef = tuple(
-                    observation.rover_ecef[axis] - expected[axis] for axis in range(3)
-                )
-                consistency_error = _vector_length(consistency_residual_ecef)
-                consistency_residual_enu_array = (
-                    ecef_to_enu_rotation(base_llh[0], base_llh[1])
-                    @ np.asarray(consistency_residual_ecef, dtype=float)
-                )
-                consistency_residual_enu = tuple(
-                    float(value) for value in consistency_residual_enu_array
-                )
-                if consistency_error > raw_ecef_tolerance:
-                    horizontal_error = math.hypot(
-                        consistency_residual_enu[0], consistency_residual_enu[1]
-                    )
-                    if (
-                        horizontal_error <= raw_ecef_tolerance
-                        and abs(consistency_residual_enu[2]) > raw_ecef_tolerance
-                    ):
-                        # The independent rover ECEF and baseline agree in plan
-                        # but use different vertical datums. Keep the validated
-                        # baseline, while never using this rover ECEF as a raw
-                        # point-coordinate observation.
-                        flags.append("ROVER_ECEF_VERTICAL_DATUM_OFFSET_DIAGNOSTIC")
-                    else:
-                        flags.append("BASELINE_POSITION_INCONSISTENT")
+            if res is None:
+                continue
+            rover_name, from_name, base_llh, delta, covariance, flags, consistency_error, consistency_residual_enu = res
+            obs = record.observation
 
             raw_index = len(raw_rows)
-            raw_rows.append({
-                "from": from_name,
-                "to": rover_name,
-                "session_id": str(cluster_index),
-                "observation_epoch": observation.epoch_ts,
-                "position_type": observation.position_type,
-                "gps_satellites": observation.full_data.get("gps_satellites"),
-                "bds_satellites": observation.full_data.get("bds_satellites"),
-                "glonass_satellites": observation.full_data.get("glonass_satellites"),
-                "galileo_satellites": observation.full_data.get("galileo_satellites"),
-                "diff_age": observation.full_data.get("diff_age"),
-                "baseline_neu": observation.baseline_neu,
-                "baseline_ecef_xyz": delta,
-                "raw_base_llh": observation.base_llh,
-                "base_llh": base_llh,
-                "baseline_std_neu_raw": observation.std_neu_raw,
-                "baseline_std_neu": observation.std_neu,
-                "velocity_up_std": observation.full_data.get("velocity_up_std"),
-                "rover_ecef": observation.rover_ecef,
-                "rover_position_std_ecef_raw": observation.rover_position_std_ecef_raw,
-                "rover_position_std_ecef": observation.rover_position_std_ecef,
-                "raw_ecef_consistency_error_m": consistency_error,
-                "raw_ecef_consistency_residual_enu_m": consistency_residual_enu,
-                "quality_flags": flags,
-                "source_validation_diagnostic": getattr(
-                    record, "source_diagnostic", None
-                ),
-                "rotation_index": getattr(record, "rotation_index", None),
-                "stable_window_index": getattr(record, "stable_window_index", None),
-                "effective_session_id": (
-                    f"R{getattr(record, 'rotation_index'):03d}-W{getattr(record, 'stable_window_index'):02d}-{from_name}>{rover_name}"
-                    if getattr(record, "rotation_index", None) is not None
-                    and getattr(record, "stable_window_index", None) is not None
-                    else None
-                ),
-                "raw_payload": observation.raw,
-                "vector_deviation_from_edge_m": None,
-                "vector_outlier_threshold_m": None,
-                "vector_filter_status": "SKIPPED_PRIOR_FILTER",
-                "residual_xyz": None,
-                "standardized_residual": None,
-            })
-            if observation.rover_ecef and getattr(record, "solver_eligible", True):
-                raw_ecef_candidates[rover_name].append((raw_index, observation.rover_ecef))
+            raw_row = self._build_raw_row_record(
+                from_name, rover_name, cluster_index, obs, delta, base_llh,
+                consistency_error, consistency_residual_enu, flags, record
+            )
+            raw_rows.append(raw_row)
+            if obs.rover_ecef and getattr(record, "solver_eligible", True):
+                raw_ecef_candidates[rover_name].append((raw_index, obs.rover_ecef))
             solver_sample = {
                 "from": from_name,
                 "to": rover_name,
                 "delta": delta,
                 "covariance": covariance,
                 "raw_index": raw_index,
-                "session_id": raw_rows[-1]["effective_session_id"] or str(cluster_index),
-                "observation_epoch": observation.epoch_ts,
-                "position_type": observation.position_type,
-                "ratio": observation.full_data.get("ratio"),
-                "velocity_up_std": observation.full_data.get("velocity_up_std"),
+                "session_id": raw_row["effective_session_id"] or str(cluster_index),
+                "observation_epoch": obs.epoch_ts,
+                "position_type": obs.position_type,
+                "ratio": obs.full_data.get("ratio"),
+                "velocity_up_std": obs.full_data.get("velocity_up_std"),
             }
-            rejected_flags = {
-                str(flag)
-                for flag in flags
-                if str(flag).startswith("REJECTED_")
-            }
+            rejected_flags = {str(flag) for flag in flags if str(flag).startswith("REJECTED_")}
             if getattr(record, "solver_eligible", True) and not rejected_flags:
                 solver_samples.append(solver_sample)
-            elif (
-                from_name != "BASE"
-                and rejected_flags == {"REJECTED_BASELINE_STD"}
-            ):
-                # Some UM980 field sessions report metre-level baseline STD
-                # while the RTK-Fixed ECEF vectors themselves repeat at the
-                # centimetre level. Keep these rows quarantined until the whole
-                # edge can prove repeatability; an isolated high-STD epoch must
-                # never create a network edge by itself.
+            elif from_name != "BASE" and rejected_flags == {"REJECTED_BASELINE_STD"}:
                 high_std_cross_candidates.append(solver_sample)
+        return raw_rows, solver_samples, high_std_cross_candidates, raw_ecef_candidates
 
-        baseline_std_repeatability_fallback_edges: List[dict] = []
+    @staticmethod
+    def _evaluate_candidate_group(
+        candidates: List[dict], raw_rows: List[dict],
+        high_std_fallback_min_samples: int, high_std_fallback_max_repeatability_m: float,
+        raw_ecef_tolerance: float
+    ) -> Optional[tuple[float, float]]:
+        epochs = {int(s["observation_epoch"]) for s in candidates if s.get("observation_epoch") is not None}
+        if (
+            len(candidates) < high_std_fallback_min_samples
+            or len(epochs) < high_std_fallback_min_samples
+            or any(int(s.get("position_type") or 0) != 4 for s in candidates)
+        ):
+            return None
+        canonical_vectors = []
+        consistency_errors = []
+        for sample in candidates:
+            _key, vector, _ = _canonical_baseline(sample["from"], sample["to"], sample["delta"])
+            canonical_vectors.append(np.asarray(vector, dtype=float))
+            c_err = raw_rows[sample["raw_index"]].get("raw_ecef_consistency_error_m")
+            if c_err is None:
+                return None
+            consistency_errors.append(float(c_err))
+        if len(consistency_errors) != len(candidates) or max(consistency_errors) > raw_ecef_tolerance:
+            return None
+        vector_matrix = np.vstack(canonical_vectors)
+        vector_center = np.median(vector_matrix, axis=0)
+        deviations = np.linalg.norm(vector_matrix - vector_center, axis=1)
+        max_deviation = float(np.max(deviations))
+        if max_deviation > high_std_fallback_max_repeatability_m:
+            return None
+        return max_deviation, max(consistency_errors)
+
+    def _evaluate_high_std_fallback_edges(
+        self, high_std_cross_candidates: List[dict], solver_samples: List[dict],
+        raw_rows: List[dict], high_std_fallback_min_samples: int,
+        high_std_fallback_max_repeatability_m: float, raw_ecef_tolerance: float
+    ) -> list[dict]:
         accepted_cross_edge_keys = {
             _canonical_baseline(sample["from"], sample["to"], sample["delta"])[0]
             for sample in solver_samples
@@ -745,53 +783,20 @@ class RoundRobinResultsMixin:
         }
         candidate_groups: Dict[tuple[str, str], List[dict]] = {}
         for sample in high_std_cross_candidates:
-            edge_key, _vector, _direction = _canonical_baseline(
-                sample["from"], sample["to"], sample["delta"]
-            )
+            edge_key, _, _ = _canonical_baseline(sample["from"], sample["to"], sample["delta"])
             candidate_groups.setdefault(edge_key, []).append(sample)
 
+        fallback_edges = []
         for edge_key, candidates in candidate_groups.items():
             if edge_key in accepted_cross_edge_keys:
                 continue
-            epochs = {
-                int(sample["observation_epoch"])
-                for sample in candidates
-                if sample.get("observation_epoch") is not None
-            }
-            if (
-                len(candidates) < high_std_fallback_min_samples
-                or len(epochs) < high_std_fallback_min_samples
-                or any(int(sample.get("position_type") or 0) != 4 for sample in candidates)
-            ):
+            eval_res = self._evaluate_candidate_group(
+                candidates, raw_rows, high_std_fallback_min_samples,
+                high_std_fallback_max_repeatability_m, raw_ecef_tolerance
+            )
+            if eval_res is None:
                 continue
-
-            canonical_vectors = []
-            consistency_errors = []
-            for sample in candidates:
-                _key, vector, _direction = _canonical_baseline(
-                    sample["from"], sample["to"], sample["delta"]
-                )
-                canonical_vectors.append(np.asarray(vector, dtype=float))
-                consistency_error = raw_rows[sample["raw_index"]].get(
-                    "raw_ecef_consistency_error_m"
-                )
-                if consistency_error is None:
-                    consistency_errors = []
-                    break
-                consistency_errors.append(float(consistency_error))
-            if (
-                len(consistency_errors) != len(candidates)
-                or max(consistency_errors) > raw_ecef_tolerance
-            ):
-                continue
-
-            vector_matrix = np.vstack(canonical_vectors)
-            vector_center = np.median(vector_matrix, axis=0)
-            deviations = np.linalg.norm(vector_matrix - vector_center, axis=1)
-            max_deviation = float(np.max(deviations))
-            if max_deviation > high_std_fallback_max_repeatability_m:
-                continue
-
+            max_deviation, max_consistency_err = eval_res
             for sample in candidates:
                 flags = raw_rows[sample["raw_index"]]["quality_flags"]
                 if "REJECTED_BASELINE_STD" in flags:
@@ -800,168 +805,103 @@ class RoundRobinResultsMixin:
                     flags.append("BASELINE_STD_REPEATABILITY_FALLBACK")
                 solver_samples.append(sample)
             accepted_cross_edge_keys.add(edge_key)
-            baseline_std_repeatability_fallback_edges.append({
+            epochs = {int(s["observation_epoch"]) for s in candidates if s.get("observation_epoch") is not None}
+            fallback_edges.append({
                 "from": edge_key[0],
                 "to": edge_key[1],
                 "observation_count": len(candidates),
                 "distinct_epoch_count": len(epochs),
                 "max_vector_deviation_m": max_deviation,
-                "max_ecef_consistency_error_m": max(consistency_errors),
+                "max_ecef_consistency_error_m": max_consistency_err,
                 "covariance_policy": (
                     "Retain the receiver-reported high covariance; repeatability "
-                    "restores topology but does not increase this edge's weight"
+                    "restores topology but does not increase this edge\'s weight"
                 ),
             })
+        return fallback_edges
 
-        solver_samples, position_type_filter_diagnostics = (
-            filter_position_type_mixes(solver_samples)
-        )
-        for diagnostic in position_type_filter_diagnostics:
-            for raw_index in diagnostic.get("raw_indices") or []:
-                if raw_index is None or raw_index < 0:
-                    continue
-                flags = raw_rows[raw_index]["quality_flags"]
-                if "REJECTED_POSITION_TYPE_7" not in flags:
-                    flags.append("REJECTED_POSITION_TYPE_7")
+    @staticmethod
+    def _flag_rejected_position_types(raw_rows: List[dict], pos_diags: list) -> None:
+        for diag in pos_diags:
+            for raw_index in diag.get("raw_indices") or []:
+                if raw_index is not None and raw_index >= 0:
+                    flags = raw_rows[raw_index]["quality_flags"]
+                    if "REJECTED_POSITION_TYPE_7" not in flags:
+                        flags.append("REJECTED_POSITION_TYPE_7")
 
-        solver_samples, vector_outlier_diagnostics = filter_vector_outliers(
-            solver_samples
-        )
-        for diagnostic in vector_outlier_diagnostics:
-            raw_index = diagnostic.get("raw_index")
+    @staticmethod
+    def _apply_outlier_diagnostics(raw_rows: List[dict], outlier_diags: list) -> None:
+        for diag in outlier_diags:
+            raw_index = diag.get("raw_index")
             if raw_index is None or raw_index < 0:
                 continue
             row = raw_rows[raw_index]
-            
-            row["vector_filter_status"] = diagnostic.get("vector_filter_status")
-            if "vector_deviation_from_edge_m" in diagnostic:
-                row["vector_deviation_from_edge_m"] = diagnostic["vector_deviation_from_edge_m"]
-            if "vector_outlier_threshold_m" in diagnostic:
-                row["vector_outlier_threshold_m"] = diagnostic["vector_outlier_threshold_m"]
-                
-            if row["vector_filter_status"] == "EVALUATED_OUTLIER":
-                if "REJECTED_VECTOR_OUTLIER" not in row["quality_flags"]:
-                    row["quality_flags"].append("REJECTED_VECTOR_OUTLIER")
+            row["vector_filter_status"] = diag.get("vector_filter_status")
+            if "vector_deviation_from_edge_m" in diag:
+                row["vector_deviation_from_edge_m"] = diag["vector_deviation_from_edge_m"]
+            if "vector_outlier_threshold_m" in diag:
+                row["vector_outlier_threshold_m"] = diag["vector_outlier_threshold_m"]
+            if row["vector_filter_status"] == "EVALUATED_OUTLIER" and "REJECTED_VECTOR_OUTLIER" not in row["quality_flags"]:
+                row["quality_flags"].append("REJECTED_VECTOR_OUTLIER")
 
-        averaged_edges = weighted_edges(solver_samples)
-        rover_names = set(station_names.values())
-        cross_edges = [
-            edge
-            for edge in averaged_edges
-            if edge["from"] != "BASE" and edge["to"] != "BASE"
-        ]
+    def _apply_position_and_outlier_filters(
+        self, solver_samples: List[dict], raw_rows: List[dict],
+        filter_position_type_mixes: Callable, filter_vector_outliers: Callable
+    ) -> tuple[List[dict], list, list]:
+        solver_samples, pos_diags = filter_position_type_mixes(solver_samples)
+        self._flag_rejected_position_types(raw_rows, pos_diags)
+        solver_samples, outlier_diags = filter_vector_outliers(solver_samples)
+        self._apply_outlier_diagnostics(raw_rows, outlier_diags)
+        return solver_samples, pos_diags, outlier_diags
+
+    @staticmethod
+    def _validate_cross_network_coverage(
+        cross_edges: list, raw_rows: List[dict], rover_names: set, std_warning_threshold: float
+    ) -> None:
         if not cross_edges:
             raw_cross_rows = [row for row in raw_rows if row["from"] != "BASE"]
-            rejected_std = sum(
-                "REJECTED_BASELINE_STD" in row["quality_flags"]
-                for row in raw_cross_rows
-            )
-            rejected_short = sum(
-                "REJECTED_TOO_SHORT" in row["quality_flags"]
-                for row in raw_cross_rows
-            )
-            rejected_position_type = sum(
-                "REJECTED_POSITION_TYPE_7" in row["quality_flags"]
-                for row in raw_cross_rows
-            )
-            rejected_outlier = sum(
-                "REJECTED_VECTOR_OUTLIER" in row["quality_flags"]
-                for row in raw_cross_rows
-            )
+            rejected_std = sum("REJECTED_BASELINE_STD" in row["quality_flags"] for row in raw_cross_rows)
+            rejected_short = sum("REJECTED_TOO_SHORT" in row["quality_flags"] for row in raw_cross_rows)
+            rejected_pos = sum("REJECTED_POSITION_TYPE_7" in row["quality_flags"] for row in raw_cross_rows)
+            rejected_out = sum("REJECTED_VECTOR_OUTLIER" in row["quality_flags"] for row in raw_cross_rows)
             raise ValueError(
-                "no solver-eligible rover-to-rover baseline was collected during "
-                f"Round-Robin; raw cross samples={len(raw_cross_rows)}, "
-                f"rejected STD>{std_warning_threshold:.3f}m={rejected_std}, "
-                f"too-short={rejected_short}, position-type={rejected_position_type}, "
-                f"vector-outlier={rejected_outlier}"
+                "no solver-eligible rover-to-rover baseline was collected during Round-Robin; "
+                f"raw cross samples={len(raw_cross_rows)}, rejected STD>{std_warning_threshold:.3f}m={rejected_std}, "
+                f"too-short={rejected_short}, position-type={rejected_pos}, vector-outlier={rejected_out}"
             )
         required_cross_edges = max(len(rover_names) - 1, 1)
-        cross_participants = {
-            point_name
-            for edge in cross_edges
-            for point_name in (edge["from"], edge["to"])
-            if point_name in rover_names
-        }
-        missing_cross_participants = sorted(rover_names - cross_participants)
-        cross_components = _graph_components(
-            rover_names,
-            ((edge["from"], edge["to"]) for edge in cross_edges),
-        )
-        disconnected_detail = (
-            "; disconnected rover components: "
-            + " | ".join(", ".join(sorted(component)) for component in cross_components)
-            if len(cross_components) > 1
-            else ""
-        )
-        if (
-            len(cross_edges) < required_cross_edges
-            or missing_cross_participants
-            or len(cross_components) > 1
-        ):
-            missing_detail = (
-                f"; rovers absent from cross-baselines: {', '.join(missing_cross_participants)}"
-                if missing_cross_participants else ""
-            )
+        cross_participants = {p for edge in cross_edges for p in (edge["from"], edge["to"]) if p in rover_names}
+        missing_cross = sorted(rover_names - cross_participants)
+        cross_components = _graph_components(rover_names, ((e["from"], e["to"]) for e in cross_edges))
+        if len(cross_edges) < required_cross_edges or missing_cross or len(cross_components) > 1:
+            missing_detail = f"; rovers absent from cross-baselines: {', '.join(missing_cross)}" if missing_cross else ""
+            disc_detail = "; disconnected rover components: " + " | ".join(", ".join(sorted(c)) for c in cross_components) if len(cross_components) > 1 else ""
             raise ValueError(
-                "insufficient rover-to-rover network coverage: "
-                f"need at least {required_cross_edges} distinct cross-edge(s) for "
-                f"{len(rover_names)} rovers, collected {len(cross_edges)}"
-                f"{missing_detail}{disconnected_detail}. Adjustment was not published; "
-                "collect the missing rotations again"
+                f"insufficient rover-to-rover network coverage: need at least {required_cross_edges} distinct cross-edge(s) "
+                f"for {len(rover_names)} rovers, collected {len(cross_edges)}{missing_detail}{disc_detail}. "
+                "Adjustment was not published; collect the missing rotations again"
             )
 
-        baselines = [
-            Baseline(
-                edge["from"], edge["to"], edge["delta"],
-                covariance=tuple(tuple(float(value) for value in row) for row in edge["covariance"]),
-            )
-            for edge in averaged_edges
-        ]
-        result = adjust_network(Network.from_items(points.values(), baselines))
-        independent_baselines = [
-            Baseline(
-                edge["from"], edge["to"], edge["delta"],
-                covariance=tuple(
-                    tuple(float(value) for value in row)
-                    for row in edge["independent_covariance"]
-                ),
-            )
-            for edge in averaged_edges
-        ]
-        independent_result = adjust_network(
-            Network.from_items(points.values(), independent_baselines)
-        )
-
+    @staticmethod
+    def _assemble_adjusted_points(
+        result_points: list, points: dict, raw_ecef_candidates: dict, raw_rows: list
+    ) -> dict:
         adjusted_points = {}
-        for point in result.points:
+        for point in result_points:
             if point.fixed:
                 continue
             raw_candidates = raw_ecef_candidates.get(point.name, [])
             raw_values = [
-                value
-                for raw_index, value in raw_candidates
+                value for raw_index, value in raw_candidates
                 if not any(
                     str(flag).startswith(("REJECTED_", "EXCLUDE_"))
-                    or flag in {
-                        "BASELINE_POSITION_INCONSISTENT",
-                        "ROVER_ECEF_VERTICAL_DATUM_OFFSET_DIAGNOSTIC",
-                    }
+                    or flag in {"BASELINE_POSITION_INCONSISTENT", "ROVER_ECEF_VERTICAL_DATUM_OFFSET_DIAGNOSTIC"}
                     for flag in raw_rows[raw_index]["quality_flags"]
                 )
             ]
-            raw_mean = (
-                tuple(sum(row[axis] for row in raw_values) / len(raw_values) for axis in range(3))
-                if raw_values else None
-            )
-            std_enu = covariance_standard_deviation(
-                ecef_point_covariance_to_enu(point.covariance, tuple(point.coordinate))
-            )
-            posterior_std_enu = covariance_standard_deviation(
-                ecef_point_covariance_to_enu(
-                    point.posterior_covariance,
-                    tuple(point.coordinate),
-                )
-            )
+            raw_mean = tuple(sum(row[axis] for row in raw_values) / len(raw_values) for axis in range(3)) if raw_values else None
+            std_enu = covariance_standard_deviation(ecef_point_covariance_to_enu(point.covariance, tuple(point.coordinate)))
+            posterior_std_enu = covariance_standard_deviation(ecef_point_covariance_to_enu(point.posterior_covariance, tuple(point.coordinate)))
             adjusted_points[point.name] = {
                 "station_id": points[point.name].identifier,
                 "adjusted_n": point.coordinate[0], "adjusted_e": point.coordinate[1], "adjusted_u": point.coordinate[2],
@@ -970,23 +910,20 @@ class RoundRobinResultsMixin:
                 "dx": point.correction[0], "dy": point.correction[1], "dz": point.correction[2],
                 "std_n": point.standard_deviation[0], "std_e": point.standard_deviation[1], "std_u": point.standard_deviation[2],
                 "std_x": point.standard_deviation[0], "std_y": point.standard_deviation[1], "std_z": point.standard_deviation[2],
-                "std_x_a_priori": point.standard_deviation[0],
-                "std_y_a_priori": point.standard_deviation[1],
-                "std_z_a_priori": point.standard_deviation[2],
-                "std_x_a_posteriori": point.posterior_standard_deviation[0],
-                "std_y_a_posteriori": point.posterior_standard_deviation[1],
-                "std_z_a_posteriori": point.posterior_standard_deviation[2],
-                "standard_deviation_enu": std_enu,
-                "posterior_standard_deviation_enu": posterior_std_enu,
-                "covariance_ecef_a_priori": point.covariance,
-                "covariance_ecef_a_posteriori": point.posterior_covariance,
+                "std_x_a_priori": point.standard_deviation[0], "std_y_a_priori": point.standard_deviation[1], "std_z_a_priori": point.standard_deviation[2],
+                "std_x_a_posteriori": point.posterior_standard_deviation[0], "std_y_a_posteriori": point.posterior_standard_deviation[1], "std_z_a_posteriori": point.posterior_standard_deviation[2],
+                "standard_deviation_enu": std_enu, "posterior_standard_deviation_enu": posterior_std_enu,
+                "covariance_ecef_a_priori": point.covariance, "covariance_ecef_a_posteriori": point.posterior_covariance,
                 "raw_rover_ecef": raw_mean,
                 "raw_rover_ecef_observation_count": len(raw_values),
                 "raw_rover_ecef_rejected_count": len(raw_candidates) - len(raw_values),
             }
+        return adjusted_points
 
+    @staticmethod
+    def _assemble_adjusted_baselines(result_baselines: list, averaged_edges: list, raw_rows: list) -> list:
         adjusted_baselines = []
-        for index, adjusted in enumerate(result.baselines):
+        for index, adjusted in enumerate(result_baselines):
             edge = averaged_edges[index]
             std_xyz = covariance_standard_deviation(edge["covariance"])
             item = {
@@ -994,14 +931,8 @@ class RoundRobinResultsMixin:
                 "observed_xyz": adjusted.observed, "adjusted_xyz": adjusted.adjusted,
                 "residual_xyz": adjusted.residual,
                 "standard_deviation_xyz": std_xyz,
-                "formal_covariance_xyz": tuple(
-                    tuple(float(value) for value in row)
-                    for row in edge["formal_covariance"]
-                ),
-                "session_covariance_used_xyz": tuple(
-                    tuple(float(value) for value in row)
-                    for row in edge["session_covariance_used"]
-                ),
+                "formal_covariance_xyz": tuple(tuple(float(v) for v in row) for row in edge["formal_covariance"]),
+                "session_covariance_used_xyz": tuple(tuple(float(v) for v in row) for row in edge["session_covariance_used"]),
                 "variance_inflation": edge.get("scatter_scale_factor"),
                 "observed_length": _vector_length(adjusted.observed),
                 "adjusted_length": _vector_length(adjusted.adjusted),
@@ -1009,16 +940,10 @@ class RoundRobinResultsMixin:
                 "effective_sample_size": edge["effective_sample_size"],
                 "temporal_inflation_factor": edge["temporal_scale_factor"],
                 "scatter_scale_factor": edge["scatter_scale_factor"],
-                "total_covariance_inflation_factor": (
-                    edge["temporal_scale_factor"] * edge["scatter_scale_factor"]
-                ),
+                "total_covariance_inflation_factor": edge["temporal_scale_factor"] * edge["scatter_scale_factor"],
                 "session_count": edge["session_count"],
-                "max_session_mean_separation_m": edge[
-                    "max_session_mean_separation_m"
-                ],
-                "max_session_mean_difference_xyz": edge[
-                    "max_session_mean_difference_xyz"
-                ],
+                "max_session_mean_separation_m": edge["max_session_mean_separation_m"],
+                "max_session_mean_difference_xyz": edge["max_session_mean_difference_xyz"],
                 "max_session_mean_pair": edge["max_session_mean_pair"],
                 "position_types": edge["position_types"],
                 "position_type_mean_separation_m": edge["position_type_mean_separation_m"],
@@ -1030,206 +955,100 @@ class RoundRobinResultsMixin:
             }
             adjusted_baselines.append(item)
             for raw_index, direction in zip(edge["raw_indices"], edge["directions"], strict=True):
-                raw_rows[raw_index]["residual_xyz"] = tuple(direction * value for value in adjusted.residual)
-                raw_rows[raw_index]["standardized_residual"] = tuple(
-                    direction * value for value in adjusted.standardized_residual
-                )
+                raw_rows[raw_index]["residual_xyz"] = tuple(direction * val for val in adjusted.residual)
+                raw_rows[raw_index]["standardized_residual"] = tuple(direction * val for val in adjusted.standardized_residual)
+        return adjusted_baselines
 
-        loops = _build_fundamental_loops(adjusted_baselines)
+    @staticmethod
+    def _verify_cycle_basis(loops: list, points: dict, adjusted_baselines: list) -> tuple[int, int]:
         if not loops:
             raise ValueError("adjusted graph contains no geometric closed loop")
-        network_components = _graph_components(
-            points.keys(),
-            ((edge["from"], edge["to"]) for edge in adjusted_baselines),
-        )
-        cycle_space_dimension = (
-            len(adjusted_baselines) - len(points) + len(network_components)
-        )
-        cycle_edge_matrix = np.zeros(
-            (len(loops), len(adjusted_baselines)),
-            dtype=float,
-        )
+        network_components = _graph_components(points.keys(), ((e["from"], e["to"]) for e in adjusted_baselines))
+        cycle_space_dimension = len(adjusted_baselines) - len(points) + len(network_components)
+        cycle_edge_matrix = np.zeros((len(loops), len(adjusted_baselines)), dtype=float)
         for loop_index, loop in enumerate(loops):
             baseline_indices = loop.get("baseline_indices") or []
             baseline_directions = loop.get("baseline_directions") or []
             if len(baseline_indices) != len(baseline_directions):
-                raise RuntimeError(
-                    "fundamental loop basis is missing directed edge metadata"
-                )
-            for baseline_index, direction in zip(
-                baseline_indices,
-                baseline_directions,
-            ):
-                cycle_edge_matrix[loop_index, int(baseline_index)] = float(direction)
+                raise RuntimeError("fundamental loop basis is missing directed edge metadata")
+            for b_idx, direction in zip(baseline_indices, baseline_directions):
+                cycle_edge_matrix[loop_index, int(b_idx)] = float(direction)
         cycle_basis_rank = int(np.linalg.matrix_rank(cycle_edge_matrix))
-        if (
-            len(loops) != cycle_space_dimension
-            or cycle_basis_rank != cycle_space_dimension
-        ):
+        if len(loops) != cycle_space_dimension or cycle_basis_rank != cycle_space_dimension:
             raise RuntimeError(
-                "fundamental loop basis verification failed: "
-                f"dimension={cycle_space_dimension}, loops={len(loops)}, "
-                f"rank={cycle_basis_rank}"
+                f"fundamental loop basis verification failed: dimension={cycle_space_dimension}, loops={len(loops)}, rank={cycle_basis_rank}"
             )
+        return cycle_space_dimension, cycle_basis_rank
 
-        observation_sessions = []
-        for edge in averaged_edges:
-            epochs = [raw_rows[index]["observation_epoch"] for index in edge["raw_indices"]]
-            observation_sessions.append({
-                "session_id": str(cluster_index), "from": edge["from"], "to": edge["to"],
-                "start_epoch": min(epochs), "end_epoch": max(epochs),
-                "observation_count": edge["observation_count"],
-            })
+    @staticmethod
+    def _build_global_and_stochastic_tests(result: Any, temporal_scaling_applied: bool) -> tuple[Optional[dict], Optional[dict]]:
+        if not result.global_test:
+            return None, None
+        statistic = float(result.global_test.statistic)
+        significance = float(result.global_test.significance_level)
+        upper_critical = float(chi2.ppf(1.0 - significance, result.degrees_of_freedom))
+        upper_tail_p = float(chi2.sf(statistic, result.degrees_of_freedom))
+        network_passed = statistic <= upper_critical
+        global_test = {
+            "method": "UPPER_TAIL_NETWORK_QUALITY",
+            "statistic": statistic, "upper_critical_value": upper_critical,
+            "p_value": upper_tail_p, "p_value_tail": "UPPER",
+            "significance_level": significance, "passed": network_passed,
+            "applicable": True, "approximate": temporal_scaling_applied,
+            "conclusion": "PASSED" if network_passed else "FAILED_HIGH_RESIDUAL",
+            "interpretation": (
+                "One-sided upper-tail Chi-square network quality test. A statistic below the critical value passes; "
+                "a very small statistic does not fail the network and is diagnosed separately as conservative weighting."
+            ),
+        }
+        if statistic < result.global_test.lower_critical_value:
+            stochastic_status = "CONSERVATIVE_WEIGHTS"
+        elif statistic > result.global_test.upper_critical_value:
+            stochastic_status = "OPTIMISTIC_WEIGHTS_OR_MODEL_ERROR"
+        else:
+            stochastic_status = "CONSISTENT"
+        stochastic_model_test = {
+            "method": "TWO_SIDED_MODEL_CALIBRATION",
+            "statistic": statistic,
+            "lower_critical_value": result.global_test.lower_critical_value,
+            "upper_critical_value": result.global_test.upper_critical_value,
+            "p_value": result.global_test.p_value,
+            "significance_level": significance,
+            "within_expected_range": result.global_test.passed,
+            "status": stochastic_status, "approximate": temporal_scaling_applied,
+            "interpretation": (
+                "Two-sided diagnostic of the stochastic model only. A value below the lower bound means assigned covariance is conservative; "
+                "it is not a network-quality failure."
+            ),
+        }
+        return global_test, stochastic_model_test
 
-        temporal_scaling_applied = any(
-            edge["temporal_scale_factor"] > 1.0 + 1e-12
-            for edge in averaged_edges
-        )
-        global_test = None
-        stochastic_model_test = None
-        if result.global_test:
-            statistic = float(result.global_test.statistic)
-            significance = float(result.global_test.significance_level)
-            upper_critical = float(
-                chi2.ppf(1.0 - significance, result.degrees_of_freedom)
-            )
-            upper_tail_p_value = float(
-                chi2.sf(statistic, result.degrees_of_freedom)
-            )
-            network_passed = statistic <= upper_critical
-            global_test = {
-                "method": "UPPER_TAIL_NETWORK_QUALITY",
-                "statistic": statistic,
-                "upper_critical_value": upper_critical,
-                "p_value": upper_tail_p_value,
-                "p_value_tail": "UPPER",
-                "significance_level": significance,
-                "passed": network_passed,
-                "applicable": True,
-                "approximate": temporal_scaling_applied,
-                "conclusion": (
-                    "PASSED" if network_passed else "FAILED_HIGH_RESIDUAL"
-                ),
-                "interpretation": (
-                    "One-sided upper-tail Chi-square network quality test. A statistic "
-                    "below the critical value passes; a very small statistic does not "
-                    "fail the network and is diagnosed separately as conservative weighting."
-                ),
-            }
-
-            if statistic < result.global_test.lower_critical_value:
-                stochastic_status = "CONSERVATIVE_WEIGHTS"
-            elif statistic > result.global_test.upper_critical_value:
-                stochastic_status = "OPTIMISTIC_WEIGHTS_OR_MODEL_ERROR"
-            else:
-                stochastic_status = "CONSISTENT"
-            stochastic_model_test = {
-                "method": "TWO_SIDED_MODEL_CALIBRATION",
-                "statistic": statistic,
-                "lower_critical_value": result.global_test.lower_critical_value,
-                "upper_critical_value": result.global_test.upper_critical_value,
-                "p_value": result.global_test.p_value,
-                "significance_level": significance,
-                "within_expected_range": result.global_test.passed,
-                "status": stochastic_status,
-                "approximate": temporal_scaling_applied,
-                "interpretation": (
-                    "Two-sided diagnostic of the stochastic model only. A value below "
-                    "the lower bound means assigned covariance is conservative; it is "
-                    "not a network-quality failure."
-                ),
-            }
-        independent_global_test = None
-        if independent_result.global_test:
-            ref_std = (
-                math.sqrt(independent_result.variance_factor)
-                if independent_result.variance_factor is not None and independent_result.variance_factor >= 0
-                else None
-            )
-            independent_global_test = {
-                "statistic": independent_result.global_test.statistic,
-                "lower_critical_value": independent_result.global_test.lower_critical_value,
-                "upper_critical_value": independent_result.global_test.upper_critical_value,
-                "p_value": independent_result.global_test.p_value,
-                "passed": independent_result.global_test.passed,
-                "applicable": True,
-                "assumption": "All accepted raw epochs are statistically independent.",
-                "used_for_published_solution": False,
-                "weighted_residual_sum": independent_result.weighted_residual_sum,
-                "reference_standard_deviation": ref_std,
-            }
-        accepted_raw = [
-            row for row in raw_rows
-            if not any(
-                str(flag).startswith(("REJECTED_", "EXCLUDE_"))
-                for flag in row["quality_flags"]
-            )
-        ]
-        trusted_raw = [row for row in accepted_raw if "BASELINE_STD_WARNING" not in row["quality_flags"]]
-        mixed_position_type_edges = [
-            {
-                "from": edge["from"],
-                "to": edge["to"],
-                "position_types": edge["position_types"],
-                "mean_separation_m": edge["position_type_mean_separation_m"],
-            }
-            for edge in averaged_edges
-            if len(edge["position_types"]) > 1
-        ]
-        max_observed_closure = max(
-            (float(loop.get("observed_closure") or 0.0) for loop in loops),
-            default=0.0,
-        )
+    @staticmethod
+    def _compute_cluster_quality_gate(
+        global_test: Optional[dict], result: Any, averaged_edges: list, loops: list
+    ) -> tuple[bool, list, list, str, float]:
         network_quality_passed = bool(global_test and global_test.get("passed"))
-        # Loop closure is a diagnostic, not an acceptance threshold. In particular,
-        # it must never reduce the retained observation count or independently block
-        # publishing a solved network. Source/window validation happens before the
-        # solver; the statistical network test remains the publish quality gate.
         quality_gate_passed = network_quality_passed
-        quality_gate_reasons = []
-        if not network_quality_passed:
-            quality_gate_reasons.append("network quality test is not PASS")
+        quality_gate_reasons = [] if network_quality_passed else ["network quality test is not PASS"]
         diagnostic_warnings = []
-        if (
-            network_quality_passed
-            and result.max_standardized_residual is not None
-            and float(result.max_standardized_residual) >= 2.5
-        ):
+        if network_quality_passed and result.max_standardized_residual is not None and float(result.max_standardized_residual) >= 2.5:
             diagnostic_warnings.append({
                 "code": "LOCAL_STANDARDIZED_RESIDUAL_ELEVATED",
                 "message": (
-                    "The global network test passes, but at least one local "
-                    "standardized residual is >= 2.5 sigma. Review the affected edge; "
-                    "this warning alone is not authority to reject the point."
+                    "The global network test passes, but at least one local standardized residual is >= 2.5 sigma. "
+                    "Review the affected edge; this warning alone is not authority to reject the point."
                 ),
-                "max_standardized_residual": float(
-                    result.max_standardized_residual
-                ),
+                "max_standardized_residual": float(result.max_standardized_residual),
             })
-        
-        worst_scatter_edge = max(
-            averaged_edges,
-            key=lambda edge: float(edge.get("scatter_scale_factor") or 1.0),
-            default=None,
-        )
-        max_variance_inflation = float(
-            (worst_scatter_edge or {}).get("scatter_scale_factor") or 1.0
-        )
+        worst_scatter_edge = max(averaged_edges, key=lambda edge: float(edge.get("scatter_scale_factor") or 1.0), default=None)
+        max_variance_inflation = float((worst_scatter_edge or {}).get("scatter_scale_factor") or 1.0)
         if max_variance_inflation > 1.5:
-            max_session_separation = float(
-                (worst_scatter_edge or {}).get("max_session_mean_separation_m")
-                or 0.0
-            )
+            max_session_separation = float((worst_scatter_edge or {}).get("max_session_mean_separation_m") or 0.0)
             diagnostic_warnings.append({
                 "code": "HIGH_INTER_SESSION_SCATTER",
-                "message": (
-                    "High pooled edge scatter detected (scatter scale > 1.5). "
-                    "Review the displayed session-mean repeatability together with "
-                    "multipath, physical movement, and source changes."
-                ),
+                "message": "High pooled edge scatter detected (scatter scale > 1.5). Review the displayed session-mean repeatability together with multipath, physical movement, and source changes.",
                 "max_variance_inflation": max_variance_inflation,
-                "from": (worst_scatter_edge or {}).get("from"),
-                "to": (worst_scatter_edge or {}).get("to"),
+                "from": (worst_scatter_edge or {}).get("from"), "to": (worst_scatter_edge or {}).get("to"),
                 "max_session_mean_separation_m": max_session_separation,
             })
         if not quality_gate_passed:
@@ -1238,6 +1057,277 @@ class RoundRobinResultsMixin:
             interpretation_status = "PASS_WITH_WARNINGS"
         else:
             interpretation_status = "PASS"
+        max_observed_closure = max((float(loop.get("observed_closure") or 0.0) for loop in loops), default=0.0)
+        return quality_gate_passed, quality_gate_reasons, diagnostic_warnings, interpretation_status, max_observed_closure
+
+    def _build_cluster_quality_dict(
+        self, accepted_raw: list, averaged_edges: list, observation_sessions: list,
+        raw_rows: list, baseline_std_repeatability_fallback_edges: list,
+        quality_gate_passed: bool, interpretation_status: str, diagnostic_warnings: list,
+        vector_outlier_diagnostics: list, mixed_position_type_edges: list,
+        position_type_filter_diagnostics: list, temporal_scaling_applied: bool,
+        global_test: Optional[dict], stochastic_model_test: Optional[dict],
+        independent_global_test: Optional[dict], trusted_raw: list,
+        result: Any, cycle_space_dimension: int, loops: list, cycle_basis_rank: int,
+        std_warning_threshold: float, raw_ecef_tolerance: float,
+        vector_outlier_min_samples: int, vector_outlier_absolute_floor_m: float,
+        vector_outlier_sigma_multiplier: float, high_std_fallback_min_samples: int,
+        high_std_fallback_max_repeatability_m: float, max_observed_closure: float
+    ) -> dict:
+        return {
+            "observation_baseline_count": len(accepted_raw),
+            "averaged_baseline_count": len(averaged_edges),
+            "observation_session_count": len(observation_sessions),
+            "observation_sessions": observation_sessions,
+            "baseline_std_warning_count": sum("BASELINE_STD_WARNING" in row["quality_flags"] for row in accepted_raw),
+            "baseline_std_raw_warning_count": sum("BASELINE_STD_WARNING" in row["quality_flags"] for row in raw_rows),
+            "baseline_std_rejected_count": sum("REJECTED_BASELINE_STD" in row["quality_flags"] for row in raw_rows),
+            "baseline_std_repeatability_fallback_count": sum("BASELINE_STD_REPEATABILITY_FALLBACK" in row["quality_flags"] for row in raw_rows),
+            "baseline_std_repeatability_fallback_edges": baseline_std_repeatability_fallback_edges,
+            "baseline_std_repeatability_fallback_policy": (
+                "Only when an edge has no normal-STD observation: require at least "
+                f"{high_std_fallback_min_samples} distinct RTK-Fixed epochs, maximum "
+                f"vector deviation <= {high_std_fallback_max_repeatability_m:.3f} m, "
+                f"and ECEF consistency error <= {raw_ecef_tolerance:.3f} m; retain "
+                "the original high covariance"
+            ),
+            "raw_observation_count": len(raw_rows),
+            "raw_rejected_count": len(raw_rows) - len(accepted_raw),
+            "raw_exclusion_reason_counts_overlap": True,
+            "unconfirmed_source_excluded_count": sum("EXCLUDE_UNCONFIRMED_SOURCE" in row["quality_flags"] for row in raw_rows),
+            "pre_stable_window_excluded_count": sum("EXCLUDE_PRE_STABLE_WINDOW" in row["quality_flags"] for row in raw_rows),
+            "insufficient_stable_window_excluded_count": sum(
+                ("EXCLUDE_INSUFFICIENT_STABLE_WINDOW" in row["quality_flags"] or "EXCLUDE_STABILITY_NOT_REACHED" in row["quality_flags"])
+                for row in raw_rows
+            ),
+            "stability_not_reached_excluded_count": sum("EXCLUDE_STABILITY_NOT_REACHED" in row["quality_flags"] for row in raw_rows),
+            "insufficient_duration_excluded_count": sum("EXCLUDE_INSUFFICIENT_DURATION" in row["quality_flags"] for row in raw_rows),
+            "source_not_confirmed_excluded_count": sum("EXCLUDE_SOURCE_NOT_CONFIRMED" in row["quality_flags"] for row in raw_rows),
+            "unstable_solver_window_excluded_count": sum(
+                ("EXCLUDE_UNSTABLE_SOLVER_WINDOW" in row["quality_flags"] or "EXCLUDE_STABILITY_LOST" in row["quality_flags"])
+                for row in raw_rows
+            ),
+            "stability_lost_excluded_count": sum("EXCLUDE_STABILITY_LOST" in row["quality_flags"] for row in raw_rows),
+            "inter_rotation_reacquisition_excluded_count": sum("EXCLUDE_INTER_ROTATION_REACQUISITION" in row["quality_flags"] for row in raw_rows),
+            "post_seed_transition_excluded_count": sum("EXCLUDE_POST_SEED_TRANSITION" in row["quality_flags"] for row in raw_rows),
+            "rolling_stability_policy": {
+                "window_seconds": self.STABILITY_WINDOW_SECONDS,
+                "minimum_samples_per_window": self.STABILITY_MIN_SAMPLES_PER_WINDOW,
+                "maximum_sample_gap_seconds": self.STABILITY_MAX_SAMPLE_GAP_SECONDS,
+                "horizontal_component_limit_m": self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M,
+                "up_component_limit_m": self.STABILITY_UP_COMPONENT_LIMIT_M,
+                "horizontal_std_limit_m": self.STABILITY_HORIZONTAL_STD_LIMIT_M,
+                "up_std_limit_m": self.STABILITY_UP_STD_LIMIT_M,
+                "horizontal_slope_limit_mps": self.STABILITY_HORIZONTAL_SLOPE_LIMIT_MPS,
+                "up_slope_limit_mps": self.STABILITY_UP_SLOPE_LIMIT_MPS,
+                "ewma_fast_tau_seconds": self.STABILITY_EWMA_FAST_TAU_SECONDS,
+                "ewma_slow_tau_seconds": self.STABILITY_EWMA_SLOW_TAU_SECONDS,
+                "ewma_role": "Early transition detector only; formal acceptance still requires two non-overlapping windows plus continuous hold",
+                "continuous_hold_seconds": self.STABILITY_HOLD_SECONDS,
+                "abort_horizontal_component_limit_m": self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M,
+                "abort_up_component_limit_m": self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M,
+                "abort_consecutive_epochs": self.STABILITY_ABORT_CONSECUTIVE_EPOCHS,
+                "solver_min_distinct_epochs": self.CROSS_BASE_STABLE_MIN_DISTINCT_EPOCHS,
+                "solver_min_duration_seconds": self.CROSS_BASE_STABLE_MIN_DURATION_SECONDS,
+                "reset_complete_window_when_sustained_drift_returns": True,
+            },
+            "temporary_base_coordinate_policy": (
+                "One immutable covariance-weighted ECEF endpoint per rover, derived from the common initial "
+                "fixed-BASE solver window and reused for MODE BASE, source validation, and network reduction"
+            ),
+            "pre_adjustment_loop_closure_limit_m": None,
+            "max_pre_adjustment_loop_closure_m": max_observed_closure,
+            "loop_closure_diagnostic_only": True,
+            "quality_gate_status": "PASS" if quality_gate_passed else "FAILED_QUALITY_GATE",
+            "quality_interpretation_status": interpretation_status,
+            "diagnostic_warnings": diagnostic_warnings,
+            "max_session_mean_separation_m": max((float(e.get("max_session_mean_separation_m") or 0.0) for e in averaged_edges), default=0.0),
+            "vector_outlier_count": sum(d.get("vector_filter_status") == "EVALUATED_OUTLIER" for d in vector_outlier_diagnostics),
+            "vector_outlier_filter": (
+                f"Per edge/session coordinate-wise median center; reject 3-D deviation above max({vector_outlier_absolute_floor_m:.2f} m, "
+                f"median deviation + {vector_outlier_sigma_multiplier:.0f} x 1.4826 x MAD), minimum {vector_outlier_min_samples} samples"
+            ),
+            "mixed_position_type_edges": mixed_position_type_edges,
+            "mixed_position_type_edge_count": len(mixed_position_type_edges),
+            "mixed_position_type_warning_threshold_m": 0.01,
+            "position_type_selection_policy": "Per geometric edge prefer RTK Fixed position type 4; use Input Fixed type 7 only when that edge has no accepted type 4 observation",
+            "position_type_filter_edges": position_type_filter_diagnostics,
+            "position_type_rejected_count": sum("REJECTED_POSITION_TYPE_7" in row["quality_flags"] for row in raw_rows),
+            "raw_ecef_inconsistent_count": sum("BASELINE_POSITION_INCONSISTENT" in row["quality_flags"] for row in raw_rows),
+            "raw_ecef_vertical_datum_offset_count": sum("ROVER_ECEF_VERTICAL_DATUM_OFFSET_DIAGNOSTIC" in row["quality_flags"] for row in raw_rows),
+            "baseline_std_warning_threshold_m": std_warning_threshold,
+            "raw_ecef_consistency_tolerance_m": raw_ecef_tolerance,
+            "baseline_covariance_model": (
+                "Published session covariance: C_used = (n / n_eff) * scatter_scale * C_formal, where C_formal solves P_sum*C=I "
+                "and P_sum=sum(solve(C_i,I)); n_eff is the number of contiguous source/direction sessions, with no independence claimed between 1 Hz epochs inside one RTK FIXED session"
+            ),
+            "independent_epoch_covariance_model": "Sensitivity only: C_edge = scatter_scale * inverse(sum(inverse(C_i))); assumes n_eff=n",
+            "temporal_scaling_applied": temporal_scaling_applied,
+            "effective_sample_size_method": "Published n_eff: one independent observation per contiguous source/direction session separated by direction change or >5 s gap. Per-component ACF ESS is diagnostic only",
+            "effective_sample_size_edges": [
+                {
+                    "from": edge["from"], "to": edge["to"], "observation_count": edge["observation_count"],
+                    "effective_sample_size": edge["effective_sample_size"],
+                    "acf_estimated_effective_sample_size": edge["acf_estimated_effective_sample_size"],
+                    "temporal_inflation_factor": edge["temporal_scale_factor"], "scatter_scale_factor": edge["scatter_scale_factor"],
+                    "total_covariance_inflation_factor": edge["temporal_scale_factor"] * edge["scatter_scale_factor"],
+                    "session_count": edge["session_count"], "max_session_mean_separation_m": edge["max_session_mean_separation_m"],
+                    "max_session_mean_difference_xyz": edge["max_session_mean_difference_xyz"], "max_session_mean_pair": edge["max_session_mean_pair"],
+                    "pooled_lag_one_autocorrelations": edge["pooled_lag_one_autocorrelations"], "sessions": edge["effective_sample_size_sessions"],
+                }
+                for edge in averaged_edges
+            ],
+            "chi_square_conclusion": global_test.get("conclusion") if global_test else None,
+            "full_covariance_available": True, "source_cross_covariance_available": False,
+            "repeated_observations_independence_verified": False, "control_point_uncertainty_included": False,
+            "published_point_std_scale": "a_priori", "reported_point_std_scales": ["a_priori", "a_posteriori"],
+            "normalized_residual_scale": "a_priori", "degrees_of_freedom": result.degrees_of_freedom,
+            "variance_factor": result.variance_factor,
+            "reference_standard_deviation": math.sqrt(result.variance_factor) if result.variance_factor is not None and result.variance_factor >= 0 else None,
+            "reference_standard_deviation_m_at_1mm": 0.001 * math.sqrt(result.variance_factor) if result.variance_factor is not None and result.variance_factor >= 0 else None,
+            "weighted_residual_sum": result.weighted_residual_sum, "rank": result.rank, "condition_number": result.condition_number,
+            "cycle_space_dimension": cycle_space_dimension, "fundamental_loop_count": len(loops),
+            "fundamental_loop_basis_rank": cycle_basis_rank,
+            "rover_only_loop_count": sum(1 for loop in loops if "BASE" not in loop.get("points", [])),
+            "base_anchored_loop_count": sum(1 for loop in loops if "BASE" in loop.get("points", [])),
+            "loop_basis_independence_verified": True,
+            "loop_basis_method": "Rover-to-rover-first spanning forest plus one fundamental cycle per chord; BASE edges only anchor rover components and dependent cycles are intentionally omitted",
+            "max_standardized_residual": result.max_standardized_residual,
+            "global_test": global_test, "stochastic_model_test": stochastic_model_test,
+            "independent_epoch_sensitivity": independent_global_test,
+            "trusted_subset": {"observation_baseline_count": len(trusted_raw)},
+            "residual_flags": [
+                {
+                    "from": flag.from_point, "to": flag.to_point, "component": flag.component,
+                    "normalized_residual": flag.normalized_residual, "p_value": flag.p_value, "critical_value": flag.critical_value,
+                }
+                for flag in result.residual_flags
+            ],
+        }
+
+    def _build_cluster_result(self, project_id: int, cluster_index: int, cluster: dict) -> dict:
+        std_warning_threshold = _BASELINE_STD_REJECTION_THRESHOLD_M
+        raw_ecef_tolerance = 0.05
+        high_std_fallback_min_samples = 3
+        high_std_fallback_max_repeatability_m = 0.05
+        vector_outlier_min_samples = 5
+        vector_outlier_absolute_floor_m = 0.25
+        vector_outlier_sigma_multiplier = 8.0
+
+        records, station_names, fixed_base_llh, fixed_base_ecef = self._resolve_cluster_records(cluster)
+        filter_vector_outliers = lambda samples: self._filter_vector_outliers(
+            samples, min_samples=vector_outlier_min_samples,
+            absolute_floor_m=vector_outlier_absolute_floor_m, sigma_multiplier=vector_outlier_sigma_multiplier,
+        )
+
+        points, seed_edges = self._prepare_cluster_seed_edges(
+            records, station_names, fixed_base_llh, fixed_base_ecef, cluster_index,
+            std_warning_threshold, filter_vector_outliers
+        )
+
+        raw_rows, solver_samples, high_std_cross_candidates, raw_ecef_candidates = self._process_cluster_records(
+            records, station_names, points, fixed_base_llh, fixed_base_ecef,
+            cluster, cluster_index, std_warning_threshold, raw_ecef_tolerance
+        )
+
+        fallback_edges = self._evaluate_high_std_fallback_edges(
+            high_std_cross_candidates, solver_samples, raw_rows, high_std_fallback_min_samples,
+            high_std_fallback_max_repeatability_m, raw_ecef_tolerance
+        )
+
+        solver_samples, pos_diags, outlier_diags = self._apply_position_and_outlier_filters(
+            solver_samples, raw_rows, self._filter_position_type_mixes, filter_vector_outliers
+        )
+
+        averaged_edges = self._weighted_edges(solver_samples)
+        rover_names = set(station_names.values())
+        cross_edges = [edge for edge in averaged_edges if edge["from"] != "BASE" and edge["to"] != "BASE"]
+        self._validate_cross_network_coverage(cross_edges, raw_rows, rover_names, std_warning_threshold)
+
+        baselines = [
+            Baseline(
+                edge["from"], edge["to"], edge["delta"],
+                covariance=tuple(tuple(float(v) for v in row) for row in edge["covariance"]),
+            )
+            for edge in averaged_edges
+        ]
+        result = adjust_network(Network.from_items(points.values(), baselines))
+
+        indep_baselines = [
+            Baseline(
+                edge["from"], edge["to"], edge["delta"],
+                covariance=tuple(tuple(float(v) for v in row) for row in edge["independent_covariance"]),
+            )
+            for edge in averaged_edges
+        ]
+        indep_result = adjust_network(Network.from_items(points.values(), indep_baselines))
+
+        adjusted_points = self._assemble_adjusted_points(result.points, points, raw_ecef_candidates, raw_rows)
+        adjusted_baselines = self._assemble_adjusted_baselines(result.baselines, averaged_edges, raw_rows)
+        loops = _build_fundamental_loops(adjusted_baselines)
+        cycle_space_dim, cycle_basis_rank = self._verify_cycle_basis(loops, points, adjusted_baselines)
+
+        observation_sessions = [
+            {
+                "session_id": str(cluster_index), "from": edge["from"], "to": edge["to"],
+                "start_epoch": min(raw_rows[idx]["observation_epoch"] for idx in edge["raw_indices"]),
+                "end_epoch": max(raw_rows[idx]["observation_epoch"] for idx in edge["raw_indices"]),
+                "observation_count": edge["observation_count"],
+            }
+            for edge in averaged_edges
+        ]
+
+        temporal_scaling_applied = any(edge["temporal_scale_factor"] > 1.0 + 1e-12 for edge in averaged_edges)
+        global_test, stochastic_model_test = self._build_global_and_stochastic_tests(result, temporal_scaling_applied)
+
+        indep_ref_std = (
+            math.sqrt(indep_result.variance_factor)
+            if indep_result.variance_factor is not None and indep_result.variance_factor >= 0
+            else None
+        )
+        indep_global_test = (
+            {
+                "statistic": indep_result.global_test.statistic,
+                "lower_critical_value": indep_result.global_test.lower_critical_value,
+                "upper_critical_value": indep_result.global_test.upper_critical_value,
+                "p_value": indep_result.global_test.p_value,
+                "passed": indep_result.global_test.passed,
+                "applicable": True, "assumption": "All accepted raw epochs are statistically independent.",
+                "used_for_published_solution": False,
+                "weighted_residual_sum": indep_result.weighted_residual_sum,
+                "reference_standard_deviation": indep_ref_std,
+            }
+            if indep_result.global_test else None
+        )
+
+        accepted_raw = [
+            row for row in raw_rows
+            if not any(str(flag).startswith(("REJECTED_", "EXCLUDE_")) for flag in row["quality_flags"])
+        ]
+        trusted_raw = [row for row in accepted_raw if "BASELINE_STD_WARNING" not in row["quality_flags"]]
+        mixed_position_type_edges = [
+            {
+                "from": edge["from"], "to": edge["to"],
+                "position_types": edge["position_types"],
+                "mean_separation_m": edge["position_type_mean_separation_m"],
+            }
+            for edge in averaged_edges if len(edge["position_types"]) > 1
+        ]
+
+        quality_gate_passed, quality_gate_reasons, diagnostic_warnings, interp_status, max_observed_closure = (
+            self._compute_cluster_quality_gate(global_test, result, averaged_edges, loops)
+        )
+
+        quality_dict = self._build_cluster_quality_dict(
+            accepted_raw, averaged_edges, observation_sessions, raw_rows, fallback_edges,
+            quality_gate_passed, interp_status, diagnostic_warnings, outlier_diags,
+            mixed_position_type_edges, pos_diags, temporal_scaling_applied,
+            global_test, stochastic_model_test, indep_global_test, trusted_raw,
+            result, cycle_space_dim, loops, cycle_basis_rank,
+            std_warning_threshold, raw_ecef_tolerance, vector_outlier_min_samples,
+            vector_outlier_absolute_floor_m, vector_outlier_sigma_multiplier,
+            high_std_fallback_min_samples, high_std_fallback_max_repeatability_m, max_observed_closure
+        )
 
         return {
             "type": "gnss_adjusted",
@@ -1249,300 +1339,30 @@ class RoundRobinResultsMixin:
             "cluster_name": cluster.get("name"), "computed_at": int(time.time()),
             "base": {
                 "name": cluster.get("base_station") or "BASE", "fixed": True,
-                "role": (
-                    (cluster.get("selected_fixed_base_candidate") or {}).get("role")
-                    or "primary"
-                ),
+                "role": ((cluster.get("selected_fixed_base_candidate") or {}).get("role") or "primary"),
                 "lat": fixed_base_llh[0], "lon": fixed_base_llh[1], "h": fixed_base_llh[2],
                 "ecef_xyz": fixed_base_ecef,
-                "selection_diagnostic": cluster.get(
-                    "fixed_base_selection_diagnostic"
-                ),
-                "configured_candidates": copy.deepcopy(
-                    cluster.get("fixed_base_candidates", [])
-                ),
+                "selection_diagnostic": cluster.get("fixed_base_selection_diagnostic"),
+                "configured_candidates": copy.deepcopy(cluster.get("fixed_base_candidates", [])),
             },
-            "temporary_bases": copy.deepcopy(
-                cluster.get("temporary_base_llh_by_rover", {})
-            ),
+            "temporary_bases": copy.deepcopy(cluster.get("temporary_base_llh_by_rover", {})),
             "rover_count": len(adjusted_points), "points": adjusted_points,
             "baselines": adjusted_baselines, "baseline_observations": raw_rows,
             "loops": loops,
             "official_publish_allowed": quality_gate_passed,
             "quality_gate": {
                 "status": "PASS" if quality_gate_passed else "FAILED_QUALITY_GATE",
-                "interpretation_status": interpretation_status,
+                "interpretation_status": interp_status,
                 "passed": quality_gate_passed,
                 "pre_adjustment_loop_closure_limit_m": None,
                 "max_pre_adjustment_loop_closure_m": max_observed_closure,
                 "closure_failures": [],
                 "loop_closure_diagnostic_only": True,
-                "network_quality_passed": network_quality_passed,
+                "network_quality_passed": bool(global_test and global_test.get("passed")),
                 "reasons": quality_gate_reasons,
                 "diagnostic_warnings": diagnostic_warnings,
                 "audit_report_allowed": True,
                 "official_coordinate_publish_allowed": quality_gate_passed,
             },
-            "quality": {
-                "observation_baseline_count": len(accepted_raw),
-                "averaged_baseline_count": len(averaged_edges),
-                "observation_session_count": len(observation_sessions),
-                "observation_sessions": observation_sessions,
-                "baseline_std_warning_count": sum("BASELINE_STD_WARNING" in row["quality_flags"] for row in accepted_raw),
-                "baseline_std_raw_warning_count": sum(
-                    "BASELINE_STD_WARNING" in row["quality_flags"]
-                    for row in raw_rows
-                ),
-                "baseline_std_rejected_count": sum(
-                    "REJECTED_BASELINE_STD" in row["quality_flags"]
-                    for row in raw_rows
-                ),
-                "baseline_std_repeatability_fallback_count": sum(
-                    "BASELINE_STD_REPEATABILITY_FALLBACK" in row["quality_flags"]
-                    for row in raw_rows
-                ),
-                "baseline_std_repeatability_fallback_edges": (
-                    baseline_std_repeatability_fallback_edges
-                ),
-                "baseline_std_repeatability_fallback_policy": (
-                    "Only when an edge has no normal-STD observation: require at least "
-                    f"{high_std_fallback_min_samples} distinct RTK-Fixed epochs, maximum "
-                    f"vector deviation <= {high_std_fallback_max_repeatability_m:.3f} m, "
-                    f"and ECEF consistency error <= {raw_ecef_tolerance:.3f} m; retain "
-                    "the original high covariance"
-                ),
-                "raw_observation_count": len(raw_rows),
-                "raw_rejected_count": len(raw_rows) - len(accepted_raw),
-                "raw_exclusion_reason_counts_overlap": True,
-                "unconfirmed_source_excluded_count": sum(
-                    "EXCLUDE_UNCONFIRMED_SOURCE" in row["quality_flags"]
-                    for row in raw_rows
-                ),
-                "pre_stable_window_excluded_count": sum(
-                    "EXCLUDE_PRE_STABLE_WINDOW" in row["quality_flags"]
-                    for row in raw_rows
-                ),
-                "insufficient_stable_window_excluded_count": sum(
-                    (
-                        "EXCLUDE_INSUFFICIENT_STABLE_WINDOW" in row["quality_flags"]
-                        or "EXCLUDE_STABILITY_NOT_REACHED" in row["quality_flags"]
-                    )
-                    for row in raw_rows
-                ),
-                "stability_not_reached_excluded_count": sum(
-                    "EXCLUDE_STABILITY_NOT_REACHED" in row["quality_flags"]
-                    for row in raw_rows
-                ),
-                "insufficient_duration_excluded_count": sum(
-                    "EXCLUDE_INSUFFICIENT_DURATION" in row["quality_flags"]
-                    for row in raw_rows
-                ),
-                "source_not_confirmed_excluded_count": sum(
-                    "EXCLUDE_SOURCE_NOT_CONFIRMED" in row["quality_flags"]
-                    for row in raw_rows
-                ),
-                "unstable_solver_window_excluded_count": sum(
-                    (
-                        "EXCLUDE_UNSTABLE_SOLVER_WINDOW" in row["quality_flags"]
-                        or "EXCLUDE_STABILITY_LOST" in row["quality_flags"]
-                    )
-                    for row in raw_rows
-                ),
-                "stability_lost_excluded_count": sum(
-                    "EXCLUDE_STABILITY_LOST" in row["quality_flags"]
-                    for row in raw_rows
-                ),
-                "inter_rotation_reacquisition_excluded_count": sum(
-                    "EXCLUDE_INTER_ROTATION_REACQUISITION" in row["quality_flags"]
-                    for row in raw_rows
-                ),
-                "post_seed_transition_excluded_count": sum(
-                    "EXCLUDE_POST_SEED_TRANSITION" in row["quality_flags"]
-                    for row in raw_rows
-                ),
-                "rolling_stability_policy": {
-                    "window_seconds": self.STABILITY_WINDOW_SECONDS,
-                    "minimum_samples_per_window": (
-                        self.STABILITY_MIN_SAMPLES_PER_WINDOW
-                    ),
-                    "maximum_sample_gap_seconds": (
-                        self.STABILITY_MAX_SAMPLE_GAP_SECONDS
-                    ),
-                    "horizontal_component_limit_m": (
-                        self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M
-                    ),
-                    "up_component_limit_m": self.STABILITY_UP_COMPONENT_LIMIT_M,
-                    "horizontal_std_limit_m": self.STABILITY_HORIZONTAL_STD_LIMIT_M,
-                    "up_std_limit_m": self.STABILITY_UP_STD_LIMIT_M,
-                    "horizontal_slope_limit_mps": (
-                        self.STABILITY_HORIZONTAL_SLOPE_LIMIT_MPS
-                    ),
-                    "up_slope_limit_mps": self.STABILITY_UP_SLOPE_LIMIT_MPS,
-                    "ewma_fast_tau_seconds": self.STABILITY_EWMA_FAST_TAU_SECONDS,
-                    "ewma_slow_tau_seconds": self.STABILITY_EWMA_SLOW_TAU_SECONDS,
-                    "ewma_role": (
-                        "Early transition detector only; formal acceptance still "
-                        "requires two non-overlapping windows plus continuous hold"
-                    ),
-                    "continuous_hold_seconds": self.STABILITY_HOLD_SECONDS,
-                    "abort_horizontal_component_limit_m": (
-                        self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M
-                    ),
-                    "abort_up_component_limit_m": (
-                        self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M
-                    ),
-                    "abort_consecutive_epochs": (
-                        self.STABILITY_ABORT_CONSECUTIVE_EPOCHS
-                    ),
-                    "solver_min_distinct_epochs": (
-                        self.CROSS_BASE_STABLE_MIN_DISTINCT_EPOCHS
-                    ),
-                    "solver_min_duration_seconds": (
-                        self.CROSS_BASE_STABLE_MIN_DURATION_SECONDS
-                    ),
-                    "reset_complete_window_when_sustained_drift_returns": True,
-                },
-                "temporary_base_coordinate_policy": (
-                    "One immutable covariance-weighted ECEF endpoint per rover, "
-                    "derived from the common initial fixed-BASE solver window and "
-                    "reused for MODE BASE, source validation, and network reduction"
-                ),
-                "pre_adjustment_loop_closure_limit_m": None,
-                "max_pre_adjustment_loop_closure_m": max_observed_closure,
-                "loop_closure_diagnostic_only": True,
-                "quality_gate_status": (
-                    "PASS" if quality_gate_passed else "FAILED_QUALITY_GATE"
-                ),
-                "quality_interpretation_status": interpretation_status,
-                "diagnostic_warnings": diagnostic_warnings,
-                "max_session_mean_separation_m": max(
-                    (
-                        float(edge.get("max_session_mean_separation_m") or 0.0)
-                        for edge in averaged_edges
-                    ),
-                    default=0.0,
-                ),
-                "vector_outlier_count": sum(
-                    diagnostic.get("vector_filter_status") == "EVALUATED_OUTLIER"
-                    for diagnostic in vector_outlier_diagnostics
-                ),
-                "vector_outlier_filter": (
-                    "Per edge/session coordinate-wise median center; reject 3-D deviation above "
-                    f"max({vector_outlier_absolute_floor_m:.2f} m, median deviation + "
-                    f"{vector_outlier_sigma_multiplier:.0f} x 1.4826 x MAD), minimum "
-                    f"{vector_outlier_min_samples} samples"
-                ),
-                "mixed_position_type_edges": mixed_position_type_edges,
-                "mixed_position_type_edge_count": len(mixed_position_type_edges),
-                "mixed_position_type_warning_threshold_m": 0.01,
-                "position_type_selection_policy": (
-                    "Per geometric edge prefer RTK Fixed position type 4; use Input "
-                    "Fixed type 7 only when that edge has no accepted type 4 observation"
-                ),
-                "position_type_filter_edges": position_type_filter_diagnostics,
-                "position_type_rejected_count": sum(
-                    "REJECTED_POSITION_TYPE_7" in row["quality_flags"]
-                    for row in raw_rows
-                ),
-                "raw_ecef_inconsistent_count": sum("BASELINE_POSITION_INCONSISTENT" in row["quality_flags"] for row in raw_rows),
-                "raw_ecef_vertical_datum_offset_count": sum(
-                    "ROVER_ECEF_VERTICAL_DATUM_OFFSET_DIAGNOSTIC"
-                    in row["quality_flags"]
-                    for row in raw_rows
-                ),
-                "baseline_std_warning_threshold_m": std_warning_threshold,
-                "raw_ecef_consistency_tolerance_m": raw_ecef_tolerance,
-                "baseline_covariance_model": (
-                    "Published session covariance: C_used = (n / n_eff) * scatter_scale * "
-                    "C_formal, where C_formal solves P_sum*C=I and P_sum=sum(solve(C_i,I)); "
-                    "n_eff is the number of contiguous "
-                    "source/direction sessions, with no independence claimed between "
-                    "1 Hz epochs inside one RTK FIXED session"
-                ),
-                "independent_epoch_covariance_model": (
-                    "Sensitivity only: C_edge = scatter_scale * "
-                    "inverse(sum(inverse(C_i))); assumes n_eff=n"
-                ),
-                "temporal_scaling_applied": temporal_scaling_applied,
-                "effective_sample_size_method": (
-                    "Published n_eff: one independent observation per contiguous "
-                    "source/direction session separated by direction change or >5 s gap. "
-                    "Per-component ACF ESS is diagnostic only"
-                ),
-                "effective_sample_size_edges": [
-                    {
-                        "from": edge["from"],
-                        "to": edge["to"],
-                        "observation_count": edge["observation_count"],
-                        "effective_sample_size": edge["effective_sample_size"],
-                        "acf_estimated_effective_sample_size": edge[
-                            "acf_estimated_effective_sample_size"
-                        ],
-                        "temporal_inflation_factor": edge["temporal_scale_factor"],
-                        "scatter_scale_factor": edge["scatter_scale_factor"],
-                        "total_covariance_inflation_factor": (
-                            edge["temporal_scale_factor"]
-                            * edge["scatter_scale_factor"]
-                        ),
-                        "session_count": edge["session_count"],
-                        "max_session_mean_separation_m": edge[
-                            "max_session_mean_separation_m"
-                        ],
-                        "max_session_mean_difference_xyz": edge[
-                            "max_session_mean_difference_xyz"
-                        ],
-                        "max_session_mean_pair": edge["max_session_mean_pair"],
-                        "pooled_lag_one_autocorrelations": edge[
-                            "pooled_lag_one_autocorrelations"
-                        ],
-                        "sessions": edge["effective_sample_size_sessions"],
-                    }
-                    for edge in averaged_edges
-                ],
-                "chi_square_conclusion": (
-                    global_test.get("conclusion") if global_test else None
-                ),
-                "full_covariance_available": True,
-                "source_cross_covariance_available": False,
-                "repeated_observations_independence_verified": False,
-                "control_point_uncertainty_included": False,
-                "published_point_std_scale": "a_priori",
-                "reported_point_std_scales": ["a_priori", "a_posteriori"],
-                "normalized_residual_scale": "a_priori",
-                "degrees_of_freedom": result.degrees_of_freedom,
-                "variance_factor": result.variance_factor,
-                "reference_standard_deviation": math.sqrt(result.variance_factor) if result.variance_factor is not None and result.variance_factor >= 0 else None,
-                "reference_standard_deviation_m_at_1mm": 0.001 * math.sqrt(result.variance_factor) if result.variance_factor is not None and result.variance_factor >= 0 else None,
-                "weighted_residual_sum": result.weighted_residual_sum,
-                "rank": result.rank, "condition_number": result.condition_number,
-                "cycle_space_dimension": cycle_space_dimension,
-                "fundamental_loop_count": len(loops),
-                "fundamental_loop_basis_rank": cycle_basis_rank,
-                "rover_only_loop_count": sum(
-                    1 for loop in loops if "BASE" not in loop.get("points", [])
-                ),
-                "base_anchored_loop_count": sum(
-                    1 for loop in loops if "BASE" in loop.get("points", [])
-                ),
-                "loop_basis_independence_verified": True,
-                "loop_basis_method": (
-                    "Rover-to-rover-first spanning forest plus one fundamental "
-                    "cycle per chord; BASE edges only anchor rover components and "
-                    "dependent cycles are intentionally omitted"
-                ),
-                "max_standardized_residual": result.max_standardized_residual,
-                "global_test": global_test,
-                "stochastic_model_test": stochastic_model_test,
-                "independent_epoch_sensitivity": independent_global_test,
-                "trusted_subset": {"observation_baseline_count": len(trusted_raw)},
-                "residual_flags": [
-                    {
-                        "from": flag.from_point, "to": flag.to_point,
-                        "component": flag.component,
-                        "normalized_residual": flag.normalized_residual,
-                        "p_value": flag.p_value, "critical_value": flag.critical_value,
-                    }
-                    for flag in result.residual_flags
-                ],
-            },
+            "quality": quality_dict,
         }
