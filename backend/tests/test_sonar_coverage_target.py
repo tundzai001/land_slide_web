@@ -1,0 +1,438 @@
+"""Targeted tests to boost coverage on newly refactored processors and modules for SonarCloud."""
+
+import io
+import math
+import time
+import zipfile
+from collections import deque
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import numpy as np
+import pytest
+from fastapi import HTTPException
+
+from processors.landslide_analyzer import LandslideAnalyzer
+from processors.landslide.consensus import (
+    _append_rain_and_gnss_notes,
+    _compute_trend_agreement,
+    _decide_alerting_consensus,
+    _decide_consensus,
+    _extract_gnss_state,
+    _extract_imu_state,
+    _extract_rain_state,
+)
+from processors.landslide.velocity import (
+    _normalize_unit,
+    _infer_unit_from_description,
+    _convert_threshold_to_mm_s,
+    _extract_threshold_and_unit,
+    _normalize_table,
+    _is_table_sane,
+    _classify_from_sorted,
+    _compute_ols_velocity,
+    _evaluate_velocity_risk,
+    _apply_cusum_to_risk,
+    _apply_fukuzono_to_risk,
+    _calculate_daily_window_velocities,
+)
+from processors.water_processor import WaterEngine
+from processors.imu_processor import IMUEngine
+from app.features.projects.admin import validate_project_fields
+from processors.gnss.origin import _sync_station_origin_config, GNSSOriginMixin
+from app.features.data_export.database.job import add_csv_to_zip, _apply_date_filter
+
+
+class TestLandslideProcessorsCoverage:
+    def test_rainfall_analysis_full(self):
+        analyzer = LandslideAnalyzer()
+        base_ts = 1700000000.0  # arbitrary epoch
+        sorted_gnss = [
+            {"timestamp": base_ts + i * 86400, "data": {"pos_e": 0.001 * i, "pos_n": 0.002 * i, "pos_u": 0.0005 * i}}
+            for i in range(10)
+        ]
+        sorted_rain = [
+            {"timestamp": base_ts + i * 86400, "data": {"rainfall_mm": 5.0 + i * 3.0}}
+            for i in range(10)
+        ]
+
+        gnss_daily, daily_rain, common_days = analyzer._aggregate_gnss_and_rain_daily(sorted_gnss, sorted_rain)
+        assert len(common_days) == 10
+
+        cum, inc, legacy = analyzer._compute_daily_displacements(common_days, gnss_daily)
+        assert len(cum) == 10
+        assert len(inc) == 10
+        assert len(legacy) == 10
+
+        rain_arr = np.array([daily_rain[d] for d in common_days])
+        smi = analyzer._compute_slide_model_index(rain_arr, 3.0, 15.0, 0.7)
+        assert len(smi) == 10
+
+        disp_rate = np.array(inc)
+        lag, corr, pairs, scan_res = analyzer._scan_lag_correlation(smi, disp_rate, 3)
+        assert pairs >= 3
+
+        # assess correlation strength
+        assert analyzer._assess_correlation_strength(0.85)[0] == "Rất mạnh"
+        assert analyzer._assess_correlation_strength(0.65)[0] == "Mạnh"
+        assert analyzer._assess_correlation_strength(0.45)[0] == "Trung bình"
+        assert analyzer._assess_correlation_strength(0.25)[0] == "Yếu"
+        assert analyzer._assess_correlation_strength(0.10)[0] == "Không đáng kể"
+
+        # regression fit
+        slope, intercept, r2, c_val, strength, assess, potential = analyzer._fit_lag_regression(smi, disp_rate, 0, 0.75)
+        assert potential in ("HIGH", "MEDIUM", "LOW")
+
+        # events
+        cwds = analyzer._compute_cwd_events(common_days, rain_arr, disp_rate)
+        assert isinstance(cwds, list)
+
+        peaks = analyzer._compute_peak_events(common_days, rain_arr, disp_rate, smi, 0)
+        assert isinstance(peaks, list)
+
+        # Full method
+        res = analyzer.analyze_rainfall_displacement_correlation(sorted_gnss, sorted_rain)
+        assert res.get("available") is True
+
+    def test_displacement_analysis_full(self):
+        analyzer = LandslideAnalyzer()
+        assert analyzer._check_preliminary_gnss_status({"status": "INITIALIZING"})["level"] == "PENDING"
+        assert analyzer._check_preliminary_gnss_status({"velocity_reliable": False})["level"] == "PENDING"
+        assert analyzer._check_preliminary_gnss_status({"velocity_confirmed": False})["level"] == "PENDING"
+        assert analyzer._check_preliminary_gnss_status({"velocity_significant": False})["level"] == "PENDING"
+        assert analyzer._check_preliminary_gnss_status({"status": "OK", "velocity_reliable": True, "velocity_confirmed": True}) is None
+
+        # motion suppression
+        assert analyzer._determine_motion_suppressed([], 1) is False
+        points = [{"e": 0.001 * i, "n": 0.001 * i, "u": 0.0} for i in range(5)]
+        assert analyzer._determine_motion_suppressed(points, 1) is False
+
+        # anti-jitter
+        hist = deque(maxlen=10)
+        now = time.time()
+        for i in range(5):
+            hist.append({"ts": now - (5 - i), "e": 0.0, "n": 0.0, "u": 0.0, "data": {"pos_e": 0.0, "pos_n": 0.0, "pos_u": 0.0}})
+        info = {"first_detected": now - 3, "latched_level": "WARNING"}
+        lvl = analyzer._apply_anti_jitter(hist, info, "WARNING", 1)
+        assert lvl in ("WARNING", "LOW", "INFO")
+
+        # level from class
+        assert analyzer._level_from_velocity_class("Extremely Rapid") == "CRITICAL"
+        assert analyzer._level_from_velocity_class("Rapid") == "CRITICAL"
+        assert analyzer._level_from_velocity_class("Moderate") == "WARNING"
+        assert analyzer._level_from_velocity_class("Slow") == "INFO"
+
+        # confirmed alert
+        alt = analyzer._build_confirmed_alert("WARNING", 1, 0.5, "Rapid", 3, 10.0)
+        assert alt["level"] == "WARNING"
+
+        # deassertion
+        de_res = analyzer._step_safe_deassertion(info, 1, 1, time.time())
+        assert de_res is not None or de_res is None
+
+    def test_consensus_analysis_full(self):
+        g_st = _extract_gnss_state({"status": "success", "risk_level": "HIGH", "analysis": {"trend": "accelerating", "total_displacement_mm": 15.0}})
+        assert g_st["ok"] is True
+        assert g_st["alerting"] is True
+
+        i_st = _extract_imu_state({"status": "success", "risk_level": "HIGH", "analysis": {"trend": "accelerating", "total_tilt_change_deg": 2.5}})
+        assert i_st["ok"] is True
+        assert i_st["alerting"] is True
+
+        r_st = _extract_rain_state({"available": True, "correlation": 0.65})
+        assert r_st["supporting"] is True
+
+        # trend agreement
+        assert _compute_trend_agreement(True, True, "accelerating", "accelerating") == "full"
+        assert _compute_trend_agreement(True, True, "accelerating", "stable") == "partial"
+        assert _compute_trend_agreement(True, True, "accelerating", "decelerating") == "conflict"
+        assert _compute_trend_agreement(False, True, "accelerating", "accelerating") is None
+
+        # decide consensus
+        res_both = _decide_consensus(["gnss", "imu"], g_st, i_st, "full")
+        assert res_both[0] == "STRONG"
+
+        i_conflict = dict(i_st)
+        i_conflict["trend"] = "decelerating"
+        res_conf = _decide_consensus(["gnss", "imu"], g_st, i_conflict, "conflict")
+        assert res_conf[0] == "CONFLICT"
+
+        res_none = _decide_consensus([], g_st, i_st, None)
+        assert res_none[0] == "UNAVAILABLE"
+
+        notes = []
+        _append_rain_and_gnss_notes(notes, ["gnss"], r_st, {"available": True, "assessment": "Mạnh"}, g_st, True)
+        assert len(notes) > 0
+
+    def test_velocity_and_windows_analysis(self):
+        analyzer = LandslideAnalyzer()
+        assert _normalize_unit("mm/d") == "mm/day"
+        assert _normalize_unit("m/sec") == "m/s"
+        assert _infer_unit_from_description("Tốc độ theo mm/năm") == "mm/year"
+        assert _infer_unit_from_description("unknown") is None
+
+        assert _convert_threshold_to_mm_s(1.0, "mm/s") == 1.0
+        assert _convert_threshold_to_mm_s(86.4, "mm/day") == 0.001
+        assert _convert_threshold_to_mm_s(1.0, "m/s") == 1000.0
+
+        thresh, unit = _extract_threshold_and_unit({"threshold": 5, "unit": "m/s"})
+        assert thresh == 5
+        assert unit == "m/s"
+
+        tbl = _normalize_table([
+            {"name": "Fast", "threshold": 0.5, "unit": "mm/s"},
+            {"name": "Slow", "threshold": 0.01, "unit": "mm/s"},
+        ])
+        assert _is_table_sane(tbl) is True
+        assert _is_table_sane([]) is False
+
+        assert _classify_from_sorted(tbl, 6000.0) == "Fast"
+
+        # ols velocity
+        base_ts = time.time()
+        sorted_d = [
+            {"timestamp": base_ts + i * 3600, "data": {"pos_e": 0.001 * i, "pos_n": 0.001 * i, "pos_u": 0.0}}
+            for i in range(5)
+        ]
+        vel_mms, r2, vel_mmday = _compute_ols_velocity(sorted_d, sorted_d[0])
+        assert vel_mmday >= 0
+
+        cls_out, risk, warn = _evaluate_velocity_risk(True, "Rapid", "accelerating", "Tin cậy")
+        assert risk in ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+
+        risk_cu, notes_cu = _apply_cusum_to_risk(risk, warn, True, {"has_change": True, "message": "Change"})
+        assert "Change" in notes_cu
+
+        risk_fk, notes_fk = _apply_fukuzono_to_risk(risk, warn, True, {"predicted_failure": True, "days_to_failure": 5})
+        assert risk_fk == "EXTREME"
+
+        # windows
+        now_dt = datetime.now()
+        intervals = analyzer._build_time_intervals(now_dt.timestamp(), now_dt)
+        assert len(intervals) == 3
+
+        now_ts = now_dt.timestamp()
+        sorted_data = [
+            {"timestamp": now_ts - (5 - i) * 1000, "data": {"pos_e": 0.001 * i, "pos_n": 0.002 * i, "pos_u": 0.0}}
+            for i in range(6)
+        ]
+        w_res = analyzer._compute_single_window(intervals[0], sorted_data, 0.01)
+        assert w_res["status"] in ("success", "preliminary", "insufficient_data")
+
+        acc = analyzer._check_acceleration_alert([
+            {"status": "success", "velocity_reliable": True, "velocity_mm_day": 10.0, "window_days": "day", "label": "24h qua"},
+            {"status": "success", "velocity_reliable": True, "velocity_mm_day": 2.0, "window_days": "month", "label": "Tháng này"}
+        ])
+        assert acc is not None
+
+    def test_full_facade_and_submodules(self):
+        analyzer = LandslideAnalyzer()
+        base_ts = time.time()
+        sorted_gnss = [
+            {"timestamp": base_ts + i * 3600, "data": {"pos_e": 0.001 * i, "pos_n": 0.002 * i, "pos_u": 0.0, "speed_2d": 0.001}}
+            for i in range(10)
+        ]
+        sorted_imu = [
+            {"timestamp": base_ts + i * 3600, "data": {"roll": 0.05 * i, "pitch": -0.02 * i}}
+            for i in range(10)
+        ]
+
+        # full velocity
+        vel_res = analyzer.analyze_long_term_velocity(1, sorted_gnss, {})
+        assert vel_res.get("status") in ("success", "insufficient_data")
+
+        # full tilt
+        tilt_res = analyzer.analyze_long_term_tilt(1, sorted_imu)
+        assert tilt_res.get("status") in ("success", "insufficient_data")
+
+        # full windows
+        win_res = analyzer.analyze_multi_window(1, sorted_gnss, {})
+        assert win_res.get("available") is True
+
+        # full displacement
+        disp_res = analyzer.analyze_gnss_displacement(1, sorted_gnss, {"GnssAlerting": {"enabled": True}})
+        assert disp_res is not None or disp_res is None
+
+        # full consensus
+        cons_res = analyzer.analyze_cross_sensor_consensus(vel_res, tilt_res, {"available": True, "correlation": 0.5})
+        assert cons_res.get("available") is True
+
+        analyzer = LandslideAnalyzer()
+        now_ts = time.time()
+        sorted_data = [
+            {"timestamp": now_ts + i * 60, "data": {"roll": 0.1 * i, "pitch": -0.05 * i}}
+            for i in range(10)
+        ]
+        rolls, pitches, ts = analyzer._extract_imu_roll_pitch(sorted_data)
+        assert len(rolls) == 10
+
+        assert analyzer._compute_tilt_trend(rolls) == "accelerating"
+        assert analyzer._compute_tilt_trend([-0.1 * i for i in range(10)]) == "decelerating"
+        assert analyzer._compute_tilt_trend([0.0 for _ in range(10)]) == "stable"
+
+        assert analyzer._evaluate_tilt_risk(12.0, 1.5, 1.0, "accelerating")[0] == "EXTREME"
+        assert analyzer._evaluate_tilt_risk(6.0, 0.6, 1.0, "accelerating")[0] == "HIGH"
+        assert analyzer._evaluate_tilt_risk(3.0, 0.2, 1.0, "stable")[0] == "MEDIUM"
+        assert analyzer._evaluate_tilt_risk(0.5, 0.05, 1.0, "accelerating")[0] == "MEDIUM"
+        assert analyzer._evaluate_tilt_risk(0.1, 0.01, 1.0, "stable")[0] == "LOW"
+
+        ts_dict = analyzer._build_tilt_time_series(ts, rolls, pitches, 0.01)
+        assert len(ts_dict) > 0
+
+
+class TestWaterAndIMUEngines:
+    def test_water_engine_processing(self):
+        eng = WaterEngine(valid_min=0.0, valid_max=10.0)
+
+        # to_meters conversions
+        assert eng._to_meters({"sensortype": "GWL"}, 50.0) == 50.0
+        assert eng._to_meters({"sensortype": "GWL"}, 1500.0) == 1.5
+        assert eng._to_meters({"water_level": 2.5}, 2.5) == 2.5
+
+        # process fallback
+        res_none = eng.process({}, time.time())
+        assert res_none["is_fallback"] is True
+
+        # process normal valid
+        res_valid = eng.process({"value": 3.45}, time.time())
+        assert res_valid["water_level"] == 3.45
+        assert res_valid["water_level_cm"] == 345.0
+
+        # process out of range
+        res_oor = eng.process({"value": 999.0}, time.time())
+        assert res_oor["is_fallback"] is True
+
+    def test_imu_engine_processing(self):
+        eng = IMUEngine()
+        eng.set_baseline(1.0, 2.0, 3.0)
+        assert eng.origin_locked is True
+
+        drift, dir_text = eng._calculate_drift(2.0, 2.0, 100.0)
+        assert drift > 0
+        assert dir_text != "--"
+
+        # inclinometer
+        res_inc = eng._process_inclinometer({"angle_xyz": [1.5, 2.5, 3.5], "battery_voltage": 3.7}, 100.0)
+        assert res_inc["roll"] == 0.5
+        assert res_inc["pitch"] == 0.5
+
+        # raw imu
+        res_raw = eng._process_raw_imu({"ax": 0.1, "ay": 0.2, "az": 9.8, "temp": 25.0}, 100.0)
+        assert res_raw is not None
+
+
+class TestProjectsAdminAndJobHelpers:
+    def test_validate_project_fields(self):
+        # valid
+        data = {"project_code": " PRJ1 ", "name": " Test ", "description": " Desc "}
+        validate_project_fields(data)
+        assert data["project_code"] == "PRJ1"
+        assert data["name"] == "Test"
+
+        # missing code in create
+        with pytest.raises(HTTPException):
+            validate_project_fields({"name": "P1"}, creating=True)
+
+        # exceed length
+        with pytest.raises(HTTPException):
+            validate_project_fields({"project_code": "x" * 51})
+
+        # non-string
+        with pytest.raises(HTTPException):
+            validate_project_fields({"project_code": 123})
+
+    def test_add_csv_to_zip_and_date_filter(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            assert add_csv_to_zip(zf, "empty.csv", ["h1"], []) == 0
+            n = add_csv_to_zip(zf, "data.csv", ["col1", "col2"], [["a", "b"], ["c", "d"]])
+            assert n == 2
+
+        with zipfile.ZipFile(io.BytesIO(buf.getvalue()), "r") as zf:
+            assert "data.csv" in zf.namelist()
+
+        # date filter
+        from sqlalchemy import column, select
+        mock_col = column("timestamp")
+        query = select(mock_col)
+        q1 = _apply_date_filter(query, mock_col, "2024-01-01", "2024-01-02")
+        assert q1 is not None
+
+    def test_sync_station_origin_config(self):
+        station = MagicMock()
+        station.config = {"other": 1}
+        _sync_station_origin_config(station, {"lat": 21.0, "lon": 105.0, "h": 100.0})
+        assert "gnss_origin" in station.config
+        assert station.config["gnss_origin"]["lat"] == 21.0
+
+    def test_gnss_pipeline_mixin(self):
+        from app.mqtt.bridge.sensor_pipeline.gnss import GnssPayloadMixin
+        mixin = GnssPayloadMixin()
+        mixin.round_robin_manager = MagicMock()
+        mixin.round_robin_manager._sessions = {
+            1: {
+                "monitoring_project_id": 10,
+                "clusters": [{"stations": [101, 102]}],
+                "seed_topology_snapshots": True,
+            }
+        }
+        mixin.adjustment_phase = {1: "STARTING"}
+        assert mixin._monitoring_paused_for_adjustment(10, 101) is True
+        assert mixin._monitoring_paused_for_adjustment(10, 999) is False
+
+        # seed delta
+        assert "dN/E/U=" in mixin._format_station_seed_delta({"delta_neu_m": [0.001, 0.002, 0.003]}, 10)
+        assert "waiting" in mixin._format_station_seed_delta({}, 10)
+
+        # seed state
+        state_open = mixin._format_station_seed_state(True, 101, {101: 5}, {101: 20}, {}, {}, {"solver_min_distinct_epochs": 10, "solver_min_duration_seconds": 30})
+        assert "solver=" in state_open
+        state_warmup = mixin._format_station_seed_state(False, 101, {}, {}, {101: 3}, {101: 15}, {"seed_warmup_min_distinct_epochs": 5, "seed_warmup_min_duration_seconds": 20})
+        assert "fixed-base warm-up=" in state_warmup
+
+    def test_gnss_origin_record_apply(self):
+        from processors.gnss.origin import GNSSOriginMixin
+        mixin = GNSSOriginMixin()
+        mixin.device_id = 1
+        mixin.tracking_offset_enu = np.array([0.0, 0.0, 0.0])
+        mixin._restore_runtime_state = MagicMock(return_value=True)
+        mixin._log_prefix = MagicMock(return_value="GNSS-1")
+        
+        origin_rec = MagicMock()
+        origin_rec.lat = 21.0
+        origin_rec.lon = 105.0
+        origin_rec.h = 100.0
+        origin_rec.rotation_matrix = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        origin_rec.ecef_origin = [1000.0, 2000.0, 3000.0]
+        origin_rec.locked_at = 123456
+        origin_rec.id = 42
+        origin_rec.tracking_offset = None
+        
+        mixin._apply_origin_record(origin_rec, None)
+        assert mixin.state == "ORIGIN_LOCKED"
+        assert mixin.origin["lat"] == 21.0
+
+        # preserve existing
+        mixin._preserve_existing_origin(origin_rec)
+        assert mixin._origin_record_id == 42
+
+    @pytest.mark.anyio
+    async def test_job_export_boundaries(self):
+        from app.features.data_export.database.job import _resolve_export_boundaries
+        from app.features.data_export.schemas import ExportExcelRequest
+        mock_db = AsyncMock()
+        mock_proj = MagicMock(id=1, project_code="PRJ1")
+        mock_st = MagicMock(id=10, project_id=1, station_code="ST10")
+        
+        exec_proj = MagicMock()
+        exec_proj.scalars.return_value.all.return_value = [mock_proj]
+        exec_st = MagicMock()
+        exec_st.scalars.return_value.all.return_value = [mock_st]
+        mock_db.execute.side_effect = [exec_proj, exec_st]
+        
+        req = ExportExcelRequest(tables=["sensor_data"], project_ids=[1], station_ids=[10])
+        p_rows, s_rows, p_codes, s_map, all_s_map, scope_ids, req_types, p_filt, s_filt = await _resolve_export_boundaries(mock_db, req)
+        assert len(p_rows) == 1
+        assert len(s_rows) == 1
+        assert 10 in scope_ids
+

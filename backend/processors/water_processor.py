@@ -9,6 +9,32 @@ logger = logging.getLogger(__name__)
 
 NUMBER_RE = r"-?\d+(?:\.\d+)?"
 
+
+def extract_numeric_value(raw_value: Any) -> Optional[float]:
+    """Extract a numeric value from scalar/list/string payloads."""
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, (int, float)):
+        return float(raw_value)
+    if isinstance(raw_value, (list, tuple)):
+        return float(raw_value[-1]) if raw_value else None
+    if isinstance(raw_value, str):
+        text = raw_value.strip()
+        if not text:
+            return None
+        if text.startswith('[') and text.endswith(']'):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list) and parsed:
+                    return float(parsed[-1])
+            except (TypeError, ValueError):
+                pass
+        numbers = re.findall(NUMBER_RE, text)
+        if numbers:
+            return float(numbers[-1])
+    return None
+
+
 class WaterEngine:
     def __init__(self, history_size: int = 36, valid_min: float = 0.0, valid_max: float = 50.0):
         self.history = deque(maxlen=history_size)

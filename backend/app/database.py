@@ -1,5 +1,5 @@
 # backend/app/database.py
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import sessionmaker, declarative_base
 from .config import settings
 from .infrastructure.asyncpg_compat import install_asyncpg_tls_fix
@@ -37,17 +37,17 @@ def create_pg_engine(url):
 
 # 1. AUTH DB
 auth_engine = create_pg_engine(settings.AUTH_DB_URL)
-AuthSessionLocal = sessionmaker(auth_engine, class_=AsyncSession, expire_on_commit=False)
+AuthSessionLocal = async_sessionmaker(auth_engine, expire_on_commit=False)
 BaseAuth = declarative_base()
 
 # 2. CONFIG DB
 config_engine = create_pg_engine(settings.CONFIG_DB_URL)
-ConfigSessionLocal = sessionmaker(config_engine, class_=AsyncSession, expire_on_commit=False)
+ConfigSessionLocal = async_sessionmaker(config_engine, expire_on_commit=False)
 BaseConfig = declarative_base()
 
 # 3. DATA DB
 data_engine = create_pg_engine(settings.DATA_DB_URL)
-DataSessionLocal = sessionmaker(data_engine, class_=AsyncSession, expire_on_commit=False)
+DataSessionLocal = async_sessionmaker(data_engine, expire_on_commit=False)
 BaseData = declarative_base()
 
 # Aliases cho backward compatibility (sửa lỗi ImportError trong các file cũ)
