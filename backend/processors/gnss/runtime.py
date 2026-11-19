@@ -220,6 +220,38 @@ class GNSSRuntimeMixin:
             return None
         return restored, shift_started_at
 
+    def _parse_trusted_and_displacement(self, value: dict):
+        trusted = value.get("last_trusted")
+        displacement = value.get("displacement")
+        if not isinstance(trusted, dict) or not isinstance(displacement, dict):
+            return None
+        trusted_ts = self._normalize_epoch_timestamp(trusted.get("gga_timestamp"))
+        trusted_position = self._validated_runtime_vector(trusted.get("pos_enu"), "last trusted ENU")
+        displacement_position = self._validated_runtime_vector(displacement.get("enu"), "displacement ENU")
+        displacement_ready = displacement.get("ready")
+        peak_mm = float(displacement.get("peak_mm"))
+        if (
+            trusted_ts is None or trusted_ts <= 0.0
+            or not isinstance(displacement_ready, bool)
+            or not math.isfinite(peak_mm) or peak_mm < 0.0
+        ):
+            return None
+        return trusted_ts, trusted_position, displacement_position, displacement_ready, peak_mm
+
+    def _parse_reference_event(self, value: dict):
+        last_reacquire_ts = self._normalize_epoch_timestamp(value.get("last_reacquire_ts", 0.0))
+        if last_reacquire_ts is None or last_reacquire_ts < 0.0:
+            return None
+        reference_event = value.get("reference_event") or {}
+        if not isinstance(reference_event, dict):
+            return None
+        reference_changed_at = self._normalize_epoch_timestamp(reference_event.get("changed_at"))
+        last_handled_event = self._normalize_epoch_timestamp(reference_event.get("last_handled_at"))
+        reference_source = reference_event.get("source")
+        if reference_source is not None and not isinstance(reference_source, str):
+            return None
+        return last_reacquire_ts, reference_changed_at, reference_source, last_handled_event
+
     def _restore_runtime_state(self, value) -> bool:
         """Restore only a checkpoint tied to this exact immutable origin and offset."""
         self._needs_boot_anchor = True
@@ -229,33 +261,15 @@ class GNSSRuntimeMixin:
             if not self._validate_stored_origin_and_offset(value):
                 return False
 
-            trusted = value.get("last_trusted")
-            displacement = value.get("displacement")
-            if not isinstance(trusted, dict) or not isinstance(displacement, dict):
+            td_res = self._parse_trusted_and_displacement(value)
+            if td_res is None:
                 return False
-            trusted_ts = self._normalize_epoch_timestamp(trusted.get("gga_timestamp"))
-            trusted_position = self._validated_runtime_vector(trusted.get("pos_enu"), "last trusted ENU")
-            displacement_position = self._validated_runtime_vector(displacement.get("enu"), "displacement ENU")
-            displacement_ready = displacement.get("ready")
-            peak_mm = float(displacement.get("peak_mm"))
-            if (
-                trusted_ts is None or trusted_ts <= 0.0
-                or not isinstance(displacement_ready, bool)
-                or not math.isfinite(peak_mm) or peak_mm < 0.0
-            ):
-                return False
+            trusted_ts, trusted_position, displacement_position, displacement_ready, peak_mm = td_res
 
-            last_reacquire_ts = self._normalize_epoch_timestamp(value.get("last_reacquire_ts", 0.0))
-            if last_reacquire_ts is None or last_reacquire_ts < 0.0:
+            ref_res = self._parse_reference_event(value)
+            if ref_res is None:
                 return False
-            reference_event = value.get("reference_event") or {}
-            if not isinstance(reference_event, dict):
-                return False
-            reference_changed_at = self._normalize_epoch_timestamp(reference_event.get("changed_at"))
-            last_handled_event = self._normalize_epoch_timestamp(reference_event.get("last_handled_at"))
-            reference_source = reference_event.get("source")
-            if reference_source is not None and not isinstance(reference_source, str):
-                return False
+            last_reacquire_ts, reference_changed_at, reference_source, last_handled_event = ref_res
 
             quarantine_res = self._validate_stored_quarantine(value.get("quarantine"), trusted_ts)
             if quarantine_res is None:

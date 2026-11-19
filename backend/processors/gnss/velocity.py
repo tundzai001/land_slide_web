@@ -148,6 +148,80 @@ class GNSSVelocityMixin:
             and reliable
         )
 
+    def _build_empty_confirmation_result(
+        self,
+        required_samples: int,
+        required_duration_s: float,
+        minimum_gap_s: float,
+    ) -> Dict[str, Any]:
+        self.last_significant_motion_ts = 0.0
+        return {
+            'confirmed': False,
+            'sample_count': 0,
+            'duration_s': 0.0,
+            'direction_cosine': None,
+            'accepted_sample': False,
+            'required_samples': required_samples,
+            'required_duration_s': required_duration_s,
+            'minimum_gap_s': minimum_gap_s,
+        }
+
+    def _build_current_confirmation_result(
+        self,
+        evidence: deque,
+        ts: float,
+        accepted_sample: bool,
+        required_samples: int,
+        required_duration_s: float,
+        direction_threshold: float,
+        minimum_gap_s: float,
+    ) -> Dict[str, Any]:
+        if not evidence:
+            return self._build_empty_confirmation_result(
+                required_samples, required_duration_s, minimum_gap_s
+            )
+        reference = np.asarray(evidence[0]['velocity'], dtype=float)
+        reference_norm = float(np.linalg.norm(reference))
+        direction_cosine = min(
+            float(np.dot(reference, item['velocity']) / (
+                reference_norm * float(np.linalg.norm(item['velocity']))
+            ))
+            for item in evidence
+        )
+        duration_s = max(0.0, ts - float(evidence[0]['ts']))
+        confirmed = bool(
+            len(evidence) >= required_samples
+            and duration_s >= required_duration_s
+            and direction_cosine >= direction_threshold
+        )
+        self.last_significant_motion_ts = float(evidence[0]['ts']) if confirmed else 0.0
+        return {
+            'confirmed': confirmed,
+            'sample_count': len(evidence),
+            'duration_s': duration_s,
+            'direction_cosine': direction_cosine,
+            'accepted_sample': accepted_sample,
+            'required_samples': required_samples,
+            'required_duration_s': required_duration_s,
+            'minimum_gap_s': minimum_gap_s,
+        }
+
+    def _check_evidence_gap_and_direction(
+        self,
+        previous: dict,
+        ts: float,
+        vector: np.ndarray,
+        direction_threshold: float,
+        max_gap_s: float,
+    ) -> tuple[float, bool]:
+        gap_s = ts - float(previous['ts'])
+        previous_vector = np.asarray(previous['velocity'], dtype=float)
+        previous_norm = float(np.linalg.norm(previous_vector))
+        vector_norm = float(np.linalg.norm(vector))
+        cosine = float(np.dot(previous_vector, vector) / (previous_norm * vector_norm))
+        is_invalid = gap_s <= 0.0 or gap_s > max_gap_s or cosine < direction_threshold
+        return gap_s, is_invalid
+
     def _update_velocity_confirmation(
         self,
         timestamp: float,
@@ -156,14 +230,7 @@ class GNSSVelocityMixin:
         reliable: bool,
         config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Confirm movement from independent, directionally consistent windows.
-
-        ``velocity_m_s`` remains the measured robust estimate.  This gate only
-        decides whether it is safe to call the estimate ground movement.  A
-        rolling window produces highly correlated estimates, so accepting every
-        epoch would count the same samples repeatedly.  Evidence is therefore
-        sampled at least once per velocity window.
-        """
+        """Confirm movement from independent, directionally consistent windows."""
         config = config if isinstance(config, dict) else {}
         (
             required_samples,
@@ -178,73 +245,27 @@ class GNSSVelocityMixin:
             evidence = deque(maxlen=120)
             self._velocity_confirmation_history = evidence
 
-        def empty_result() -> Dict[str, Any]:
-            self.last_significant_motion_ts = 0.0
-            return {
-                'confirmed': False,
-                'sample_count': 0,
-                'duration_s': 0.0,
-                'direction_cosine': None,
-                'accepted_sample': False,
-                'required_samples': required_samples,
-                'required_duration_s': required_duration_s,
-                'minimum_gap_s': minimum_gap_s,
-            }
-
-        def current_result(accepted_sample: bool) -> Dict[str, Any]:
-            if not evidence:
-                return empty_result()
-            reference = np.asarray(evidence[0]['velocity'], dtype=float)
-            reference_norm = float(np.linalg.norm(reference))
-            direction_cosine = min(
-                float(np.dot(reference, item['velocity']) / (
-                    reference_norm * float(np.linalg.norm(item['velocity']))
-                ))
-                for item in evidence
-            )
-            duration_s = max(0.0, ts - float(evidence[0]['ts']))
-            confirmed = bool(
-                len(evidence) >= required_samples
-                and duration_s >= required_duration_s
-                and direction_cosine >= direction_threshold
-            )
-            self.last_significant_motion_ts = float(evidence[0]['ts']) if confirmed else 0.0
-            return {
-                'confirmed': confirmed,
-                'sample_count': len(evidence),
-                'duration_s': duration_s,
-                'direction_cosine': direction_cosine,
-                'accepted_sample': accepted_sample,
-                'required_samples': required_samples,
-                'required_duration_s': required_duration_s,
-                'minimum_gap_s': minimum_gap_s,
-            }
-
         try:
             ts = float(timestamp)
             vector = np.asarray(velocity_m_s, dtype=float).reshape(-1)
         except (TypeError, ValueError):
             evidence.clear()
-            return empty_result()
+            return self._build_empty_confirmation_result(required_samples, required_duration_s, minimum_gap_s)
 
         if not self._is_valid_motion(ts, vector, statistically_significant, reliable):
             evidence.clear()
-            return empty_result()
+            return self._build_empty_confirmation_result(required_samples, required_duration_s, minimum_gap_s)
 
         if evidence:
-            previous = evidence[-1]
-            gap_s = ts - float(previous['ts'])
-            previous_vector = np.asarray(previous['velocity'], dtype=float)
-            previous_norm = float(np.linalg.norm(previous_vector))
-            vector_norm = float(np.linalg.norm(vector))
-            cosine = float(np.dot(previous_vector, vector) / (previous_norm * vector_norm))
-            if gap_s <= 0.0 or gap_s > max_gap_s or cosine < direction_threshold:
+            gap_s, is_invalid = self._check_evidence_gap_and_direction(
+                evidence[-1], ts, vector, direction_threshold, max_gap_s
+            )
+            if is_invalid:
                 evidence.clear()
             elif gap_s < minimum_gap_s:
-                # The current rolling velocity window overlaps the previous
-                # evidence window.  Keep the streak, but do not count another
-                # copy of the same observations.
-                return current_result(False)
+                return self._build_current_confirmation_result(
+                    evidence, ts, False, required_samples, required_duration_s, direction_threshold, minimum_gap_s
+                )
 
         evidence.append({'ts': ts, 'velocity': vector.copy()})
         horizon_s = max(
@@ -255,4 +276,6 @@ class GNSSVelocityMixin:
         cutoff_ts = ts - horizon_s
         while len(evidence) > 1 and float(evidence[0]['ts']) < cutoff_ts:
             evidence.popleft()
-        return current_result(True)
+        return self._build_current_confirmation_result(
+            evidence, ts, True, required_samples, required_duration_s, direction_threshold, minimum_gap_s
+        )

@@ -234,6 +234,154 @@ class GNSSOriginMixin:
         except Exception as e:
             logger.exception(f"❌ Error saving origin to DB: {e}")
 
+    async def _wait_relock_candidates(
+        self, samples, minimum_samples, minimum_duration_s, deadline, poll_interval_s, broadcast_progress
+    ):
+        last_progress_second = -1
+        while True:
+            candidates = list(samples)
+            duration_s = (
+                float(candidates[-1]["ts"] - candidates[0]["ts"])
+                if len(candidates) >= 2 else 0.0
+            )
+            progress_second = int(min(duration_s, minimum_duration_s))
+            if progress_second != last_progress_second:
+                last_progress_second = progress_second
+                await broadcast_progress("collecting", len(candidates), duration_s)
+
+            if len(candidates) >= minimum_samples and duration_s >= minimum_duration_s:
+                return candidates, duration_s
+            if asyncio.get_running_loop().time() >= deadline:
+                raise ValueError(
+                    "Timed out collecting fresh RTK FIXED samples "
+                    f"({len(candidates)}/{minimum_samples} samples, "
+                    f"{duration_s:.1f}/{minimum_duration_s:.1f}s)"
+                )
+            await asyncio.sleep(poll_interval_s)
+
+    def _verify_relock_spread(self, candidates):
+        positions = [sample["wgs"] for sample in candidates]
+        center_lat = float(np.median([point["lat"] for point in positions]))
+        center_lon = float(np.median([point["lon"] for point in positions]))
+        center_h = float(np.median([point["h"] for point in positions]))
+        spread_xy_m = max(
+            haversine_2d(center_lat, center_lon, point["lat"], point["lon"])
+            for point in positions
+        )
+        spread_u_m = max(abs(point["h"] - center_h) for point in positions)
+        integrity_cfg = (
+            getattr(self, "_origin_relock_integrity_config", None)
+            or self._integrity_config({})
+        )
+        max_spread_xy_m = integrity_cfg["reacquire_max_spread_xy_m"]
+        max_spread_u_m = integrity_cfg["reacquire_max_spread_u_m"]
+        if spread_xy_m > max_spread_xy_m or spread_u_m > max_spread_u_m:
+            raise ValueError(
+                "RTK FIXED samples are not stable enough "
+                f"(2D spread {spread_xy_m * 1000:.1f}mm, "
+                f"vertical spread {spread_u_m * 1000:.1f}mm)"
+            )
+        return center_lat, center_lon, center_h, spread_xy_m, spread_u_m
+
+    async def _execute_relock_db_update(
+        self, center_lat, center_lon, center_h, spread_xy_m, spread_u_m, candidates, duration_s, actor, station_id
+    ):
+        new_origin = {
+            "lat": center_lat,
+            "lon": center_lon,
+            "h": center_h,
+            "R": self._get_rotation_matrix(center_lat, center_lon),
+            "ecef": self._gngga_to_ecef(center_lat, center_lon, center_h),
+        }
+        locked_at = max(int(time.time()), int(self._origin_locked_at or 0) + 1)
+        history_key = f"gnss_origin_history:{self.device_id}"
+
+        from app.models.config import Device, GNSSOrigin, GlobalConfig, Station
+        from sqlalchemy import select
+        from sqlalchemy.orm.attributes import flag_modified
+
+        async with self.db_session_factory() as db:
+            record_result = await db.execute(
+                select(GNSSOrigin).where(GNSSOrigin.device_id == self.device_id).with_for_update()
+            )
+            record = record_result.scalar_one_or_none()
+            if record is None:
+                raise ValueError("No persisted GNSS origin exists for this device")
+
+            device = await db.get(Device, self.device_id)
+            if device is None or (station_id is not None and device.station_id != station_id):
+                raise ValueError("GNSS device does not belong to this station")
+            station = await db.get(Station, device.station_id)
+            if station is None:
+                raise ValueError("Station no longer exists")
+
+            previous_origin = {
+                "lat": float(record.lat),
+                "lon": float(record.lon),
+                "h": float(record.h),
+                "locked_at": int(record.locked_at),
+                "tracking_offset": record.tracking_offset or [0.0, 0.0, 0.0],
+            }
+            history_result = await db.execute(select(GlobalConfig).where(GlobalConfig.key == history_key))
+            history_record = history_result.scalar_one_or_none()
+            history = (
+                [entry for entry in history_record.value if isinstance(entry, dict)]
+                if history_record and isinstance(history_record.value, list)
+                else []
+            )
+            history.append({
+                "action": "admin_relock",
+                "changed_at": locked_at,
+                "changed_by": actor,
+                "previous_origin": previous_origin,
+                "origin": {"lat": center_lat, "lon": center_lon, "h": center_h, "locked_at": locked_at},
+                "sample_count": len(candidates),
+                "duration_s": duration_s,
+                "spread_xy_m": spread_xy_m,
+                "spread_u_m": spread_u_m,
+            })
+            history = history[-100:]
+
+            record.lat = center_lat
+            record.lon = center_lon
+            record.h = center_h
+            record.locked_at = locked_at
+            record.spread_meters = spread_xy_m
+            record.num_points = len(candidates)
+            record.rotation_matrix = new_origin["R"].tolist()
+            record.ecef_origin = new_origin["ecef"].tolist()
+            record.tracking_offset = [0.0, 0.0, 0.0]
+
+            station_config = dict(station.config or {})
+            station_config["gnss_origin"] = {
+                "lat": center_lat, "lon": center_lon, "h": center_h,
+                "locked_at": locked_at, "spread_meters": spread_xy_m,
+            }
+            station.config = station_config
+            flag_modified(station, "config")
+            station.location = {
+                **(station.location or {}),
+                "lat": center_lat, "lon": center_lon, "h": center_h,
+                "source": "GNSS Origin",
+            }
+            flag_modified(station, "location")
+            station.updated_at = locked_at
+
+            if history_record:
+                history_record.value = history
+                history_record.updated_at = locked_at
+                history_record.updated_by = actor
+            else:
+                db.add(GlobalConfig(key=history_key, value=history, updated_at=locked_at, updated_by=actor))
+
+            checkpoint_result = await db.execute(select(GlobalConfig).where(GlobalConfig.key == self._runtime_state_key()))
+            checkpoint = checkpoint_result.scalar_one_or_none()
+            if checkpoint:
+                await db.delete(checkpoint)
+
+            await db.commit()
+            return new_origin, record.id, locked_at, previous_origin
+
     async def relock_origin(
         self,
         *,
@@ -264,7 +412,6 @@ class GNSSOriginMixin:
         async def broadcast_progress(phase, sample_count=0, duration_s=0.0, message=None):
             try:
                 from app.websocket import manager
-
                 await manager.broadcast({
                     "type": "gnss_origin_relock_progress",
                     "station_id": station_id,
@@ -283,177 +430,22 @@ class GNSSOriginMixin:
                 logger.debug("GNSS origin relock progress broadcast failed: %s", exc)
 
         try:
-            duration_s = 0.0
             pending_save = getattr(self, "_runtime_state_save_task", None)
             if pending_save is not None and pending_save is not asyncio.current_task():
                 await asyncio.shield(pending_save)
 
             deadline = asyncio.get_running_loop().time() + timeout_s
-            last_progress_second = -1
-            while True:
-                candidates = list(samples)
-                duration_s = (
-                    float(candidates[-1]["ts"] - candidates[0]["ts"])
-                    if len(candidates) >= 2 else 0.0
-                )
-                progress_second = int(min(duration_s, minimum_duration_s))
-                if progress_second != last_progress_second:
-                    last_progress_second = progress_second
-                    await broadcast_progress("collecting", len(candidates), duration_s)
-
-                if len(candidates) >= minimum_samples and duration_s >= minimum_duration_s:
-                    break
-                if asyncio.get_running_loop().time() >= deadline:
-                    raise ValueError(
-                        "Timed out collecting fresh RTK FIXED samples "
-                        f"({len(candidates)}/{minimum_samples} samples, "
-                        f"{duration_s:.1f}/{minimum_duration_s:.1f}s)"
-                    )
-                await asyncio.sleep(poll_interval_s)
-
-            positions = [sample["wgs"] for sample in candidates]
-            center_lat = float(np.median([point["lat"] for point in positions]))
-            center_lon = float(np.median([point["lon"] for point in positions]))
-            center_h = float(np.median([point["h"] for point in positions]))
-            spread_xy_m = max(
-                haversine_2d(center_lat, center_lon, point["lat"], point["lon"])
-                for point in positions
+            candidates, duration_s = await self._wait_relock_candidates(
+                samples, minimum_samples, minimum_duration_s, deadline, poll_interval_s, broadcast_progress
             )
-            spread_u_m = max(abs(point["h"] - center_h) for point in positions)
-            integrity_cfg = (
-                getattr(self, "_origin_relock_integrity_config", None)
-                or self._integrity_config({})
+            c_lat, c_lon, c_h, spread_xy, spread_u = self._verify_relock_spread(candidates)
+            new_origin, rec_id, locked_at, prev_origin = await self._execute_relock_db_update(
+                c_lat, c_lon, c_h, spread_xy, spread_u, candidates, duration_s, actor, station_id
             )
-            max_spread_xy_m = integrity_cfg["reacquire_max_spread_xy_m"]
-            max_spread_u_m = integrity_cfg["reacquire_max_spread_u_m"]
-            if spread_xy_m > max_spread_xy_m or spread_u_m > max_spread_u_m:
-                raise ValueError(
-                    "RTK FIXED samples are not stable enough "
-                    f"(2D spread {spread_xy_m * 1000:.1f}mm, "
-                    f"vertical spread {spread_u_m * 1000:.1f}mm)"
-                )
-
-            new_origin = {
-                "lat": center_lat,
-                "lon": center_lon,
-                "h": center_h,
-                "R": self._get_rotation_matrix(center_lat, center_lon),
-                "ecef": self._gngga_to_ecef(center_lat, center_lon, center_h),
-            }
-            locked_at = max(int(time.time()), int(self._origin_locked_at or 0) + 1)
-            history_key = f"gnss_origin_history:{self.device_id}"
-
-            from app.models.config import Device, GNSSOrigin, GlobalConfig, Station
-            from sqlalchemy import select
-            from sqlalchemy.orm.attributes import flag_modified
-
-            async with self.db_session_factory() as db:
-                record_result = await db.execute(
-                    select(GNSSOrigin)
-                    .where(GNSSOrigin.device_id == self.device_id)
-                    .with_for_update()
-                )
-                record = record_result.scalar_one_or_none()
-                if record is None:
-                    raise ValueError("No persisted GNSS origin exists for this device")
-
-                device = await db.get(Device, self.device_id)
-                if device is None or (station_id is not None and device.station_id != station_id):
-                    raise ValueError("GNSS device does not belong to this station")
-                station = await db.get(Station, device.station_id)
-                if station is None:
-                    raise ValueError("Station no longer exists")
-
-                previous_origin = {
-                    "lat": float(record.lat),
-                    "lon": float(record.lon),
-                    "h": float(record.h),
-                    "locked_at": int(record.locked_at),
-                    "tracking_offset": record.tracking_offset or [0.0, 0.0, 0.0],
-                }
-                history_result = await db.execute(
-                    select(GlobalConfig).where(GlobalConfig.key == history_key)
-                )
-                history_record = history_result.scalar_one_or_none()
-                history = (
-                    [entry for entry in history_record.value if isinstance(entry, dict)]
-                    if history_record and isinstance(history_record.value, list)
-                    else []
-                )
-                history.append({
-                    "action": "admin_relock",
-                    "changed_at": locked_at,
-                    "changed_by": actor,
-                    "previous_origin": previous_origin,
-                    "origin": {
-                        "lat": center_lat,
-                        "lon": center_lon,
-                        "h": center_h,
-                        "locked_at": locked_at,
-                    },
-                    "sample_count": len(candidates),
-                    "duration_s": duration_s,
-                    "spread_xy_m": spread_xy_m,
-                    "spread_u_m": spread_u_m,
-                })
-                history = history[-100:]
-
-                record.lat = center_lat
-                record.lon = center_lon
-                record.h = center_h
-                record.locked_at = locked_at
-                record.spread_meters = spread_xy_m
-                record.num_points = len(candidates)
-                record.rotation_matrix = new_origin["R"].tolist()
-                record.ecef_origin = new_origin["ecef"].tolist()
-                record.tracking_offset = [0.0, 0.0, 0.0]
-
-                station_config = dict(station.config or {})
-                station_config["gnss_origin"] = {
-                    "lat": center_lat,
-                    "lon": center_lon,
-                    "h": center_h,
-                    "locked_at": locked_at,
-                    "spread_meters": spread_xy_m,
-                }
-                station.config = station_config
-                flag_modified(station, "config")
-                station.location = {
-                    **(station.location or {}),
-                    "lat": center_lat,
-                    "lon": center_lon,
-                    "h": center_h,
-                    "source": "GNSS Origin",
-                }
-                flag_modified(station, "location")
-                station.updated_at = locked_at
-
-                if history_record:
-                    history_record.value = history
-                    history_record.updated_at = locked_at
-                    history_record.updated_by = actor
-                else:
-                    db.add(GlobalConfig(
-                        key=history_key,
-                        value=history,
-                        updated_at=locked_at,
-                        updated_by=actor,
-                    ))
-
-                checkpoint_result = await db.execute(
-                    select(GlobalConfig).where(
-                        GlobalConfig.key == self._runtime_state_key()
-                    )
-                )
-                checkpoint = checkpoint_result.scalar_one_or_none()
-                if checkpoint:
-                    await db.delete(checkpoint)
-                record_id = record.id
-                await db.commit()
 
             self.origin = new_origin
             self._origin_locked_at = locked_at
-            self._origin_record_id = record_id
+            self._origin_record_id = rec_id
             self.tracking_offset_enu = np.zeros(3, dtype=float)
             self.history.clear()
             self.reacquire_candidates.clear()
@@ -546,6 +538,74 @@ class GNSSOriginMixin:
             logger.exception(f"❌ Error persisting tracking offset for device {self.device_id}: {e}")
             return False
 
+    async def _wait_calibration_samples(
+        self, capture_buffer, started_after_ts, minimum_samples, minimum_duration_s, deadline, poll_interval_s, station_id
+    ):
+        last_progress_second = -1
+        while True:
+            captured_samples = list(capture_buffer)
+            used_capture_samples = bool(captured_samples)
+            samples = captured_samples or [
+                sample for sample in self.history
+                if float(sample["ts"]) > started_after_ts
+            ]
+            duration_s = (
+                float(samples[-1]["ts"] - samples[0]["ts"])
+                if len(samples) >= 2
+                else 0.0
+            )
+            progress_second = int(min(duration_s, minimum_duration_s))
+            if progress_second != last_progress_second:
+                last_progress_second = progress_second
+                progress = {
+                    "type": "gnss_offset_calibration_progress",
+                    "station_id": station_id,
+                    "device_id": self.device_id,
+                    "data": {
+                        "phase": "collecting",
+                        "sample_count": len(samples),
+                        "minimum_samples": minimum_samples,
+                        "duration_s": round(duration_s, 1),
+                        "minimum_duration_s": minimum_duration_s,
+                        "remaining_s": max(0.0, minimum_duration_s - duration_s),
+                    },
+                }
+                try:
+                    from app.websocket import manager
+                    await manager.broadcast(progress)
+                except Exception as exc:
+                    logger.debug("GNSS calibration progress broadcast failed: %s", exc)
+            if len(samples) >= minimum_samples and duration_s >= minimum_duration_s:
+                return samples, duration_s, used_capture_samples
+            if asyncio.get_running_loop().time() >= deadline:
+                raise ValueError(
+                    "Timed out collecting fresh RTK FIXED samples "
+                    f"({len(samples)}/{minimum_samples} samples, "
+                    f"{duration_s:.1f}/{minimum_duration_s:.1f}s)"
+                )
+            await asyncio.sleep(poll_interval_s)
+
+    def _verify_calibration_spread(self, samples, old_offset):
+        if not np.allclose(self.tracking_offset_enu, old_offset):
+            raise ValueError("GNSS tracking reference changed during calibration; retry")
+
+        positions = np.asarray([sample["pos_enu"] for sample in samples], dtype=float)
+        center = np.median(positions, axis=0)
+        residuals = positions - center
+        spread_2d_m = float(np.max(np.linalg.norm(residuals[:, :2], axis=1)))
+        spread_u_m = float(np.max(np.abs(residuals[:, 2])))
+        config = self._integrity_config({})
+        if (
+            spread_2d_m > float(config["reacquire_max_spread_xy_m"])
+            or spread_u_m > float(config["reacquire_max_spread_u_m"])
+        ):
+            raise ValueError(
+                "RTK FIXED samples are not stable enough "
+                f"(2D spread {spread_2d_m * 1000:.1f}mm, "
+                f"vertical spread {spread_u_m * 1000:.1f}mm)"
+            )
+        return center, spread_2d_m, spread_u_m
+
     async def recalibrate_tracking_offset(
         self,
         *,
@@ -555,12 +615,7 @@ class GNSSOriginMixin:
         timeout_s: float = 120.0,
         poll_interval_s: float = 0.25,
     ):
-        """Collect a fresh stable FIXED window and re-zero displacement.
-
-        During quarantine, samples are deliberately excluded from ``history``.
-        A manual calibration therefore uses a short-lived capture buffer filled
-        by ``_handle_processing`` while this method is waiting.
-        """
+        """Collect a fresh stable FIXED window and re-zero displacement."""
         if self.state != "ORIGIN_LOCKED" or self.origin is None:
             raise ValueError("GNSS origin is not locked")
         if getattr(self, "_origin_relock_in_progress", False):
@@ -581,85 +636,15 @@ class GNSSOriginMixin:
         capture_buffer.clear()
         deadline = asyncio.get_running_loop().time() + timeout_s
         self._offset_calibration_in_progress = True
-        last_progress_second = -1
-        used_capture_samples = False
         try:
-            while True:
-                captured_samples = list(capture_buffer)
-                used_capture_samples = bool(captured_samples)
-                samples = captured_samples or [
-                    sample for sample in self.history
-                    if float(sample["ts"]) > started_after_ts
-                ]
-                duration_s = (
-                    float(samples[-1]["ts"] - samples[0]["ts"])
-                    if len(samples) >= 2
-                    else 0.0
-                )
-                progress_second = int(min(duration_s, minimum_duration_s))
-                if progress_second != last_progress_second:
-                    last_progress_second = progress_second
-                    progress = {
-                        "type": "gnss_offset_calibration_progress",
-                        "station_id": station_id,
-                        "device_id": self.device_id,
-                        "data": {
-                            "phase": "collecting",
-                            "sample_count": len(samples),
-                            "minimum_samples": minimum_samples,
-                            "duration_s": round(duration_s, 1),
-                            "minimum_duration_s": minimum_duration_s,
-                            "remaining_s": max(0.0, minimum_duration_s - duration_s),
-                        },
-                    }
-                    logger.info(
-                        "[GNSS CALIBRATION] device=%s station=%s samples=%s/%s duration=%.1fs/%.1fs",
-                        self.device_id,
-                        station_id,
-                        len(samples),
-                        minimum_samples,
-                        duration_s,
-                        minimum_duration_s,
-                    )
-                    try:
-                        from app.websocket import manager
-                        await manager.broadcast(progress)
-                    except Exception as exc:
-                        logger.debug("GNSS calibration progress broadcast failed: %s", exc)
-                if (
-                    len(samples) >= minimum_samples
-                    and duration_s >= minimum_duration_s
-                ):
-                    break
-                if asyncio.get_running_loop().time() >= deadline:
-                    raise ValueError(
-                        "Timed out collecting fresh RTK FIXED samples "
-                        f"({len(samples)}/{minimum_samples} samples, "
-                        f"{duration_s:.1f}/{minimum_duration_s:.1f}s)"
-                    )
-                await asyncio.sleep(poll_interval_s)
+            samples, duration_s, used_capture_samples = await self._wait_calibration_samples(
+                capture_buffer, started_after_ts, minimum_samples, minimum_duration_s, deadline, poll_interval_s, station_id
+            )
         finally:
             self._offset_calibration_in_progress = False
             capture_buffer.clear()
 
-        if not np.allclose(self.tracking_offset_enu, old_offset):
-            raise ValueError("GNSS tracking reference changed during calibration; retry")
-
-        positions = np.asarray([sample["pos_enu"] for sample in samples], dtype=float)
-        center = np.median(positions, axis=0)
-        residuals = positions - center
-        spread_2d_m = float(np.max(np.linalg.norm(residuals[:, :2], axis=1)))
-        spread_u_m = float(np.max(np.abs(residuals[:, 2])))
-        config = self._integrity_config({})
-        if (
-            spread_2d_m > float(config["reacquire_max_spread_xy_m"])
-            or spread_u_m > float(config["reacquire_max_spread_u_m"])
-        ):
-            raise ValueError(
-                "RTK FIXED samples are not stable enough "
-                f"(2D spread {spread_2d_m * 1000:.1f}mm, "
-                f"vertical spread {spread_u_m * 1000:.1f}mm)"
-            )
+        center, spread_2d_m, spread_u_m = self._verify_calibration_spread(samples, old_offset)
 
         proposed_offset = self._validated_tracking_offset(old_offset + center)
         if not await self._async_save_tracking_offset(proposed_offset):
@@ -667,10 +652,6 @@ class GNSSOriginMixin:
 
         self.tracking_offset_enu = proposed_offset
         if used_capture_samples:
-            # Quarantined samples never entered trusted history. Replace the
-            # stale pre-shift anchor with their re-zeroed window so the first
-            # post-calibration FIXED sample is accepted instead of creating a
-            # synthetic jump back from ``-center``.
             self.history.clear()
             self.history.extend({
                 "ts": sample["ts"],
@@ -680,10 +661,7 @@ class GNSSOriginMixin:
             for sample in self.history:
                 sample["pos_enu"] = np.asarray(sample["pos_enu"], dtype=float) - center
 
-        calibrated_positions = np.asarray(
-            [sample["pos_enu"] for sample in samples],
-            dtype=float,
-        )
+        calibrated_positions = np.asarray([sample["pos_enu"] for sample in samples], dtype=float)
         try:
             from app.websocket import manager
             completion_message = {
@@ -697,11 +675,10 @@ class GNSSOriginMixin:
                     "remaining_s": 0.0,
                 },
             }
-            # Do not hold the HTTP calibration response on a stale browser socket.
             asyncio.create_task(manager.broadcast(completion_message))
         except Exception as exc:
             logger.debug("GNSS calibration completion broadcast failed: %s", exc)
-        # Keep the newest measured residual; never synthesize a zero payload.
+
         self.disp_enu_state = calibrated_positions[-1].copy()
         self.disp_state_ready = True
         self._velocity_confirmation_history = deque(maxlen=120)
@@ -727,8 +704,6 @@ class GNSSOriginMixin:
             "shift_u_m": float(center[2]),
             "old_tracking_offset": old_offset.tolist(),
             "new_tracking_offset": proposed_offset.tolist(),
-            "new_tracking_offset_2d_mm": float(
-                np.linalg.norm(proposed_offset[:2]) * 1000.0
-            ),
+            "new_tracking_offset_2d_mm": float(np.linalg.norm(proposed_offset[:2]) * 1000.0),
             "origin_unchanged": True,
         }
