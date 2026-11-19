@@ -15,8 +15,8 @@ router = APIRouter(prefix="/api/field", tags=["Field Unit API"])
 @router.post("/stations/{station_id}/stop-siren", responses={500: {"description": "Internal Server Error"}})
 async def stop_siren_command(
     station_id: int,
+    db: Annotated[AsyncSession, Depends(get_config_db)],
     target: Optional[str] = 'all',
-    db: Annotated[AsyncSession, Depends(get_config_db)]
 ):
     """
     Publish an MQTT command to stop any continuous siren (e.g., from IMU tilt)
@@ -87,8 +87,8 @@ async def stop_siren_command(
 @router.post("/stations/{station_id}/enable-siren", responses={500: {"description": "Internal Server Error"}})
 async def enable_siren_command(
     station_id: int,
+    db: Annotated[AsyncSession, Depends(get_config_db)],
     target: Optional[str] = 'all',
-    db: Annotated[AsyncSession, Depends(get_config_db)]
 ):
     """
     Re-enable the siren at the specified station (undo a previous stop-siren).

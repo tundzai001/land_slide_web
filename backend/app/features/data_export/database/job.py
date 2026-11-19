@@ -56,16 +56,14 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
             def add_csv(filename_in_zip: str, headers: List[str], rows: List[List[Any]]):
                 if not rows:
                     return 0
-                with archive.open(filename_in_zip, "w") as bin_f:
-                    with io.TextIOWrapper(bin_f, encoding="utf-8-sig", newline='') as text_f:
-                        writer = csv.writer(text_f)
-                        writer.writerow(headers)
-                        for r in rows:
-                            writer.writerow(r)
+                with archive.open(filename_in_zip, "w") as bin_f, io.TextIOWrapper(bin_f, encoding="utf-8-sig", newline='') as text_f:
+                    writer = csv.writer(text_f)
+                    writer.writerow(headers)
+                    for r in rows:
+                        writer.writerow(r)
                 return len(rows)
 
-            async with ConfigSessionLocal() as config_db:
-                async with DataSessionLocal() as data_db:
+            async with ConfigSessionLocal() as config_db, DataSessionLocal() as data_db:
                     exported_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     total_records = 0
                     records_processed = 0

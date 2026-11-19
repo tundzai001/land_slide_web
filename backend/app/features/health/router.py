@@ -21,9 +21,8 @@ router = APIRouter(tags=["Health"])
 async def _probe_engine(engine, timeout: float = 2.0) -> dict[str, Any]:
     started = time.perf_counter()
     try:
-        async with asyncio.timeout(timeout):
-            async with engine.connect() as connection:
-                await connection.execute(text("SELECT 1"))
+        async with asyncio.timeout(timeout), engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
         return {"ok": True, "duration_ms": round((time.perf_counter() - started) * 1000, 1)}
     except Exception as exc:
         return {

@@ -187,17 +187,15 @@ async def lifespan(_app: FastAPI):
 
         try:
             from .shared.project_location import backfill_project_map_positions
-            async with asyncio.timeout(30):
-                async with ConfigSessionLocal() as db_config:
-                    await backfill_project_map_positions(db_config)
+            async with asyncio.timeout(30), ConfigSessionLocal() as db_config:
+                await backfill_project_map_positions(db_config)
 
             interrupted = await simulations_router.recover_interrupted_runs()
             if interrupted:
                 logger.warning("Marked %s unfinished simulation run(s) as interrupted", interrupted)
 
             # 4. Tạo Admin mặc định
-            async with asyncio.timeout(10):
-                async with AuthSessionLocal() as db_auth:
+            async with asyncio.timeout(10), AuthSessionLocal() as db_auth:
                     result = await db_auth.execute(
                         select(model_auth.User).where(model_auth.User.username == "admin")
                     )
@@ -225,8 +223,7 @@ async def lifespan(_app: FastAPI):
             # System Access was retired: purge browser-managed credentials and
             # global runtime overrides left by older deployments. Server settings
             # are now sourced only from the deployment environment.
-            async with asyncio.timeout(10):
-                async with ConfigSessionLocal() as db_config:
+            async with asyncio.timeout(10), ConfigSessionLocal() as db_config:
                     legacy_keys = {
                         "system_password",
                         "main_config",

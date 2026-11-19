@@ -51,7 +51,6 @@ def add_excel_files(path):
     with zipfile.ZipFile(path, 'r') as source:
         names = [name for name in source.namelist() if name.lower().endswith('.csv')]
     for name in names:
-        with zipfile.ZipFile(path, 'r') as source:
-            with source.open(name) as binary, io.TextIOWrapper(binary, encoding='utf-8-sig', newline='') as handle:
-                workbook = _convert_csv_to_workbook(handle)
+        with zipfile.ZipFile(path, 'r') as source, source.open(name) as binary, io.TextIOWrapper(binary, encoding='utf-8-sig', newline='') as handle:
+            workbook = _convert_csv_to_workbook(handle)
         _write_workbook_to_archive(workbook, path, name)
