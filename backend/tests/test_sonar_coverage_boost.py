@@ -2790,6 +2790,98 @@ NODATA_value -9999
             self.assertEqual(case.status, "resolved")
             self.assertEqual(case.signal_state, "RETURNED")
 
+    def test_gnss_receiver_stability_timeout_coverage(self):
+        from processors.gnss_adjustment.receiver import RoundRobinReceiverMixin
+        r = RoundRobinReceiverMixin()
+        r.CROSS_BASE_STABILITY_TIMEOUT_SECONDS = 10
+        # now < deadline
+        r._check_stability_timeout(10.0, 20.0, False, None, "ROV1")
+
+        # now >= deadline, solver_window_open=False
+        cb = MagicMock()
+        with self.assertRaises(RuntimeError):
+            r._check_stability_timeout(25.0, 20.0, False, cb, "ROV1")
+        cb.assert_called_once_with("stability")
+
+        # now >= deadline, solver_window_open=True
+        cb2 = MagicMock()
+        with self.assertRaises(RuntimeError):
+            r._check_stability_timeout(25.0, 20.0, True, cb2, "ROV2")
+        cb2.assert_called_once_with("duration")
+
+    def test_gnss_cycle_quarantine_and_reconnect_coverage(self):
+        from processors.gnss_adjustment.cycle import RoundRobinCycleMixin
+        c = RoundRobinCycleMixin()
+        c._clear_cluster_fragment_buffers = MagicMock()
+        rec1 = MagicMock(base_name="ROV1", solver_eligible=True, quality_flags=("A",))
+        rec2 = MagicMock(base_name="OTHER", solver_eligible=True, quality_flags=())
+        cluster = {"observations": [rec1, rec2]}
+        c._quarantine_stable_window(cluster, "ROV1", 0, "FLAG_X", "diag", 1)
+        self.assertFalse(rec1.solver_eligible)
+        self.assertIn("FLAG_X", rec1.quality_flags)
+        self.assertEqual(rec1.source_diagnostic, "diag")
+        c._clear_cluster_fragment_buffers.assert_called_once_with(1, cluster)
+
+        async def run_reconnect_tests():
+            c.INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS = 0.05
+            c.CROSS_BASE_STATUS_POLL_SECONDS = 0.01
+            c._find_client_info = AsyncMock(return_value={"client": 123})
+            res = await c._wait_rover_client_reconnect("ROV1", 1)
+            self.assertEqual(res, {"client": 123})
+
+            c._find_client_info = AsyncMock(return_value=None)
+            with self.assertRaises(RuntimeError):
+                await c._wait_rover_client_reconnect("ROV1", 1)
+
+        asyncio.run(run_reconnect_tests())
+
+    def test_gnss_cycle_single_rotation_attempt_callbacks_coverage(self):
+        from processors.gnss_adjustment.cycle import RoundRobinCycleMixin
+        c = RoundRobinCycleMixin()
+        c._clear_cluster_fragment_buffers = MagicMock()
+        c._reset_online_baseline_states = MagicMock()
+        c._filter_eligible_records_from = MagicMock(return_value=["elig"])
+        c._build_collection_status_dict = MagicMock(return_value={"status": "ok"})
+        c._set_cors_fixed_base_enabled = AsyncMock()
+        c._wait_rover_client_reconnect = AsyncMock()
+
+        async def mock_set_rover(*args, **kwargs):
+            kwargs["on_collection_started"]()
+            kwargs["on_stable_collection_started"]()
+            kwargs["on_stable_collection_invalid"]("drift")
+            kwargs["on_stable_collection_invalid"]("duration")
+            kwargs["on_stable_collection_invalid"]("source")
+            kwargs["on_stable_collection_invalid"]("other")
+            kwargs["on_collection_stopped"]()
+            kwargs["collection_status_callback"]()
+            if kwargs.get("before_rover_restore"):
+                await kwargs["before_rover_restore"]()
+            if kwargs.get("before_route_start"):
+                await kwargs["before_route_start"]()
+
+        c._set_rover_as_temporary_base = AsyncMock(side_effect=mock_set_rover)
+
+        cluster_ctx = {
+            "configured_mountpoint": "MP1",
+            "configured_base_host": "host1",
+            "configured_base_serial": "S1",
+            "configured_base_server_id": 1,
+            "route_host": "rhost",
+            "route_port": 2101,
+            "temporary_route_mountpoint": "TMP1",
+            "route_password": "pass",
+            "frozen_base_coordinates": {},
+            "uses_common_base": False,
+        }
+        session = {"active_bases": {}}
+        cluster = {"observations": []}
+
+        async def run_test():
+            res = await c._execute_single_rotation_attempt(1, 0, cluster, "ROV1", {"R2"}, cluster_ctx, session)
+            self.assertTrue(res)
+
+        asyncio.run(run_test())
+
 
 
 
