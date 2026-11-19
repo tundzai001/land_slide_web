@@ -84,7 +84,7 @@ def parse_agrica(data):
     
     for i, part in enumerate(parts):
         doc_id = i + 2 # Do ID 1 là phần header
-        field_name = agrica_fields[i] if i < len(agrica_fields) else f"Trường chưa xác định"
+        field_name = agrica_fields[i] if i < len(agrica_fields) else "Trường chưa xác định"
         
         # Chuyển đổi định dạng các trường đặc biệt
         if i == 8:

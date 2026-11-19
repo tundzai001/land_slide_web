@@ -92,9 +92,11 @@ async def main() -> int:
     errors: list[str] = []
 
     async def progress_callback(_project_id: int, message: str) -> None:
+        await asyncio.sleep(0)
         print(f"[{ts()}] PHASE: {message}", flush=True)
 
     async def result_callback(_project_id: int, result: dict) -> None:
+        await asyncio.sleep(0)
         results.append(result)
         quality = result.get("quality") or {}
         print(
@@ -107,6 +109,7 @@ async def main() -> int:
         )
 
     async def error_callback(_project_id: int, message: str) -> None:
+        await asyncio.sleep(0)
         errors.append(message)
         print(f"[{ts()}] ERROR: {message}", flush=True)
 

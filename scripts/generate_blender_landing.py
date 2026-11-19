@@ -52,11 +52,17 @@ def make_material(
 
     # Set Blender Solid Viewport display colors so opening .blend in Blender is immediately vibrant!
     em_boost = min(0.38, emission_strength * 0.18) if emission_color else 0.0
+    if alpha < 1.0:
+        final_alpha = alpha
+    elif len(base_color) > 3:
+        final_alpha = base_color[3]
+    else:
+        final_alpha = 1.0
     mat.diffuse_color = (
         min(1.0, base_color[0] + (emission_color[0] * em_boost if emission_color else 0.0)),
         min(1.0, base_color[1] + (emission_color[1] * em_boost if emission_color else 0.0)),
         min(1.0, base_color[2] + (emission_color[2] * em_boost if emission_color else 0.0)),
-        alpha if alpha < 1.0 else (base_color[3] if len(base_color) > 3 else 1.0),
+        final_alpha,
     )
     mat.metallic = metallic
     mat.roughness = roughness
@@ -64,19 +70,22 @@ def make_material(
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
     bsdf = nodes.get(PRINCIPLED_BSDF_NODE)
+    base_color_key = "Base Color"
+    emission_color_key = "Emission Color"
+    emission_strength_key = "Emission Strength"
     if bsdf:
-        bsdf.inputs["Base Color"].default_value = base_color
+        bsdf.inputs[base_color_key].default_value = base_color
         bsdf.inputs["Metallic"].default_value = metallic
         bsdf.inputs["Roughness"].default_value = roughness
         if "Alpha" in bsdf.inputs:
             bsdf.inputs["Alpha"].default_value = alpha
-        if emission_color and "Emission Color" in bsdf.inputs:
-            bsdf.inputs["Emission Color"].default_value = (*emission_color[:3], 1.0)
-            bsdf.inputs["Emission Strength"].default_value = emission_strength
+        if emission_color and emission_color_key in bsdf.inputs:
+            bsdf.inputs[emission_color_key].default_value = (*emission_color[:3], 1.0)
+            bsdf.inputs[emission_strength_key].default_value = emission_strength
         if use_vertex_color:
             vc_node = nodes.new(type="ShaderNodeVertexColor")
             vc_node.layer_name = "Col"
-            links.new(vc_node.outputs["Color"], bsdf.inputs["Base Color"])
+            links.new(vc_node.outputs["Color"], bsdf.inputs[base_color_key])
     if alpha < 1.0:
         if hasattr(mat, "surface_render_method"):
             mat.surface_render_method = "BLENDED"
@@ -663,7 +672,7 @@ def cleanup_hardware_templates(templates):
     """Remove temporary hardware template objects after cloning."""
     if not templates:
         return
-    for tmpl in list(templates.values()):
+    for tmpl in tuple(templates.values()):
         if tmpl and tmpl.name in bpy.data.objects:
             bpy.data.objects.remove(tmpl, do_unlink=True)
 
@@ -1238,7 +1247,7 @@ def import_single_glb_mesh(filename: str, new_name: str, scale_xyz=(1.0, 1.0, 1.
         and not any(ex in n for ex in exclude_names)
     ]
     if not meshes:
-        for n in list(imp_names):
+        for n in tuple(imp_names):
             if n in bpy.data.objects:
                 bpy.data.objects.remove(bpy.data.objects[n], do_unlink=True)
         return None
@@ -1287,7 +1296,7 @@ def import_single_glb_mesh(filename: str, new_name: str, scale_xyz=(1.0, 1.0, 1.
                     slot.material = replacement_mat
                     break
 
-    for n in list(imp_names):
+    for n in tuple(imp_names):
         if n != joined_orig_name and n in bpy.data.objects and bpy.data.objects[n] != joined:
             bpy.data.objects.remove(bpy.data.objects[n], do_unlink=True)
     return joined
@@ -1451,7 +1460,7 @@ def create_uv_quad_panel(bm, center, width, height, yaw_rad, u0, u1, v0=0.0, v1=
         loop[uv_layer].uv = uv
 
 
-def build_operations_hub(root, mats, templates=None):
+def build_operations_hub(root, mats, _templates=None):
     """Build a Cohesive Modern Glass-and-Steel AI Data Center & Command Building with Motorized Sliding Glass Doors, Server Racks, Rooftop Helipad, and a Curved Panoramic Grafana + WebGIS Video Wall."""
     ox, oy = 5.15, -0.55
     oz = terrain_height(ox, oy)
@@ -1975,7 +1984,7 @@ def import_helicopters(root, mats):
         tail_r = next((m for k, m in meshes.items() if "backrotor" in k), None)
 
         if not body_m or not main_r or not tail_r:
-            for n in list(imp_names):
+            for n in tuple(imp_names):
                 if n in bpy.data.objects:
                     bpy.data.objects.remove(bpy.data.objects[n], do_unlink=True)
             return None
@@ -2085,7 +2094,7 @@ def import_helicopters(root, mats):
 
         # Cleanup empty nodes from glTF import
         keep = {body_m, main_r, tail_r}
-        for n in list(imp_names):
+        for n in tuple(imp_names):
             obj = bpy.data.objects.get(n)
             if obj and obj not in keep:
                 bpy.data.objects.remove(obj, do_unlink=True)
@@ -2107,7 +2116,7 @@ def import_helicopters(root, mats):
     )
 
 
-def import_web_vehicles(root, mats):
+def import_web_vehicles(root, _mats):
     """Import multi-part 3D vehicles from frontend/assets/blender/models/cars_big_set.glb and place them along the mountain highway."""
     cars_glb = BLENDER_DIR / "models" / "cars_big_set.glb"
     if not cars_glb.exists():
@@ -2226,7 +2235,7 @@ def import_web_vehicles(root, mats):
             ops_veh.rotation_euler = (0.0, 0.0, pyaw)
             link_obj(ops_veh, fleet_grp)
 
-    for name in list(imported_names):
+    for name in tuple(imported_names):
         obj = bpy.data.objects.get(name)
         if obj is not None:
             bpy.data.objects.remove(obj, do_unlink=True)
@@ -2333,7 +2342,7 @@ def import_nasa_satellites(sat_grp, mats):
         sat_obj.scale = (sc, sc, sc)
         link_obj(sat_obj, sat_grp)
 
-    for tmpl in list(templates.values()):
+    for tmpl in tuple(templates.values()):
         if tmpl.name in bpy.data.objects:
             bpy.data.objects.remove(tmpl, do_unlink=True)
 
@@ -2705,7 +2714,7 @@ def purge_unused_datablocks():
             for m in obj.data.materials:
                 if m:
                     used_mats.add(m)
-    for m in list(bpy.data.materials):
+    for m in tuple(bpy.data.materials):
         if m not in used_mats:
             bpy.data.materials.remove(m, do_unlink=True)
 
@@ -2715,7 +2724,7 @@ def purge_unused_datablocks():
             for n in m.node_tree.nodes:
                 if n.type == "TEX_IMAGE" and n.image:
                     used_imgs.add(n.image)
-    for img in list(bpy.data.images):
+    for img in tuple(bpy.data.images):
         if img not in used_imgs:
             bpy.data.images.remove(img, do_unlink=True)
 

@@ -50,8 +50,8 @@ except ImportError:
         import tkintermapview
         HAS_MAPVIEW = True
         logging.info("tkintermapview loaded successfully.")
-    except Exception as e:
-        logging.error(f"Failed to install tkintermapview: {e}")
+    except Exception:
+        logging.exception("Failed to install tkintermapview")
         HAS_MAPVIEW = False
 
 IPC_HOST = os.getenv("IPC_HOST", "127.0.0.1")
@@ -91,8 +91,8 @@ class SIEMAdminGUI(ttk.Window):
                 if callback:
                     self.after(0, callback, result)
                     logging.debug("Callback scheduled.")
-            except Exception as e:
-                logging.error(f"Async Error: {e}")
+            except Exception:
+                logging.exception("Async Error")
                 if callback:
                     self.after(0, callback, None)
                     logging.debug("Callback scheduled without result.")
@@ -122,7 +122,7 @@ class SIEMAdminGUI(ttk.Window):
             logging.error("Connection refused when trying to send IPC command.")
             return {"status": "error", "message": "Connection refused. Is security_core running?"}
         except Exception as e:
-            logging.error(f"IPC Error: {e}")
+            logging.exception("IPC Error")
             return {"status": "error", "message": f"IPC Error: {e}"}
 
     def _build_ui(self):

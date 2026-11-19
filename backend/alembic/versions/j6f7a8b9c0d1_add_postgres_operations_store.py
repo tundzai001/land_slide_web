@@ -7,9 +7,9 @@ import sqlalchemy as sa
 
 
 revision: str = 'j6f7a8b9c0d1'
-down_revision: Union[str, Sequence[str], None] = 'i5e6f7a8b9c0'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = 'i5e6f7a8b9c0'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def _create_log_table(name):

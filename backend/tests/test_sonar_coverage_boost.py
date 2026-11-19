@@ -2701,6 +2701,48 @@ NODATA_value -9999
             self.assertEqual(res["stations"]["stale"], 1)
             self.assertEqual(res["stations"]["offline"], 0)
 
+    def test_landslide_rainfall_and_water_level_alert_analysis(self):
+        from processors.landslide.alerts import SensorAlertAnalysisMixin
+        from collections import defaultdict
+
+        analyzer = SensorAlertAnalysisMixin()
+        analyzer.alert_counters = defaultdict(lambda: defaultdict(dict))
+        analyzer._get_cfg = lambda cfg, sec, key, def_val: cfg.get(sec, {}).get(key, def_val)
+
+        config = {
+            'RainAlerting': {
+                'rain_intensity_critical_threshold': 50.0,
+                'rain_intensity_warning_threshold': 20.0,
+                'rain_intensity_watch_threshold': 5.0,
+                'rain_critical_confirm_steps': 1,
+            },
+            'Water': {
+                'warning_threshold': 5.0,
+                'critical_threshold': 10.0,
+                'water_critical_confirm_steps': 1,
+            }
+        }
+
+        # 1. Rainfall empty -> None
+        self.assertIsNone(analyzer.analyze_rainfall(1, [], [], config))
+
+        # 2. Rainfall critical alert confirmed
+        recent_rain = [{'data': {'intensity_mm_h': 60.0}}]
+        res_rain = analyzer.analyze_rainfall(1, recent_rain, [], config)
+        self.assertIsNotNone(res_rain)
+        self.assertEqual(res_rain['level'], 'CRITICAL')
+        self.assertEqual(res_rain['audio_code'], 'rain_critical')
+
+        # 3. Water level empty -> None
+        self.assertIsNone(analyzer.analyze_water_level(1, [], config))
+
+        # 4. Water level critical alert confirmed
+        recent_water = [{'data': {'water_level': 12.0}}]
+        res_water = analyzer.analyze_water_level(1, recent_water, config)
+        self.assertIsNotNone(res_water)
+        self.assertEqual(res_water['level'], 'CRITICAL')
+        self.assertEqual(res_water['audio_code'], 'water_critical')
+
 
 
 

@@ -391,7 +391,7 @@ class MQTTAudioClient:
         if rc == 0:
             logger.info(f"✅ MQTT Connected (code: {rc})")
             logger.info(f"   📍 Station ID: {self.station_id}")
-            logger.info(f"   📢 Topics:")
+            logger.info("   📢 Topics:")
             logger.info(f"      - {self.topic_alert}")
             logger.info(f"      - {self.topic_command}")
             
@@ -825,7 +825,7 @@ def main():
     logger.info(f"🎵 Audio Dir: {AUDIO_DIR}")
     logger.info("")
     logger.info("🔴 PRIMARY:   MQTT @ {0}:{1}".format(MQTT_BROKER, MQTT_PORT))
-    logger.info(f"   Topics:")
+    logger.info("   Topics:")
     logger.info(f"      - landslide/{MY_STATION_ID}/alert")
     logger.info(f"      - landslide/{MY_STATION_ID}/command")
     logger.info(f"🟡 FALLBACK:  WebSocket @ {WEBSOCKET_BACKEND}")

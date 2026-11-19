@@ -10,9 +10,9 @@ from alembic import op
 
 
 revision: str = "b4a6f5d1c2e0"
-down_revision: Union[str, Sequence[str], None] = "88c875be05eb"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "88c875be05eb"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

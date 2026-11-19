@@ -10,6 +10,10 @@ def _init_alert_counter(counter_info: dict) -> None:
         counter_info['latched_level'] = None
     if 'safe_count' not in counter_info:
         counter_info['safe_count'] = 0
+    if 'last_level' not in counter_info:
+        counter_info['last_level'] = None
+    if 'count' not in counter_info:
+        counter_info['count'] = 0
 
 
 def _step_alert_counter(counter_info: dict, current_level: str, required_steps: int) -> bool:

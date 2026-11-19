@@ -71,9 +71,11 @@ async def main() -> int:
     errors: list[str] = []
 
     async def progress_callback(_project_id: int, message: str) -> None:
+        await asyncio.sleep(0)
         print(f"[{ts()}] PHASE: {message}", flush=True)
 
     async def result_callback(_project_id: int, result: dict) -> None:
+        await asyncio.sleep(0)
         results.append(result)
         quality = result.get("quality") or {}
         print(
@@ -86,6 +88,7 @@ async def main() -> int:
         )
 
     async def error_callback(_project_id: int, message: str) -> None:
+        await asyncio.sleep(0)
         errors.append(message)
         print(f"[{ts()}] ERROR: {message}", flush=True)
 
@@ -103,9 +106,9 @@ async def main() -> int:
         await ntrip_manager.start_pusher(station, host, port, mountpoint, password)
         return True
 
-    async def route_wait(station: str, timeout: float = 25.0) -> None:
+    async def route_wait(station: str, timeout_sec: float = 25.0) -> None:
         try:
-            await ntrip_manager.wait_for_rtcm(station, timeout=timeout)
+            await ntrip_manager.wait_for_rtcm(station, timeout=timeout_sec)
         except Exception:
             diagnostic = ntrip_manager.get_diagnostics(station)
             print(f"[{ts()}] ROUTE DIAGNOSTIC {station}: {diagnostic}", flush=True)

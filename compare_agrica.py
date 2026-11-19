@@ -14,7 +14,7 @@ DEVICES = {
     os.getenv("DEVICE_TOPIC_4", "device/DAP1_4_DEMO/upload"): "Dap1_4",
 }
 
-buffers = {topic: "" for topic in DEVICES}
+buffers = dict.fromkeys(DEVICES, "")
 
 def parse_and_compare(device_name, sentence, is_truncated=False):
     # Analyze the sentence length and structure

@@ -31,6 +31,7 @@ async def get(
         return {"type": "http.disconnect"}
 
     async def send(message):
+        await asyncio.sleep(0)
         messages.append(message)
         if message["type"] == "http.response.body" and not message.get("more_body", False):
             response_complete.set()
@@ -63,6 +64,9 @@ async def get(
     return start["status"], headers, body
 
 
+CONTRACT_QUERY = "v=contract"
+
+
 async def verify() -> None:
     for route in ("/", "/map", "/login", "/management"):
         status, headers, body = await get(route)
@@ -70,20 +74,20 @@ async def verify() -> None:
         assert b"/assets/" in body, route
         assert "no-cache" in headers.get("cache-control", ""), (route, headers)
 
-    status, headers, body = await get("/assets/app-runtime.min.js", "v=contract")
+    status, headers, body = await get("/assets/app-runtime.min.js", CONTRACT_QUERY)
     assert status == 200 and body, status
     assert "immutable" in headers.get("cache-control", ""), headers
     assert "javascript" in headers.get("content-type", ""), headers
 
     status, headers, _ = await get(
         "/assets/map-app.min.js",
-        "v=contract",
+        CONTRACT_QUERY,
         ((b"accept-encoding", b"gzip"),),
     )
     assert status == 200, status
     assert headers.get("content-encoding") == "gzip", headers
 
-    status, headers, body = await get("/static/sounds/siren.mp3", "v=contract")
+    status, headers, body = await get("/static/sounds/siren.mp3", CONTRACT_QUERY)
     assert status == 200 and body, status
     assert headers.get("x-content-type-options") == "nosniff", headers
 
