@@ -101,6 +101,13 @@ jobs:
         with:
           name: frontend-coverage
           path: coverage-js
+      - name: Ensure SonarCloud project visibility is public
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          curl -s -u "$SONAR_TOKEN:" -X POST "https://sonarcloud.io/api/projects/update_visibility" \
+            -d "project=tundzai001_land_slide_web" \
+            -d "visibility=public" || true
       - uses: SonarSource/sonarqube-scan-action@c7ee0f9df90b7aa20e8dcf9695dcfe2e7da5b4f2 # v7
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
