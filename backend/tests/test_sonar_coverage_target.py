@@ -1056,6 +1056,135 @@ class TestStationAnalysisAndRuntimeCoverage:
         elems = _build_sensor_cache_elements([], colors, 1, table_cls, table_style_cls, paragraph_cls, MagicMock(), MagicMock())
         assert len(elems) == 2
 
+    @pytest.mark.anyio
+    async def test_gnss_origin_save_and_spread(self):
+        from processors.gnss.origin import GNSSOriginMixin
+        mixin = GNSSOriginMixin()
+        mixin.device_id = 10
+        mixin.origin = {"lat": 21.0, "lon": 105.0, "h": 50.0, "R": MagicMock(tolist=lambda: [[1,0,0],[0,1,0],[0,0,1]]), "ecef": MagicMock(tolist=lambda: [1,2,3])}
+        mixin.tracking_offset_enu = MagicMock(tolist=lambda: [0,0,0])
+        mixin.origin_candidates = [{"ts": 1700000000, "wgs": {"lat": 21.0, "lon": 105.0, "h": 50.0}}]
+        mixin._preserve_existing_origin = MagicMock()
+
+        # Existing origin
+        mock_db = AsyncMock()
+        mock_res = MagicMock()
+        mock_res.scalar_one_or_none.return_value = MagicMock(id=1, lat=21.0, lon=105.0, h=50.0)
+        mock_db.execute.return_value = mock_res
+        mixin.db_session_factory = MagicMock(return_value=mock_db)
+        mock_db.__aenter__.return_value = mock_db
+
+        await mixin._save_origin_to_db()
+        mixin._preserve_existing_origin.assert_called()
+
+        # New origin
+        mock_res.scalar_one_or_none.return_value = None
+        mock_dev_res = MagicMock()
+        mock_dev_res.scalar_one_or_none.return_value = 100
+        mock_st_res = MagicMock()
+        mock_st_res.scalar_one_or_none.return_value = MagicMock(config={})
+        mock_db.execute.side_effect = [mock_res, mock_dev_res, mock_st_res]
+        mock_db.add = MagicMock()
+        await mixin._save_origin_to_db()
+        assert mock_db.commit.called
+
+        # Spread verification
+        candidates = [
+            {"ts": 1700000000 + i, "wgs": {"lat": 21.0 + 1e-6*i, "lon": 105.0 + 1e-6*i, "h": 50.0 + 1e-4*i}}
+            for i in range(5)
+        ]
+        mixin._origin_relock_integrity_config = {"reacquire_max_spread_xy_m": 0.5, "reacquire_max_spread_u_m": 0.5}
+        center_lat, center_lon, center_h, spread_xy, spread_u = mixin._verify_relock_spread(candidates)
+        assert center_lat > 20.0
+        assert spread_xy >= 0.0
+
+    @pytest.mark.anyio
+    async def test_gnss_pipeline_broadcasts_and_transition(self):
+        from app.mqtt.bridge.sensor_pipeline.gnss import GnssPayloadMixin
+        pipeline = GnssPayloadMixin()
+        pipeline.round_robin_manager = MagicMock()
+        pipeline.round_robin_manager.SEED_COLLECTION_MAX_STEPS = 50
+        pipeline.round_robin_manager.SEED_SOLVER_MIN_DURATION_SECONDS = 10
+        pipeline.round_robin_manager._sessions = {1: {"clusters": [{"stations": [10, 20]}]}}
+        pipeline.adjustment_phase = {}
+        pipeline.adjustment_run_contexts = {1: {"cluster_name": "C1"}}
+        pipeline.adjustment_run_rosters = {}
+        pipeline._diag_should_log = MagicMock(return_value=True)
+
+        # Seed diagnostic broadcast
+        pipeline.round_robin_manager.get_last_ingest_diagnostic.return_value = {"message": "Diagnostic msg"}
+        seed_status = {
+            "missing_station_ids": [10], "warming_station_ids": [20],
+            "step_count": 5, "max_steps": 50,
+            "silent_station_ids": [10], "invalid_fix_station_ids": []
+        }
+        with patch("app.mqtt.bridge.sensor_pipeline.gnss.manager.broadcast", AsyncMock()) as mock_b:
+            await pipeline._broadcast_seed_diagnostic(1, 1, 10, seed_status, ["warming P1"])
+            assert mock_b.called
+
+        # Valid baselines broadcast
+        mock_obs = MagicMock(rover_name="R1", baseline_neu=(1,2,3), std_neu=(0.01,0.01,0.02), rover_llh=(21,105,50), base_llh=(21,105,50), full_data={})
+        pipeline.round_robin_manager.get_active_base_for_station.return_value = "BASE_1"
+        with patch("app.mqtt.bridge.sensor_pipeline.gnss.manager.broadcast", AsyncMock()) as mock_b:
+            await pipeline._broadcast_valid_baselines([mock_obs], 1, 1, 10)
+            assert mock_b.called
+
+        # Free network transition
+        pipeline.round_robin_manager.start_cycle = AsyncMock()
+        with patch("app.mqtt.bridge.sensor_pipeline.gnss.manager.broadcast", AsyncMock()) as mock_b:
+            await pipeline._transition_to_free_network(1, 1, {"skipped_station_ids": [10]})
+            assert pipeline.adjustment_phase[1] == "FREE_NETWORK"
+            assert pipeline.round_robin_manager.start_cycle.called
+
+    @pytest.mark.anyio
+    async def test_job_alert_and_sensor_streams(self):
+        from app.features.data_export.database.job import (
+            _open_alert_csv_file, _export_alerts_stream_data, _export_sensor_stream_data,
+        )
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            mapping = {"project_code": "P1", "station_code": "S1"}
+            text_f, writer = _open_alert_csv_file(zf, mapping, 10, ["id", "msg"], None)
+            assert text_f is not None
+            text_f.close()
+
+            # Alert stream
+            db = AsyncMock()
+            mock_alert = MagicMock(id=1, timestamp=1700000000, station_id=10, level="HIGH", category="tilt", message="Warning", is_resolved=False)
+            async def mock_gen():
+                yield mock_alert
+            mock_stream = MagicMock()
+            mock_stream.scalars.return_value = mock_gen()
+            db.stream.return_value = mock_stream
+
+            query = MagicMock()
+            rec_p, total_r, summary = await _export_alerts_stream_data(
+                zf, db, "task-test", query, 1, 0, {10: mapping}, "2024-01-01"
+            )
+            assert total_r == 1
+            assert len(summary) >= 1
+
+        # Sensor stream in fresh zip
+        buf2 = io.BytesIO()
+        with zipfile.ZipFile(buf2, "w") as zf2:
+            mock_sensor = MagicMock(id=1, timestamp=1700000000, station_id=10, sensor_type="gnss")
+            async def mock_sensor_gen():
+                yield mock_sensor
+            mock_stream2 = MagicMock()
+            mock_stream2.scalars.return_value = mock_sensor_gen()
+            db.stream.return_value = mock_stream2
+            mock_bin = MagicMock()
+            mock_text = MagicMock()
+            mock_writer = MagicMock()
+            with patch("app.features.data_export.database.job.export_sensor_record", return_value={"dataset": "GNSS", "row": [1, 2, 3]}), \
+                 patch("app.features.data_export.database.job._rotate_sensor_csv", return_value=(mock_bin, mock_text, mock_writer)):
+                rec_p, total_r2, summary2 = await _export_sensor_stream_data(
+                    zf2, db, "task-test", query, 1, 0, {10: mapping}, "2024-01-01"
+                )
+                assert total_r2 == 1
+                assert len(summary2) >= 1
+
+
 
 
 
