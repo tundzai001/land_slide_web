@@ -78,7 +78,6 @@ class SensorAlertAnalysisMixin:
         _ = past_72h
         if not recent_data: return None
         try:
-            watch = self._get_cfg(config, "RainAlerting", "rain_intensity_watch_threshold", 10.0)
             warning = self._get_cfg(config, "RainAlerting", "rain_intensity_warning_threshold", 25.0)
             critical = self._get_cfg(config, "RainAlerting", "rain_intensity_critical_threshold", 50.0)
             warn_steps = int(config.get("RainAlerting", {}).get("rain_warning_confirm_steps", config.get("RainAlerting", {}).get("rain_confirm_steps", 2)))

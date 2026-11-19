@@ -329,9 +329,8 @@ class RoundRobinReceiverMixin:
         return stable_participants, verified, handover_verified, new_partial
 
     async def _poll_rover_handover(
-        self, rover_code: str, project_id: Optional[int], collection_status_callback: Any,
-        expected: set[str]
-    ) -> tuple[bool, set[str], set[str], dict, set[str]]:
+        self, collection_status_callback: Any, expected: set[str]
+    ) -> tuple[bool, set[str], dict]:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self.CROSS_BASE_SWITCH_TIMEOUT_SECONDS
         handover_verified = False
@@ -350,12 +349,11 @@ class RoundRobinReceiverMixin:
                 break
             await asyncio.sleep(self.CROSS_BASE_STATUS_POLL_SECONDS)
 
-        participants = set(latest_status.get("rover_names") or ())
         counts = {
             str(name): int(count)
             for name, count in (latest_status.get("sample_counts_by_rover") or {}).items()
         }
-        return handover_verified, verified_participants, participants, counts, stable_participants
+        return handover_verified, verified_participants, counts
 
     def _check_solver_window_abort(
         self, rolling: dict, stability_targets: set[str],
@@ -444,6 +442,29 @@ class RoundRobinReceiverMixin:
             return True, True, reset_count
         return solver_window_open, False, reset_count
 
+    def _is_stable_held(self, stability_targets: set[str], rolling: dict) -> bool:
+        return bool(stability_targets) and all(
+            rolling.get(name, {}).get("stable") is True
+            and not rolling.get(name, {}).get("ewma_transition_detected", False)
+            and int(rolling.get(name, {}).get("stable_run_seconds") or 0) >= self.STABILITY_HOLD_SECONDS
+            for name in stability_targets
+        )
+
+    async def _open_solver_window_if_stable(
+        self, rover_code: str, project_id: Optional[int], stability_targets: set[str],
+        rolling: dict, now: float, stability_deadline: float, on_stable_collection_started: Any
+    ) -> tuple[bool, float, dict, dict]:
+        if on_stable_collection_started:
+            on_stable_collection_started()
+        new_deadline = max(
+            stability_deadline,
+            now + self.CROSS_BASE_STABLE_MIN_DURATION_SECONDS + self.CROSS_BASE_STATUS_POLL_SECONDS * 2,
+        )
+        counts = dict.fromkeys(stability_targets, 0)
+        epochs = {name: rolling.get(name, {}).get("latest_epoch") for name in stability_targets}
+        await self._emit_progress(project_id, f"{rover_code}: stationary solver window opened.")
+        return True, new_deadline, counts, epochs
+
     async def _monitor_temporary_base_stability(
         self, rover_code: str, project_id: Optional[int], collection_status_callback: Any,
         on_stable_collection_started: Any, on_stable_collection_invalid: Any,
@@ -464,12 +485,6 @@ class RoundRobinReceiverMixin:
                 for name, diag in (latest_status.get("rolling_stability_by_rover") or {}).items()
             }
             now = loop.time()
-            stable_held = bool(stability_targets) and all(
-                rolling.get(name, {}).get("stable") is True
-                and not rolling.get(name, {}).get("ewma_transition_detected", False)
-                and int(rolling.get(name, {}).get("stable_run_seconds") or 0) >= self.STABILITY_HOLD_SECONDS
-                for name in stability_targets
-            )
 
             if solver_window_open:
                 solver_window_open, done, reset_count = await self._process_stability_step(
@@ -479,17 +494,12 @@ class RoundRobinReceiverMixin:
                 )
                 if done:
                     break
-            elif stable_held:
-                if on_stable_collection_started:
-                    on_stable_collection_started()
-                solver_window_open = True
-                stability_deadline = max(
-                    stability_deadline,
-                    now + self.CROSS_BASE_STABLE_MIN_DURATION_SECONDS + self.CROSS_BASE_STATUS_POLL_SECONDS * 2,
+            elif self._is_stable_held(stability_targets, rolling):
+                solver_window_open, stability_deadline, drift_failure_counts, drift_evaluation_epochs = (
+                    await self._open_solver_window_if_stable(
+                        rover_code, project_id, stability_targets, rolling, now, stability_deadline, on_stable_collection_started
+                    )
                 )
-                drift_failure_counts = dict.fromkeys(stability_targets, 0)
-                drift_evaluation_epochs = {name: rolling.get(name, {}).get("latest_epoch") for name in stability_targets}
-                await self._emit_progress(project_id, f"{rover_code}: stationary solver window opened.")
 
             if now >= stability_deadline:
                 if on_stable_collection_invalid:
@@ -513,8 +523,8 @@ class RoundRobinReceiverMixin:
             project_id,
             f"{rover_code}: RTCM route is live; waiting up to {self.CROSS_BASE_SWITCH_TIMEOUT_SECONDS}s for AGRICA to verify the temporary base and a solver-eligible baseline.",
         )
-        handover_verified, verified_participants, participants, counts, stable_participants = (
-            await self._poll_rover_handover(rover_code, project_id, collection_status_callback, expected)
+        handover_verified, verified_participants, counts = (
+            await self._poll_rover_handover(collection_status_callback, expected)
         )
         if not handover_verified:
             summary = (
@@ -562,6 +572,34 @@ class RoundRobinReceiverMixin:
             logger.exception(err)
             return None, None, err
 
+    async def _dispatch_rover_restore(
+        self, rover_code: str, project_id: Optional[int], mountpoint: str,
+        client_info: dict, rover_commands: list[bytes]
+    ) -> tuple[bool, Optional[str]]:
+        try:
+            await self._restore_rover_output_sequence(
+                rover_code=rover_code, mountpoint=mountpoint, client_info=client_info,
+                commands=rover_commands, project_id=project_id,
+            )
+            return True, None
+        except Exception as restore_exc:
+            restore_error = f"Could not restore {rover_code} to ROVER mode: {restore_exc}"
+            logger.exception(restore_error)
+            return False, restore_error
+
+    async def _handle_after_restore_hook(self, after_rover_restore: Any, rover_code: str) -> Optional[str]:
+        if not after_rover_restore:
+            return None
+        try:
+            res = after_rover_restore()
+            if inspect.isawaitable(res):
+                await res
+            return None
+        except Exception as sleep_exc:
+            err = f"{rover_code} is back in ROVER mode, but fixed BASE failed to sleep: {sleep_exc}"
+            logger.exception(err)
+            return err
+
     async def _restore_rover_safe(
         self, rover_code: str, project_id: Optional[int], mountpoint: str,
         client_info: dict, rover_commands: list[bytes], before_rover_restore: Any,
@@ -584,26 +622,15 @@ class RoundRobinReceiverMixin:
         await self._emit_progress(project_id, f"{rover_code}: sending SET ROVER to restore normal AGRICA operation.")
         restored = False
         if not restore_error:
-            try:
-                await self._restore_rover_output_sequence(
-                    rover_code=rover_code, mountpoint=mountpoint, client_info=client_info,
-                    commands=rover_commands, project_id=project_id,
-                )
-                restored = True
-            except Exception as restore_exc:
-                restore_error = f"Could not restore {rover_code} to ROVER mode: {restore_exc}"
-                logger.exception(restore_error)
+            restored, restore_error = await self._dispatch_rover_restore(
+                rover_code, project_id, mountpoint, client_info, rover_commands
+            )
 
         if restored:
             await self._emit_progress(project_id, f"{rover_code}: SET ROVER accepted; receiver restored.")
-            if after_rover_restore:
-                try:
-                    res = after_rover_restore()
-                    if inspect.isawaitable(res):
-                        await res
-                except Exception as sleep_exc:
-                    restore_error = f"{rover_code} is back in ROVER mode, but fixed BASE failed to sleep: {sleep_exc}"
-                    logger.exception(restore_error)
+            hook_error = await self._handle_after_restore_hook(after_rover_restore, rover_code)
+            if hook_error:
+                restore_error = hook_error
 
         await asyncio.sleep(5)
         if restore_error:
@@ -653,7 +680,7 @@ class RoundRobinReceiverMixin:
         before_rover_restore = kwargs.get("before_rover_restore")
         after_rover_restore = kwargs.get("after_rover_restore")
 
-        client_info, mountpoint, llh, commands, rover_commands = (
+        client_info, mountpoint, _, commands, rover_commands = (
             await self._resolve_temporary_base_target(rover_code, project_id, base_llh_override)
         )
         await self._run_temporary_base_preflight(rover_code, project_id, mountpoint, client_info, rover_commands)
@@ -842,9 +869,9 @@ class RoundRobinReceiverMixin:
                 break
 
     async def _read_command_socket_response(
-        self, reader: asyncio.StreamReader, timeout: float
+        self, reader: asyncio.StreamReader, duration_seconds: float
     ) -> tuple[bool, bool, str]:
-        end_time = asyncio.get_event_loop().time() + timeout
+        end_time = asyncio.get_event_loop().time() + duration_seconds
         accumulated = ""
         success = False
         rejected = False
@@ -868,10 +895,10 @@ class RoundRobinReceiverMixin:
 
     async def _wait_single_command_response(
         self, reader: asyncio.StreamReader, mqtt_waiter: Any,
-        is_optional: bool, timeout: float
+        is_optional: bool, wait_seconds: float
     ) -> tuple[bool, bool, str]:
         if mqtt_waiter is not None:
-            actual_timeout = min(timeout, 3.0) if is_optional else timeout
+            actual_timeout = min(wait_seconds, 3.0) if is_optional else wait_seconds
             mqtt_result = await asyncio.wait_for(mqtt_waiter.future, timeout=actual_timeout)
             success = bool(mqtt_result["accepted"])
             rejected = not success
@@ -882,7 +909,7 @@ class RoundRobinReceiverMixin:
                 f"raw={mqtt_result.get('raw_response', mqtt_result['response'])}"
             )
             return success, rejected, compact
-        return await self._read_command_socket_response(reader, timeout)
+        return await self._read_command_socket_response(reader, wait_seconds)
 
     def _handle_command_attempt_result(
         self, compact_response: str, success: bool, rejected: bool, attempt: int,
@@ -935,7 +962,7 @@ class RoundRobinReceiverMixin:
     async def _dispatch_single_set_command(
         self, writer: asyncio.StreamWriter, reader: asyncio.StreamReader,
         command: bytes, optional_commands: set, wait_for_response: bool,
-        timeout: float, ack_station: Optional[str], mountpoint: str,
+        command_timeout: float, ack_station: Optional[str], mountpoint: str,
         target_host: str, target_port: int
     ) -> bool:
         command_str = command.decode("ascii", errors="replace").strip()
@@ -957,7 +984,7 @@ class RoundRobinReceiverMixin:
 
             try:
                 success, rejected, compact_response = await self._wait_single_command_response(
-                    reader, mqtt_waiter, is_optional, timeout
+                    reader, mqtt_waiter, is_optional, command_timeout
                 )
                 res = self._handle_command_attempt_result(
                     compact_response, success, rejected, attempt, max_retries, is_optional, command_str, mountpoint
@@ -974,7 +1001,7 @@ class RoundRobinReceiverMixin:
             finally:
                 if mqtt_waiter is not None:
                     self._remove_command_ack_waiter(mqtt_waiter)
-        return True
+        return False
 
     async def _send_set_command(
         self,
