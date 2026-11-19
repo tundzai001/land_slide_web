@@ -227,11 +227,23 @@ def generate_customer_license_base(identifier: str = "CUSTOMER") -> str:
     return base_code_str.ljust(12, '0')
 
 
+def _save_registration_config(existing_cfg, serial, device_id, station_id):
+    cfg = {
+        **existing_cfg,
+        'device_code': serial,
+        'device_id': device_id,
+        'station_id': station_id or 0,
+    }
+    with open(LOCAL_CONFIG, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    try:
+        os.chmod(str(LOCAL_CONFIG), 0o600)
+    except Exception:
+        pass
+
+
 def auto_register_device():
-    """Register/heartbeat this device with backend on every startup.
-    - First run: creates pi_devices record (status=pending)
-    - Subsequent runs: updates last_seen, returns existing status + station_id
-    """
+    """Register/heartbeat this device with backend on every startup."""
     try:
         import requests
     except ImportError:
@@ -239,7 +251,6 @@ def auto_register_device():
         return
 
     try:
-        # Load existing config to get serial/device_id if already registered
         existing_cfg = {}
         if LOCAL_CONFIG.exists():
             try:
@@ -250,46 +261,27 @@ def auto_register_device():
 
         import sys
         prefix = "win" if sys.platform.startswith("win") else "pi"
-        
-        serial = (existing_cfg.get('device_code')
-                  or DEVICE_CODE
-                  or os.getenv('DEVICE_CODE')
-                  or f"{prefix}-{int(time.time())}")
-                  
+        serial = (existing_cfg.get('device_code') or DEVICE_CODE or os.getenv('DEVICE_CODE') or f"{prefix}-{int(time.time())}")
         name_prefix = "Win" if prefix == "win" else "Pi"
         device_name = os.getenv('DEVICE_NAME', f'{name_prefix}-{serial[-8:]}')
 
         url = f"{BACKEND_URL}/api/field/register"
-        # Use new schema: field "serial" (matches new PiDevice model)
         payload = {'serial': serial, 'name': device_name, 'device_type': prefix}
-
         logger.info("📡 Registering/heartbeat to %r (serial=%r)", url, serial)
         resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
 
         result = resp.json()
-        device_id   = result.get('device_id')
-        status      = result.get('status', 'pending')
-        station_id  = result.get('station_id') or existing_cfg.get('station_id', 0)
+        device_id = result.get('device_id')
+        status = result.get('status', 'pending')
+        station_id = result.get('station_id') or existing_cfg.get('station_id', 0)
 
         clean_device_id = str(device_id).replace("\r", "").replace("\n", "")
         clean_status = str(status).replace("\r", "").replace("\n", "")
         clean_station_id = str(station_id).replace("\r", "").replace("\n", "")
         logger.info("✅ Registration OK: device_id=%s, status=%s, station_id=%s", clean_device_id, clean_status, clean_station_id)
 
-        # Update local config with fresh data from backend
-        cfg = {
-            **existing_cfg,           # preserve any extra keys (license, mqtt overrides, etc.)
-            'device_code': serial,
-            'device_id':   device_id,
-            'station_id':  station_id or 0,
-        }
-        with open(LOCAL_CONFIG, 'w', encoding='utf-8') as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
-        try:
-            os.chmod(str(LOCAL_CONFIG), 0o600)
-        except Exception:
-            pass
+        _save_registration_config(existing_cfg, serial, device_id, station_id)
 
         if status == 'pending':
             logger.info("   ⏳ Waiting for admin to activate this device...")
@@ -300,29 +292,35 @@ def auto_register_device():
         logger.warning(f"⚠️ Register/heartbeat failed: {e}")
 
 
+def _apply_mqtt_and_ws_config(cfg):
+    global MQTT_BROKER, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD, WEBSOCKET_BACKEND
+    mqtt = cfg.get('config', {}).get('mqtt') or cfg.get('mqtt') or {}
+    if mqtt.get('broker'):
+        MQTT_BROKER = mqtt.get('broker')
+    if mqtt.get('port'):
+        MQTT_PORT = int(mqtt.get('port'))
+    if mqtt.get('username'):
+        MQTT_USERNAME = mqtt.get('username')
+    if mqtt.get('password'):
+        MQTT_PASSWORD = mqtt.get('password')
+    ws = cfg.get('config', {}).get('websocket') or cfg.get('websocket')
+    if ws:
+        WEBSOCKET_BACKEND = ws
+
+
 def load_local_config():
-    global DEVICE_CODE, MY_STATION_ID, MQTT_BROKER, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD, WEBSOCKET_BACKEND
-    if LOCAL_CONFIG.exists():
-        try:
-            with open(LOCAL_CONFIG, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
-            DEVICE_CODE = cfg.get('device_code') or cfg.get('device_id') or DEVICE_CODE
-            MY_STATION_ID = int(cfg.get('station_id', MY_STATION_ID))
-            mqtt = cfg.get('config', {}).get('mqtt') or cfg.get('mqtt') or {}
-            if mqtt.get('broker'):
-                MQTT_BROKER = mqtt.get('broker')
-            if mqtt.get('port'):
-                MQTT_PORT = int(mqtt.get('port'))
-            if mqtt.get('username'):
-                MQTT_USERNAME = mqtt.get('username')
-            if mqtt.get('password'):
-                MQTT_PASSWORD = mqtt.get('password')
-            ws = cfg.get('config', {}).get('websocket') or cfg.get('websocket')
-            if ws:
-                WEBSOCKET_BACKEND = ws
-            logger.info(f"Loaded local config: device_code={DEVICE_CODE}, station_id={MY_STATION_ID}")
-        except Exception as e:
-            logger.warning(f"Could not read local config: {e}")
+    global DEVICE_CODE, MY_STATION_ID
+    if not LOCAL_CONFIG.exists():
+        return
+    try:
+        with open(LOCAL_CONFIG, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+        DEVICE_CODE = cfg.get('device_code') or cfg.get('device_id') or DEVICE_CODE
+        MY_STATION_ID = int(cfg.get('station_id', MY_STATION_ID))
+        _apply_mqtt_and_ws_config(cfg)
+        logger.info(f"Loaded local config: device_code={DEVICE_CODE}, station_id={MY_STATION_ID}")
+    except Exception as e:
+        logger.warning(f"Could not read local config: {e}")
 
 
 # =====================================================
@@ -431,192 +429,138 @@ class MQTTAudioClient:
         except json.JSONDecodeError as e:
             logger.exception(f"❌ Invalid JSON in alert: {e}")
     
+    def _play_command_audio(self, audio_code: str):
+        if not audio_code:
+            return
+        if self.is_locked:
+            logger.warning(f"🔒 Device locked, ignoring audio command: {audio_code}")
+            return
+        if self.siren_muted:
+            logger.info(f"🔇 Siren muted, ignoring audio command: {audio_code}")
+            return
+        logger.info(f"🎵 Command: Play {audio_code}")
+        threading.Thread(
+            target=self.audio_player.play,
+            args=(audio_code,),
+            daemon=True
+        ).start()
+
+    def _handle_siren_control(self, cmd: str, data: dict) -> bool:
+        target = data.get('target', 'all')
+        if target not in ['all', 'pi_center']:
+            return True
+        if cmd == 'stop_siren':
+            logger.info("🔇 Received stop_siren command — stopping audio")
+            self.siren_muted = True
+            self.audio_player._stop_current()
+            return True
+        if cmd == 'auto_stop_siren':
+            logger.info("🛑 Received auto_stop_siren command — stopping audio")
+            self.audio_player._stop_current()
+            return True
+        if cmd == 'enable_siren':
+            logger.info("🔊 Received enable_siren command — re-enabling siren")
+            self.siren_muted = False
+            return True
+        return False
+
+    def _handle_json_command(self, data: dict):
+        cmd = data.get('cmd')
+        if cmd == 'install_license':
+            threading.Thread(target=self._handle_install_license, args=(data,), daemon=True).start()
+            return
+        if cmd == 'set_station':
+            threading.Thread(target=self._handle_set_station, args=(data,), daemon=True).start()
+            return
+        if cmd == 'reset':
+            threading.Thread(target=self._handle_reset, daemon=True).start()
+            return
+        if cmd == 'lock':
+            self.is_locked = True
+            self._save_lock_state(True)
+            logger.warning("🔒 Device LOCKED by admin")
+            return
+        if cmd == 'unlock':
+            self.is_locked = False
+            self._save_lock_state(False)
+            logger.info("🔓 Device UNLOCKED by admin")
+            return
+
+        if self._handle_siren_control(cmd, data):
+            return
+
+        level = data.get('level', '').upper()
+        if level in ('WARNING', 'DANGER', 'CRITICAL'):
+            audio_code = data.get('audio_code', '')
+            if audio_code and not self.is_locked and not self.siren_muted:
+                logger.info(f"🚨 Alert level={level} on command topic → playing {audio_code}")
+                threading.Thread(target=self.audio_player.play, args=(audio_code,), daemon=True).start()
+            return
+
+        self._play_command_audio(data.get('audio_code', ''))
+
     def _handle_command(self, payload: str):
         """Xử lý lệnh trực tiếp từ MQTT"""
         try:
-            # payload có thể là JSON hoặc plain text (audio_code)
             if payload.startswith('{'):
-                data = json.loads(payload)
-                # handle install_license command
-                if data.get('cmd') == 'install_license':
-                    threading.Thread(target=self._handle_install_license, args=(data,), daemon=True).start()
-                    return
-                # handle set_station command
-                if data.get('cmd') == 'set_station':
-                    threading.Thread(target=self._handle_set_station, args=(data,), daemon=True).start()
-                    return
-                # handle reset command
-                if data.get('cmd') == 'reset':
-                    threading.Thread(target=self._handle_reset, daemon=True).start()
-                    return
-                # handle lock/unlock command
-                if data.get('cmd') == 'lock':
-                    self.is_locked = True
-                    self._save_lock_state(True)
-                    logger.warning("🔒 Device LOCKED by admin")
-                    return
-                if data.get('cmd') == 'unlock':
-                    self.is_locked = False
-                    self._save_lock_state(False)
-                    logger.info("🔓 Device UNLOCKED by admin")
-                    return
-
-                # handle stop_siren command — tắt còi
-                if data.get('cmd') == 'stop_siren':
-                    target = data.get('target', 'all')
-                    if target not in ['all', 'pi_center']:
-                        return
-                    logger.info("🔇 Received stop_siren command — stopping audio")
-                    self.siren_muted = True
-                    self.audio_player._stop_current()
-                    return
-
-                # handle auto_stop_siren command — tắt còi tự động
-                if data.get('cmd') == 'auto_stop_siren':
-                    target = data.get('target', 'all')
-                    if target not in ['all', 'pi_center']:
-                        return
-                    logger.info("🛑 Received auto_stop_siren command — stopping audio")
-                    self.audio_player._stop_current()
-                    return
-
-                # handle enable_siren command — bật lại còi
-                if data.get('cmd') == 'enable_siren':
-                    target = data.get('target', 'all')
-                    if target not in ['all', 'pi_center']:
-                        return
-                    logger.info("🔊 Received enable_siren command — re-enabling siren")
-                    self.siren_muted = False
-                    return
-
-                # Kích hoạt audio nếu payload có level nguy hiểm (từ command topic)
-                level = data.get('level', '').upper()
-                if level in ('WARNING', 'DANGER', 'CRITICAL'):
-                    audio_code = data.get('audio_code', '')
-                    if audio_code:
-                        if self.is_locked:
-                            logger.warning(f"🔒 Locked, ignoring alert audio: {audio_code}")
-                            return
-                        if self.siren_muted:
-                            logger.info(f"🔇 Siren muted, ignoring alert audio: {audio_code}")
-                            return
-                        logger.info(f"🚨 Alert level={level} on command topic → playing {audio_code}")
-                        threading.Thread(
-                            target=self.audio_player.play,
-                            args=(audio_code,),
-                            daemon=True
-                        ).start()
-                    return
-
-                audio_code = data.get('audio_code', '')
+                self._handle_json_command(json.loads(payload))
             else:
-                # Plain text: coi là audio_code trực tiếp
-                audio_code = payload.strip()
-
-            if audio_code:
-                if self.is_locked:
-                    logger.warning(f"🔒 Device locked, ignoring audio command: {audio_code}")
-                    return
-                if self.siren_muted:
-                    logger.info(f"🔇 Siren muted, ignoring audio command: {audio_code}")
-                    return
-                logger.info(f"🎵 Command: Play {audio_code}")
-                threading.Thread(
-                    target=self.audio_player.play,
-                    args=(audio_code,),
-                    daemon=True
-                ).start()
+                self._play_command_audio(payload.strip())
         except json.JSONDecodeError as e:
             logger.exception(f"❌ Invalid JSON in command: {e}")
+
+    def _persist_license(self, license_str: str):
+        try:
+            cfg = {}
+            if LOCAL_CONFIG.exists():
+                with open(LOCAL_CONFIG, 'r', encoding='utf-8') as f:
+                    cfg = json.load(f)
+            cfg.setdefault('config', {})
+            cfg['config']['license'] = license_str
+            with open(LOCAL_CONFIG, 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"Could not persist license locally: {e}")
+
+    def _notify_license_status(self, device_id: str, local_code: str, ok: bool):
+        if device_id:
+            try:
+                import requests
+                requests.post(
+                    f"{BACKEND_URL}/api/field/pi-devices/{device_id}/confirm",
+                    json={"activated": ok, "serial": local_code},
+                    timeout=10
+                )
+            except Exception as e:
+                logger.warning(f"Could not send confirm to backend: {e}")
+        try:
+            status_topic = f"landslide/{self.station_id}/status"
+            payload = json.dumps({"type": "license_installed", "device_code": local_code, "ok": ok})
+            self.client.publish(status_topic, payload)
+        except Exception as e:
+            logger.warning(f"Failed to publish license ack: {e}")
 
     def _handle_install_license(self, data: dict):
         """Handle license installation command from admin/backend."""
         try:
             license_str = data.get('license')
-            device_code = data.get('device_code')
-            customer_base = data.get('customer_base')
-
-            # Determine our device code
-            local_code = DEVICE_CODE or device_code
+            local_code = DEVICE_CODE or data.get('device_code')
             if not local_code:
                 logger.error("No local device code available to verify license")
                 return
 
-            # compute expected
-            logger.info(f"   [verify] compute pi_base for {local_code}...")
-            pi_base = generate_pi_license_base(local_code)
-            logger.info(f"   [verify] pi_base={pi_base}")
-
-            logger.info(f"   [verify] compute cust_base for {customer_base}...")
-            cust_base = customer_base or generate_customer_license_base('CUSTOMER')
-            logger.info(f"   [verify] cust_base={cust_base}")
-
-            combined = pi_base + cust_base
-            logger.info(f"   [verify] combined={combined}")
-
+            cust_base = data.get('customer_base') or generate_customer_license_base('CUSTOMER')
+            combined = generate_pi_license_base(local_code) + cust_base
             expected = get_license_code_from_string(combined)
-            logger.info(f"   [verify] expected={expected}")
-
             ok = (expected == (license_str or ''))
-
 
             if ok:
                 logger.info(f"✅ License verified for device {local_code}")
-                # persist license locally
-                try:
-                    cfg = {}
-                    if LOCAL_CONFIG.exists():
-                        with open(LOCAL_CONFIG, 'r', encoding='utf-8') as f:
-                            cfg = json.load(f)
-                    cfg.setdefault('config', {})
-                    cfg['config']['license'] = license_str
-                    with open(LOCAL_CONFIG, 'w', encoding='utf-8') as f:
-                        json.dump(cfg, f, ensure_ascii=False, indent=2)
-                except Exception as e:
-                    logger.warning(f"Could not persist license locally: {e}")
-
-                # Notify backend via HTTP callback
-                device_id = data.get('device_id')
-                if device_id:
-                    try:
-                        import requests
-                        resp = requests.post(
-                            f"{BACKEND_URL}/api/field/pi-devices/{device_id}/confirm",
-                            json={"activated": True, "serial": local_code},
-                            timeout=10
-                        )
-                        logger.info(f"📡 Confirm sent: {resp.status_code}")
-                    except Exception as e:
-                        logger.warning(f"Could not send confirm to backend: {e}")
-
-                # send ack via MQTT status topic
-                try:
-                    status_topic = f"landslide/{self.station_id}/status"
-                    ack_payload = json.dumps({"type": "license_installed", "device_code": local_code, "ok": True})
-                    self.client.publish(status_topic, ack_payload)
-                except Exception as e:
-                    logger.warning(f"Failed to publish license ack: {e}")
-
+                self._persist_license(license_str)
             else:
                 logger.warning(f"❌ License mismatch: expected {expected} got {license_str}")
-                device_id = data.get('device_id')
-                if device_id:
-                    try:
-                        import requests
-                        requests.post(
-                            f"{BACKEND_URL}/api/field/pi-devices/{device_id}/confirm",
-                            json={"activated": False, "serial": local_code},
-                            timeout=10
-                        )
-                    except Exception:
-                        pass
-                try:
-                    status_topic = f"landslide/{self.station_id}/status"
-                    fail_payload = json.dumps({"type": "license_installed", "device_code": local_code, "ok": False})
-                    self.client.publish(status_topic, fail_payload)
-                except Exception:
-                    pass
 
+            self._notify_license_status(data.get('device_id'), local_code, ok)
         except Exception as e:
             logger.exception(f"Error handling install_license: {e}")
 
@@ -810,46 +754,89 @@ class WebSocketAudioClient:
 # =====================================================
 # MAIN
 # =====================================================
-def main():
-    logger.info("=" * 70)
-    logger.info("🎵 Pi Audio Player - Field Unit (MQTT + WebSocket)")
-    logger.info("=" * 70)
-    
-    # Auto-register on first run
-    auto_register_device()
-    
-    # Load local config if available
-    load_local_config()
-    
-    logger.info(f"📍 Station ID: {MY_STATION_ID}")
-    logger.info(f"🎵 Audio Dir: {AUDIO_DIR}")
-    logger.info("")
-    logger.info("🔴 PRIMARY:   MQTT @ {0}:{1}".format(MQTT_BROKER, MQTT_PORT))
-    logger.info("   Topics:")
-    logger.info(f"      - landslide/{MY_STATION_ID}/alert")
-    logger.info(f"      - landslide/{MY_STATION_ID}/command")
-    logger.info(f"🟡 FALLBACK:  WebSocket @ {WEBSOCKET_BACKEND}")
-    logger.info("=" * 70)
-    
-    # Kiểm tra thư mục audio
+def _verify_audio_dir():
     if not AUDIO_DIR.exists():
         logger.error(f"❌ Audio directory not found: {AUDIO_DIR}")
         logger.error(f"   Create it: mkdir -p {AUDIO_DIR}")
         logger.error(f"   Copy MP3 files there: cp *.mp3 {AUDIO_DIR}/")
         sys.exit(1)
-    
-    # Chỉ yêu cầu duy nhất file siren.mp3
     if not SIREN_FILE.exists():
         logger.error(f"❌ Required siren file not found: {SIREN_FILE}")
         logger.error("   Please add siren.mp3 before starting this service")
         sys.exit(1)
-
     logger.info(f"✅ Siren file ready: {SIREN_FILE}")
+
+
+def _heartbeat_worker():
+    while True:
+        time.sleep(120)
+        try:
+            import requests as _req
+            serial = DEVICE_CODE or ""
+            if not serial:
+                continue
+            import sys as _sys
+            prefix = "win" if _sys.platform.startswith("win") else "pi"
+            name = f"{'Win' if prefix == 'win' else 'Pi'}-{serial[-8:]}"
+            _req.post(
+                f"{BACKEND_URL}/api/field/heartbeat",
+                json={"serial": serial, "name": name, "device_type": prefix},
+                timeout=10
+            )
+        except Exception:
+            pass
+
+
+def _start_ws_fallback(audio_player):
+    if not websocket:
+        logger.warning("⚠️ websocket-client not installed, fallback disabled")
+        return None
+    ws_client = WebSocketAudioClient(WEBSOCKET_BACKEND, MY_STATION_ID, audio_player)
+    threading.Thread(target=ws_client.start, daemon=True).start()
+    logger.info("✅ WebSocket fallback thread started")
+    return ws_client
+
+
+def _run_service_loop(mqtt_client, ws_client):
+    try:
+        if not mqtt_client.connect():
+            logger.error("❌ Failed to connect to MQTT broker")
+            sys.exit(1)
+        logger.info("\n🚀 System ready! Waiting for MQTT messages...")
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("\n🛑 Stopped by user")
+        mqtt_client.disconnect()
+        if ws_client:
+            ws_client.stop()
+        sys.exit(0)
+    except Exception as e:
+        logger.exception(f"❌ Fatal error: {e}")
+        mqtt_client.disconnect()
+        if ws_client:
+            ws_client.stop()
+        sys.exit(1)
+
+
+def main():
+    logger.info("=" * 70)
+    logger.info("🎵 Pi Audio Player - Field Unit (MQTT + WebSocket)")
+    logger.info("=" * 70)
     
-    # Khởi tạo Audio Player
+    auto_register_device()
+    load_local_config()
+    
+    logger.info(f"📍 Station ID: {MY_STATION_ID}")
+    logger.info(f"🎵 Audio Dir: {AUDIO_DIR}")
+    logger.info(f"🔴 PRIMARY:   MQTT @ {MQTT_BROKER}:{MQTT_PORT}")
+    logger.info(f"   Topics: landslide/{MY_STATION_ID}/alert, landslide/{MY_STATION_ID}/command")
+    logger.info(f"🟡 FALLBACK:  WebSocket @ {WEBSOCKET_BACKEND}")
+    logger.info("=" * 70)
+    
+    _verify_audio_dir()
     audio_player = AudioPlayer(AUDIO_DIR)
     
-    # ✅ CHÍNH: Kết nối MQTT
     mqtt_client = MQTTAudioClient(
         broker=MQTT_BROKER,
         port=MQTT_PORT,
@@ -860,66 +847,11 @@ def main():
         device_serial=DEVICE_CODE or ""
     )
     
-    # ✅ PHỤ: WebSocket Fallback (nếu có websocket library)
-    ws_client = None
-    ws_thread = None
-    if websocket:
-        ws_client = WebSocketAudioClient(WEBSOCKET_BACKEND, MY_STATION_ID, audio_player)
-        ws_thread = threading.Thread(target=ws_client.start, daemon=True)
-        ws_thread.start()
-        logger.info("✅ WebSocket fallback thread started")
-    else:
-        logger.warning("⚠️ websocket-client not installed, fallback disabled")
-
-    # ✅ Heartbeat: cập nhật last_seen định kỳ
-    def _heartbeat_loop():
-        while True:
-            time.sleep(120)  # Heartbeat every 2 minutes instead of 15s to reduce log spam
-            try:
-                import requests as _req
-                serial = DEVICE_CODE or ""
-                if not serial:
-                    continue
-                import sys as _sys
-                prefix = "win" if _sys.platform.startswith("win") else "pi"
-                name = f"{'Win' if prefix == 'win' else 'Pi'}-{serial[-8:]}"
-                _req.post(
-                    f"{BACKEND_URL}/api/field/heartbeat",
-                    json={"serial": serial, "name": name, "device_type": prefix},
-                    timeout=10
-                )
-            except Exception:
-                pass
-
-    hb_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
-    hb_thread.start()
+    ws_client = _start_ws_fallback(audio_player)
+    threading.Thread(target=_heartbeat_worker, daemon=True).start()
     logger.info("✅ Heartbeat thread started (60s interval)")
     
-    try:
-        # Kết nối MQTT (chính)
-        if mqtt_client.connect():
-            logger.info("\n🚀 System ready! Waiting for MQTT messages...")
-            
-            # Giữ chạy
-            while True:
-                time.sleep(1)
-        else:
-            logger.error("❌ Failed to connect to MQTT broker")
-            sys.exit(1)
-    
-    except KeyboardInterrupt:
-        logger.info("\n🛑 Stopped by user")
-        mqtt_client.disconnect()
-        if ws_client:
-            ws_client.stop()
-        sys.exit(0)
-    
-    except Exception as e:
-        logger.exception(f"❌ Fatal error: {e}")
-        mqtt_client.disconnect()
-        if ws_client:
-            ws_client.stop()
-        sys.exit(1)
+    _run_service_loop(mqtt_client, ws_client)
 
 if __name__ == "__main__":
     main()

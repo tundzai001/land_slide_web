@@ -86,8 +86,7 @@ async def read_device(device):
     return payload
 
 
-async def run(config):
-    import paho.mqtt.client as mqtt
+def _validate_gateway_config(config):
     if config.get('version') != 1:
         raise ValueError('Unsupported gateway configuration version')
     devices = [d for d in config.get('devices', []) if d['profile'].get('enabled') and d['profile']['protocol'] != 'mqtt']
@@ -98,8 +97,15 @@ async def run(config):
             raise ValueError('A concrete MQTT publish topic is required')
         if device['sensor_type'] not in {'water', 'rain', 'imu'}:
             raise ValueError('Unsupported sensor type')
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
-                         client_id=os.environ.get('MQTT_CLIENT_ID', 'landslide-industrial-gateway'))
+    return devices
+
+
+def _setup_mqtt_client():
+    import paho.mqtt.client as mqtt
+    client = mqtt.Client(
+        mqtt.CallbackAPIVersion.VERSION2,
+        client_id=os.environ.get('MQTT_CLIENT_ID', 'landslide-industrial-gateway')
+    )
     client.max_queued_messages_set(100)
     if os.environ.get('MQTT_USERNAME'):
         client.username_pw_set(os.environ['MQTT_USERNAME'], os.environ.get('MQTT_PASSWORD'))
@@ -107,6 +113,25 @@ async def run(config):
         client.tls_set(ca_certs=os.environ['MQTT_TLS_CA'])
     client.connect_async(os.environ['MQTT_HOST'], int(os.environ.get('MQTT_PORT', '1883')))
     client.loop_start()
+    return client
+
+
+async def _poll_and_publish_device(client, device):
+    identifier = device['device_id']
+    try:
+        payload = await read_device(device)
+        info = client.publish(device['topic'], json.dumps(payload, allow_nan=False), qos=1, retain=False)
+        await asyncio.to_thread(info.wait_for_publish, 5)
+        if not info.is_published():
+            raise ConnectionError('MQTT publish acknowledgement timed out')
+        logger.info('Published device %s', identifier)
+    except Exception as exc:
+        logger.exception('Device %s read/publish failed: %s', identifier, type(exc).__name__)
+
+
+async def run(config):
+    devices = _validate_gateway_config(config)
+    client = _setup_mqtt_client()
     next_read = {}
     disconnected_logged = False
     try:
@@ -118,20 +143,11 @@ async def run(config):
                 await asyncio.sleep(1)
                 continue
             disconnected_logged = False
-            # Sequential reads avoid concurrent access to a shared RTU bus.
             for device in devices:
                 identifier = device['device_id']
                 if time.monotonic() < next_read.get(identifier, 0):
                     continue
-                try:
-                    payload = await read_device(device)
-                    info = client.publish(device['topic'], json.dumps(payload, allow_nan=False), qos=1, retain=False)
-                    await asyncio.to_thread(info.wait_for_publish, 5)
-                    if not info.is_published():
-                        raise ConnectionError('MQTT publish acknowledgement timed out')
-                    logger.info('Published device %s', identifier)
-                except Exception as exc:
-                    logger.exception('Device %s read/publish failed: %s', identifier, type(exc).__name__)
+                await _poll_and_publish_device(client, device)
                 next_read[identifier] = time.monotonic() + max(1, float(device['profile'].get('poll_seconds', 5)))
             await asyncio.sleep(0.2)
     finally:

@@ -291,99 +291,85 @@ class MQTTPointClient:
         except Exception:
             pass
 
-    def _handle_command(self, payload):
+    def _handle_siren_command(self, cmd, target):
+        if target not in ['all', 'pi_point']:
+            return
         global is_continuous_alert
+        if cmd == 'stop_siren':
+            logger.info("🔇 Muting siren")
+            self.siren_muted = True
+            is_continuous_alert = False
+            light_off()
+        elif cmd == 'auto_stop_siren':
+            logger.info("🛑 Auto-stopping siren")
+            is_continuous_alert = False
+            light_off()
+        elif cmd == 'enable_siren':
+            self.siren_muted = False
+            logger.info("🔊 Siren unmuted, ready for alerts")
+
+    def _handle_json_command(self, data, cmd):
+        global is_continuous_alert
+        handlers = {
+            'install_license': lambda: threading.Thread(target=self._handle_install_license, args=(data,), daemon=True).start(),
+            'set_station': lambda: self._handle_set_station(data),
+            'reset': lambda: (setattr(self, 'is_continuous_alert', False), light_off(), self._handle_reset()),
+            'lock': lambda: (setattr(self, 'is_locked', True), self._save_lock_state(True)),
+            'unlock': lambda: (setattr(self, 'is_locked', False), self._save_lock_state(False)),
+            'on': light_on,
+            'off': light_off,
+        }
+        handler = handlers.get(cmd)
+        if handler:
+            handler()
+            return
+        if cmd in ('stop_siren', 'auto_stop_siren', 'enable_siren'):
+            self._handle_siren_command(cmd, data.get('target', 'all'))
+
+    def _handle_level_alert(self, data):
+        global is_continuous_alert
+        level = data.get('level', '').upper()
+        if level not in ('WARNING', 'DANGER', 'CRITICAL'):
+            return
+        if self.is_locked or self.siren_muted:
+            logger.info("🔒 Locked or muted. Ignore alert from command.")
+            return
+
+        audio_code = data.get('audio_code', '')
+        category = data.get('category', '')
+        if audio_code.startswith('imu_') or 'tilt' in category or 'shock' in category:
+            logger.info(f"🚨 IMU Alert level={level} on command topic → activating continuous GPIO")
+            is_continuous_alert = True
+            light_on()
+        else:
+            logger.info(f"🚨 Alert level={level} on command topic → activating GPIO pulse")
+            threading.Thread(target=light_pulse, args=(15,), daemon=True).start()
+
+    def _handle_raw_command(self, cmd):
+        global is_continuous_alert
+        if cmd == 'on': light_on()
+        elif cmd == 'off': light_off()
+        elif cmd == 'stop_siren':
+            logger.info("🔇 Muting siren")
+            self.siren_muted = True
+            is_continuous_alert = False
+            light_off()
+        elif cmd == 'enable_siren':
+            self.siren_muted = False
+            logger.info("🔊 Siren unmuted, ready for alerts")
+        elif cmd == 'reset':
+            is_continuous_alert = False
+            light_off()
+
+    def _handle_command(self, payload):
         try:
             if payload.startswith('{'):
                 data = json.loads(payload)
                 cmd = data.get('cmd', data.get('action', ''))
-                
-                if cmd == 'install_license':
-                    threading.Thread(target=self._handle_install_license, args=(data,), daemon=True).start()
-                    return
-                elif cmd == 'set_station':
-                    self._handle_set_station(data)
-                    return
-                elif cmd == 'reset':
-                    is_continuous_alert = False
-                    light_off()
-                    self._handle_reset()
-                    return
-                elif cmd == 'stop_siren':
-                    target = data.get('target', 'all')
-                    if target not in ['all', 'pi_point']:
-                        return
-                    logger.info("🔇 Muting siren")
-                    self.siren_muted = True
-                    is_continuous_alert = False
-                    light_off()
-                    return
-                elif cmd == 'auto_stop_siren':
-                    target = data.get('target', 'all')
-                    if target not in ['all', 'pi_point']:
-                        return
-                    logger.info("🛑 Auto-stopping siren")
-                    is_continuous_alert = False
-                    light_off()
-                    return
-                elif cmd == 'enable_siren':
-                    target = data.get('target', 'all')
-                    if target not in ['all', 'pi_point']:
-                        return
-                    # Re-arm: cho phép nhận cảnh báo lại
-                    self.siren_muted = False
-                    logger.info("🔊 Siren unmuted, ready for alerts")
-                    return
-                elif cmd == 'lock':
-                    self.is_locked = True
-                    self._save_lock_state(True)
-                    return
-                elif cmd == 'unlock':
-                    self.is_locked = False
-                    self._save_lock_state(False)
-                    return
-                elif cmd == 'on':
-                    light_on()
-                elif cmd == 'off':
-                    light_off()
-                
-                # Kích hoạt GPIO nếu payload có level nguy hiểm (từ command topic)
-                level = data.get('level', '').upper()
-                audio_code = data.get('audio_code', '')
-                category = data.get('category', '')
-                
-                if level in ('WARNING', 'DANGER', 'CRITICAL'):
-                    if self.is_locked:
-                        logger.warning("🔒 Locked. Ignore alert from command.")
-                        return
-                    if self.siren_muted:
-                        logger.info("🔇 Siren muted. Ignore alert from command.")
-                        return
-                    
-                    if audio_code.startswith('imu_') or 'tilt' in category or 'shock' in category:
-                        logger.info(f"🚨 IMU Alert level={level} on command topic → activating continuous GPIO")
-                        is_continuous_alert = True
-                        light_on()
-                    else:
-                        logger.info(f"🚨 Alert level={level} on command topic → activating GPIO pulse")
-                        threading.Thread(target=light_pulse, args=(15,), daemon=True).start()
-                    
+                self._handle_json_command(data, cmd)
+                self._handle_level_alert(data)
             else:
-                # payload thô
-                cmd = payload.strip().lower()
-                if cmd == 'on': light_on()
-                if cmd == 'off': light_off()
-                if cmd == 'stop_siren':
-                    logger.info("🔇 Muting siren")
-                    self.siren_muted = True
-                    is_continuous_alert = False
-                    light_off()
-                if cmd == 'enable_siren':
-                    self.siren_muted = False
-                    logger.info("🔊 Siren unmuted, ready for alerts")
-                if cmd == 'reset':
-                    is_continuous_alert = False
-                    light_off()
+                self._handle_raw_command(payload.strip().lower())
         except Exception:
             pass
 
