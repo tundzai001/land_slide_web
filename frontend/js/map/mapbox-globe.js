@@ -34,12 +34,19 @@
         { type: 'Feature', properties: { name: 'Biển Đông' }, geometry: { type: 'Point', coordinates: [113.0, 13.2] } },
     ]);
 
+    function resolveStationColor(status) {
+        if (status === 'critical') return '#ef4444';
+        if (status === 'warning') return '#f59e0b';
+        if (status === 'offline') return '#94a3b8';
+        return '#22c55e';
+    }
+
     function createStationGeoJson(stations = []) {
         const features = (stations || [])
             .filter(item => item?.location?.lat && item?.location?.lon)
             .map(item => {
                 const status = item.status || 'safe';
-                const color = status === 'critical' ? '#ef4444' : status === 'warning' ? '#f59e0b' : status === 'offline' ? '#94a3b8' : '#22c55e';
+                const color = resolveStationColor(status);
                 return {
                     type: 'Feature',
                     properties: {
@@ -59,18 +66,16 @@
     }
 
     class MapboxGlobeController {
-        constructor() {
-            this.map = null;
-            this.container = null;
-            this.active = false;
-            this.spinning = true;
-            this.interacting = false;
-            this.ready = false;
-            this.selectedProvinceCode = '';
-            this.resumeTimer = null;
-            this.spinInterval = null;
-            this.provincesGeoJson = null;
-        }
+        map = null;
+        container = null;
+        active = false;
+        spinning = true;
+        interacting = false;
+        ready = false;
+        selectedProvinceCode = '';
+        resumeTimer = null;
+        spinInterval = null;
+        provincesGeoJson = null;
 
         async init(container) {
             if (this.map) return this.map;
@@ -280,7 +285,7 @@
             map.on('click', 'station-pins-circle', (e) => {
                 const stationId = e.features?.[0]?.properties?.id;
                 if (stationId && typeof window.selectStation === 'function') {
-                    window.selectStation(stationId);
+                    void window.selectStation(stationId);
                 }
             });
 

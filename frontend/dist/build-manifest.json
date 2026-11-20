@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "build": "5fd3bb07037c",
+  "build": "5ae97c44aa42",
   "assets": {
     "about.html": {
       "bytes": 4584,
-      "sha256": "17a0878fc0ee7c411ead93efab0d0e50353e51d495890a0a908bd48d56791099"
+      "sha256": "beefe263e51b8916285e1d2f94122ed3cfec5c1d374dc8164b08444250db0d73"
     },
     "about.min.css": {
       "bytes": 35597,
@@ -16,7 +16,7 @@
     },
     "admin-app.min.js": {
       "bytes": 562087,
-      "sha256": "974a8eb36f4b951b33731260b9237f5baccef7c7d43ad7bca94b164d5b4d95f1"
+      "sha256": "f853e6352583a32e41e8aaee2ee587c4e3e2cf565c9a5f884ca0804be0b1b9cd"
     },
     "admin.min.css": {
       "bytes": 138726,
@@ -32,11 +32,11 @@
     },
     "app-runtime.min.js": {
       "bytes": 19835,
-      "sha256": "abe4f55de4e6cf93f54728da3888f0ff94b9089c0db89f132e276906c9f10968"
+      "sha256": "753f72a25482e577a6b0f5a093419b6354741b322236a7410ff3a3f19a30b1fa"
     },
     "app.html": {
       "bytes": 971,
-      "sha256": "16002ab6618d70c5612345176559060bb697278bdf93a39845d9603527540b9d"
+      "sha256": "7c0506225cfa6a4828eb800e3a39720a9aa69c3aac7fd66f774d530b433a06ea"
     },
     "digital-twin.min.js": {
       "bytes": 66740,
@@ -44,7 +44,7 @@
     },
     "index.html": {
       "bytes": 4410,
-      "sha256": "cf720385d73033b2c0e6337df40739032c9360b62b8c8ee1fed9171c5f2a11d0"
+      "sha256": "bb857480b95fd64884f20815cf9ee5a09dc78c6ac9e702a90f1d319e657f7486"
     },
     "landing.min.css": {
       "bytes": 18946,
@@ -59,16 +59,16 @@
       "sha256": "9e69fd1c0b9c9fbc5405028405828bc511a7628ddba482013297222568a6e7d0"
     },
     "map-app.min.js": {
-      "bytes": 514106,
-      "sha256": "ebea6d4b3ab88ae681ea9a3dbcf5c05e4868fa4f1fbe9ada3dc30421a07bca05"
+      "bytes": 514610,
+      "sha256": "4caa9e4a14003871cf060f2620fa25c68e233f636feb7e50d3719ddb0f80f71e"
     },
     "map.html": {
       "bytes": 2843,
-      "sha256": "70d1989811be9d9d88dd48e15275958516119390f980dc8aa1e3cdda2fa4a7b5"
+      "sha256": "26b250a43e4eee4e905d21fc6accd7d68529b4c8ca43f1eb0af3d255e95bbbd9"
     },
     "map.min.css": {
-      "bytes": 178552,
-      "sha256": "3570668ac394fcf0d20d6288b65dd11831ff830a6847381a2516ba08fbbc5dba"
+      "bytes": 178641,
+      "sha256": "f85075fef9346b0ecfe85503439333e515d9466da432c21816080e271ff2328d"
     },
     "mapbox-gl-sdk.min.css": {
       "bytes": 36468,
