@@ -149,9 +149,9 @@ function setStationListSidebarOpen(sidebar, open) {
     if (open) sidebar.classList.remove('force-hidden');
     sidebar.setAttribute('aria-hidden', String(!open));
     sidebar.style.setProperty('transform', open ? 'translateX(0)' : 'translateX(-100%)', 'important');
-    sidebar.style.setProperty('visibility', open ? 'visible' : 'hidden', 'important');
-    sidebar.style.setProperty('opacity', open ? '1' : '0', 'important');
     sidebar.style.setProperty('pointer-events', open ? 'auto' : 'none', 'important');
+    sidebar.style.removeProperty('visibility');
+    sidebar.style.removeProperty('opacity');
     document.getElementById('navbar-hamburger-btn')
         ?.setAttribute('aria-expanded', String(open));
     if (open) mapUiState.activePanel = 'stations';

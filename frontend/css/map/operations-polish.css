@@ -122,6 +122,18 @@ html[data-theme="dark"] .station-item.selected {
     font-size: 22px !important;
     letter-spacing: -.6px !important;
     font-weight: 750;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.station-list-header h6 i {
+    font-size: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    margin-right: 0 !important;
 }
 
 .layer-toggle-switch {

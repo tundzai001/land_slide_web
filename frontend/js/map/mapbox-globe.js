@@ -253,6 +253,17 @@
             canvas.addEventListener('pointerdown', pause);
             canvas.addEventListener('wheel', resume, { passive: true });
             window.addEventListener('pointerup', resume);
+
+            map.on('click', (e) => {
+                const activeLayers = ['vietnam-provinces-fill', 'station-pins-circle', 'station-clusters', 'vietnam-island-labels']
+                    .filter(id => map.getLayer(id));
+                if (activeLayers.length === 0) return;
+                const features = map.queryRenderedFeatures(e.point, { layers: activeLayers });
+                if (!features || features.length === 0) {
+                    this.clearProvinceSelection();
+                    this.popup?.remove();
+                }
+            });
         }
 
         _onStyleLoad() {
@@ -388,12 +399,78 @@
             map.addSource('station-pins', {
                 type: 'geojson',
                 data: createStationGeoJson(stations),
+                cluster: true,
+                clusterMaxZoom: 14,
+                clusterRadius: 50,
             });
 
+            // Cluster glow
+            map.addLayer({
+                id: 'station-clusters-glow',
+                type: 'circle',
+                source: 'station-pins',
+                filter: ['has', 'point_count'],
+                paint: {
+                    'circle-radius': [
+                        'step',
+                        ['get', 'point_count'],
+                        22,
+                        10, 28,
+                        30, 34,
+                    ],
+                    'circle-color': '#0284c7',
+                    'circle-opacity': 0.25,
+                },
+            });
+
+            // Cluster circle
+            map.addLayer({
+                id: 'station-clusters',
+                type: 'circle',
+                source: 'station-pins',
+                filter: ['has', 'point_count'],
+                paint: {
+                    'circle-radius': [
+                        'step',
+                        ['get', 'point_count'],
+                        16,
+                        10, 20,
+                        30, 24,
+                    ],
+                    'circle-color': [
+                        'step',
+                        ['get', 'point_count'],
+                        '#0284c7',
+                        10, '#0ea5e9',
+                        30, '#059669',
+                    ],
+                    'circle-stroke-width': 2.5,
+                    'circle-stroke-color': '#ffffff',
+                    'circle-opacity': 0.95,
+                },
+            });
+
+            // Cluster count label
+            map.addLayer({
+                id: 'station-cluster-count',
+                type: 'symbol',
+                source: 'station-pins',
+                filter: ['has', 'point_count'],
+                layout: {
+                    'text-field': '{point_count_abbreviated}',
+                    'text-size': 12,
+                },
+                paint: {
+                    'text-color': '#ffffff',
+                },
+            });
+
+            // Unclustered station pins glow
             map.addLayer({
                 id: 'station-pins-glow',
                 type: 'circle',
                 source: 'station-pins',
+                filter: ['!', ['has', 'point_count']],
                 paint: {
                     'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 8, 8, 14],
                     'circle-color': ['get', 'color'],
@@ -401,10 +478,12 @@
                 },
             });
 
+            // Unclustered station pins circle
             map.addLayer({
                 id: 'station-pins-circle',
                 type: 'circle',
                 source: 'station-pins',
+                filter: ['!', ['has', 'point_count']],
                 paint: {
                     'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 4, 8, 7],
                     'circle-color': ['get', 'color'],
@@ -413,10 +492,12 @@
                 },
             });
 
+            // Unclustered station pins label
             map.addLayer({
                 id: 'station-pins-label',
                 type: 'symbol',
                 source: 'station-pins',
+                filter: ['!', ['has', 'point_count']],
                 minzoom: 6,
                 layout: {
                     'text-field': ['get', 'code'],
@@ -431,6 +512,26 @@
                 },
             });
 
+            // Click cluster to zoom in
+            map.on('click', 'station-clusters', (e) => {
+                const features = map.queryRenderedFeatures(e.point, { layers: ['station-clusters'] });
+                const clusterId = features[0]?.properties?.cluster_id;
+                const source = map.getSource('station-pins');
+                if (!source || clusterId === undefined) return;
+                source.getClusterExpansionZoom(clusterId, (err, zoom) => {
+                    if (err) return;
+                    this._stopSpin();
+                    map.easeTo({
+                        center: features[0].geometry.coordinates,
+                        zoom: zoom + 0.5,
+                        duration: 600,
+                    });
+                });
+            });
+            map.on('mouseenter', 'station-clusters', () => { map.getCanvas().style.cursor = 'pointer'; });
+            map.on('mouseleave', 'station-clusters', () => { map.getCanvas().style.cursor = ''; });
+
+            // Click individual station pin
             map.on('click', 'station-pins-circle', (e) => {
                 const stationId = e.features?.[0]?.properties?.id;
                 if (stationId && typeof window.selectStation === 'function') {
@@ -493,6 +594,15 @@
             this._showPopup(content, targetPos);
         }
 
+        clearProvinceSelection() {
+            this.selectedProvinceCode = '';
+            for (const id of ['vietnam-province-selected-fill', 'vietnam-province-selected-line']) {
+                if (this.map?.getLayer(id)) {
+                    this.map.setFilter(id, ['==', ['to-string', ['get', 'code']], '']);
+                }
+            }
+        }
+
         _showPopup(content, lngLat) {
             this.popup?.remove();
             if (typeof window.mapboxgl?.Popup !== 'function' || !this.map) return;
@@ -500,12 +610,16 @@
                 .setLngLat(lngLat)
                 .setDOMContent(content)
                 .addTo(this.map);
+            this.popup.on('close', () => {
+                this.clearProvinceSelection();
+            });
             const closeBtn = this.popup.getElement()?.querySelector('.mapboxgl-popup-close-button');
             closeBtn?.removeAttribute('aria-hidden');
             closeBtn?.setAttribute('aria-label', 'Đóng thông tin');
         }
 
         _showTextPopup(lngLat, title, desc) {
+            this.clearProvinceSelection();
             const content = document.createElement('div');
             content.className = 'station-map-popup';
             const titleEl = document.createElement('div');
@@ -602,6 +716,7 @@
                 this.map?.resize();
                 if (this.map?.getZoom() < 5 && this.projection === 'globe') this._startSpin();
             } else {
+                this.clearProvinceSelection();
                 this.popup?.remove();
                 this._stopSpin();
             }
