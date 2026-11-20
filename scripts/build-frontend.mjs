@@ -60,7 +60,7 @@ const groups = {
   'map-app.min.js': [
     'js/templates/map/shell.js', 'js/templates/map/station-panels.js',
     'js/templates/map/analysis.js', 'js/templates/map/rescue.js', 'js/templates/map-template.js',
-    'js/map/runtime.js', 'js/map/realtime.js', 'js/map/marker-alerts.js',
+    'js/map/runtime.js', 'js/map/mapbox-globe.js', 'js/map/realtime.js', 'js/map/marker-alerts.js',
     'js/map/guest-rescue.js', 'js/map/map-layers.js', 'js/map/map-interactions.js',
     'js/dem-grid.js', 'js/map/stations.js', 'js/map/station-detail.js', 'js/map/chart-workspace.js', 'js/map/long-term.js',
     'js/map/analysis.js', 'js/map/ui-alerts.js', 'js/map/tools.js'
@@ -152,7 +152,7 @@ await esbuild.build({
   external: ['three', 'three/*']
 });
 
-await Promise.all(['aitogy.png', 'social-card.png'].map(assetName =>
+await Promise.all(['aitogy.png', 'social-card.png', 'mapbox-gl-sdk.min.js', 'mapbox-gl-sdk.min.css'].map(assetName =>
   copyFile(path.join(frontendRoot, 'assets', assetName), path.join(outputRoot, assetName))
 ));
 
@@ -166,7 +166,8 @@ await Promise.all(['index.html', 'about.html', 'map.html', 'app.html'].map(async
 
 const artifactNames = [
   ...Object.keys(groups), 'landing.min.js', 'about.min.js', 'about.html', 'app-runtime.min.js',
-  'digital-twin.min.js', 'index.html', 'map.html', 'app.html', 'aitogy.png', 'social-card.png'
+  'digital-twin.min.js', 'index.html', 'map.html', 'app.html', 'aitogy.png', 'social-card.png',
+  'mapbox-gl-sdk.min.js', 'mapbox-gl-sdk.min.css'
 ].sort((a, b) => a.localeCompare(b));
 // The manifest is committed and checked in CI. Identical inputs must produce
 // identical bytes; release timestamps belong to the workflow run metadata.

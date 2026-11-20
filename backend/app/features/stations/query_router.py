@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -280,6 +281,32 @@ async def get_public_map_config(response: Response):
     return {
         "mapbox_public_token": token if token.startswith("pk.") else "",
     }
+
+
+_VIETNAM_PROVINCES_GEOJSON_BYTES: bytes | None = None
+
+
+def _get_vietnam_provinces_geojson_bytes() -> bytes:
+    global _VIETNAM_PROVINCES_GEOJSON_BYTES
+    if _VIETNAM_PROVINCES_GEOJSON_BYTES is None:
+        target = os.path.join(os.path.dirname(__file__), "..", "..", "shared", "vietnam_provinces.geojson")
+        if os.path.exists(target):
+            with open(target, "rb") as f:
+                _VIETNAM_PROVINCES_GEOJSON_BYTES = f.read()
+        else:
+            _VIETNAM_PROVINCES_GEOJSON_BYTES = b'{"type":"FeatureCollection","features":[]}'
+    return _VIETNAM_PROVINCES_GEOJSON_BYTES
+
+
+@router.get("/api/public/vietnam-provinces-geojson")
+async def get_vietnam_provinces_geojson():
+    """Return Vietnam province boundaries GeoJSON for map overlays."""
+    content = _get_vietnam_provinces_geojson_bytes()
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=86400, stale-while-revalidate=604800"},
+    )
 
 
 @router.get("/api/public/dashboard-summary", responses={422: {"description": "Unprocessable Entity"}})

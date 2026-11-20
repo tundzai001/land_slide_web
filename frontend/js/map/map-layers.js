@@ -36,6 +36,18 @@ function setupMarkerLayerControls() {
         if (layerHeatmap.checked !== heatmapVisible) void toggleHeatmap();
     });
 
+    const layerProvinces = document.getElementById('layer-provinces');
+    if (layerProvinces) {
+        layerProvinces.addEventListener('change', () => {
+            void loadAndRenderProvinces(layerProvinces.checked);
+        });
+        if (layerProvinces.checked) {
+            void loadAndRenderProvinces(true);
+        }
+    }
+
+    setupGlobeToggleControl();
+
     // Bases stay enabled, but appear only when viewing project details.
     showStationMarkers = true;
     showRescueMarkers = window.rescueFeatureEnabled !== false;
@@ -622,4 +634,110 @@ function setupBasemapControls() {
     popover.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); }
     });
+}
+
+let provincesGeoJsonLayer = null;
+let provincesGeoJsonData = null;
+
+async function loadAndRenderProvinces(show = true) {
+    if (!window.map || typeof L === 'undefined') return;
+    if (!show) {
+        if (provincesGeoJsonLayer && window.map.hasLayer(provincesGeoJsonLayer)) {
+            window.map.removeLayer(provincesGeoJsonLayer);
+        }
+        window.MapboxGlobeController?.setProvincesVisible(false);
+        return;
+    }
+
+    window.MapboxGlobeController?.setProvincesVisible(true);
+    if (provincesGeoJsonLayer && window.map.hasLayer(provincesGeoJsonLayer)) {
+        return;
+    }
+
+    if (!provincesGeoJsonData) {
+        try {
+            const res = await fetch('/api/public/vietnam-provinces-geojson');
+            if (res.ok) {
+                provincesGeoJsonData = await res.json();
+            }
+        } catch (e) {
+            console.debug('Failed to load provinces GeoJSON:', e);
+        }
+    }
+
+    if (!provincesGeoJsonData || !window.map) return;
+
+    provincesGeoJsonLayer = L.geoJSON(provincesGeoJsonData, {
+        style: () => ({
+            color: '#0284c7',
+            weight: 1.5,
+            opacity: 0.9,
+            fillColor: '#38bdf8',
+            fillOpacity: 0.04
+        }),
+        onEachFeature: (feature, layer) => {
+            const name = feature?.properties?.name || '';
+            if (name) {
+                layer.bindTooltip(name, { sticky: true, className: 'map-province-tooltip' });
+            }
+            layer.on({
+                mouseover: (e) => {
+                    e.target.setStyle({ weight: 2.5, color: '#38bdf8', fillColor: '#0ea5e9', fillOpacity: 0.16 });
+                },
+                mouseout: (e) => {
+                    provincesGeoJsonLayer?.resetStyle(e.target);
+                }
+            });
+        }
+    });
+
+    provincesGeoJsonLayer.addTo(window.map);
+    provincesGeoJsonLayer.bringToBack();
+}
+
+function setupGlobeToggleControl() {
+    const btn = document.getElementById('btn-toggle-globe');
+    const globeContainer = document.getElementById('mapbox-globe');
+    if (!btn || !globeContainer) return;
+
+    let isGlobeActive = false;
+
+    async function setGlobeMode(active) {
+        isGlobeActive = active;
+        btn.classList.toggle('is-active', active);
+        const label = document.getElementById('globe-toggle-label');
+        if (label) {
+            label.textContent = active ? 'Bản đồ 2D' : 'Địa cầu 3D';
+        }
+
+        if (active) {
+            try {
+                await window.MapboxGlobeController?.init(globeContainer);
+                window.MapboxGlobeController?.setActive(true);
+                window.MapboxGlobeController?.updateStations(window.allStations || []);
+            } catch (err) {
+                console.warn('Mapbox 3D Globe không khả dụng:', err);
+                isGlobeActive = false;
+                btn.classList.remove('is-active');
+                if (label) label.textContent = 'Địa cầu 3D';
+                window.MapboxGlobeController?.setActive(false);
+            }
+        } else {
+            window.MapboxGlobeController?.setActive(false);
+            if (window.map) {
+                window.map.invalidateSize();
+            }
+        }
+    }
+
+    btn.addEventListener('click', () => {
+        void setGlobeMode(!isGlobeActive);
+    });
+
+    // Auto-activate 3D globe if valid Mapbox token is present
+    if (window.mapboxAccessToken?.startsWith('pk.')) {
+        setTimeout(() => {
+            void setGlobeMode(true);
+        }, 500);
+    }
 }

@@ -170,7 +170,7 @@
     }
 
     const sharedStyles = [CDN.iconsCss, CDN.bootstrapCss];
-    const mapStyles = ['/assets/map.min.css?v=__BUILD_VERSION__'];
+    const mapStyles = ['/assets/map.min.css?v=__BUILD_VERSION__', '/assets/mapbox-gl-sdk.min.css?v=__BUILD_VERSION__'];
     const adminStyles = ['/assets/admin.min.css?v=__BUILD_VERSION__'];
 
     function setupAdminMobileNavigation() {

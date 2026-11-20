@@ -16,6 +16,11 @@ window.LegacyTemplateParts['shell'] = `
 
             <span class="map-workspace-label">Bản đồ quan trắc</span>
 
+            <button type="button" id="btn-toggle-globe" class="btn btn-sm btn-outline-secondary map-globe-toggle-btn"
+                aria-label="Chuyển chế độ Địa cầu 3D" title="Chuyển đổi Địa cầu 3D / Bản đồ 2D">
+                <i class="bi bi-globe-asia-australia me-1"></i> <span id="globe-toggle-label">Địa cầu 3D</span>
+            </button>
+
             <button type="button" id="btn-digital-twin" class="btn btn-sm map-simulation-nav"
                 aria-label="Mở mô phỏng sạt lở 3D" style="display:none">
                 <i class="bi bi-boxes me-1"></i> Mô phỏng 3D
@@ -50,6 +55,7 @@ window.LegacyTemplateParts['shell'] = `
                 <button type="button" id="layer-popover-toggle" class="map-icon-button" aria-label="Chọn lớp bản đồ" aria-expanded="false" aria-controls="layer-popover"><i class="bi bi-layers"></i></button>
                 <fieldset id="layer-popover" class="map-layer-popover" hidden><legend>Lớp hiển thị</legend>
                     <label><input type="checkbox" id="layer-station" checked><span><i class="bi bi-broadcast-pin"></i> Trạm quan trắc</span></label>
+                    <label><input type="checkbox" id="layer-provinces" checked><span><i class="bi bi-geo"></i> Ranh giới tỉnh thành</span></label>
                     <label><input type="checkbox" id="layer-cors" checked><span><i class="bi bi-crosshair"></i> Trạm CORS base</span></label>
                     <label><input type="checkbox" id="layer-rescue" checked><span><i class="bi bi-life-preserver"></i> Yêu cầu cứu hộ</span></label>
                     <label><input type="checkbox" id="layer-heatmap"><span><i class="bi bi-fire"></i> Mật độ cảnh báo</span></label>
@@ -129,7 +135,8 @@ window.LegacyTemplateParts['shell'] = `
         </div>
     </div>
 
-    <!-- MAP -->
+    <!-- MAP ENGINES -->
+    <div id="mapbox-globe" class="mapbox-globe-canvas is-hidden"></div>
     <div id="map">
     </div>
 

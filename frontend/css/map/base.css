@@ -96,6 +96,40 @@ body {
     z-index: 1;
 }
 
+#mapbox-globe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 2;
+    background: #020611;
+}
+
+#mapbox-globe.is-hidden {
+    display: none !important;
+}
+
+.map-globe-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 8px;
+    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--text-primary);
+    transition: all 0.2s ease;
+}
+
+.map-globe-toggle-btn:hover,
+.map-globe-toggle-btn.is-active {
+    background: rgba(14, 165, 233, 0.2);
+    border-color: #38bdf8;
+    color: #38bdf8;
+}
+
 /* Offset Leaflet Top Controls to start below Navbar */
 .leaflet-top {
     top: 80px !important;
