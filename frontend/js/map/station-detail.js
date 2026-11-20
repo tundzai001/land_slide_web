@@ -152,6 +152,15 @@ async function fetchStationHistory(stationId, { hours = activeChartHours, sensor
 }
 
 function focusMapOnStation(stationId, skipZoom = false) {
+    if (window.MapboxGlobeController?.active && !skipZoom) {
+        const station = (allStations || []).find(s => Number(s.id) === Number(stationId));
+        const lat = Number(station?.location?.lat ?? station?.latitude);
+        const lon = Number(station?.location?.lon ?? station?.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+            window.MapboxGlobeController.flyTo(lat, lon, 14);
+        }
+    }
+
     const marker = markers[stationId];
     const leafletMap = getLeafletMap();
     if (skipZoom || !marker || !leafletMap) return Promise.resolve();

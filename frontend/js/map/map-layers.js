@@ -716,64 +716,34 @@ async function loadAndRenderProvinces(show = true) {
     provincesGeoJsonLayer.bringToBack();
 }
 
-function setupGlobeToggleControl() {
-    const btn = document.getElementById('btn-toggle-globe');
+async function initGlobeDefault() {
     const globeContainer = document.getElementById('mapbox-globe');
-    if (!btn || !globeContainer) return;
+    if (!globeContainer) return;
 
-    let isGlobeActive = false;
-
-    async function setGlobeMode(active) {
-        isGlobeActive = active;
-        btn.classList.toggle('is-active', active);
-        const label = document.getElementById('globe-toggle-label');
-        if (label) {
-            label.textContent = active ? 'Địa cầu 3D' : 'Bản đồ 2D';
-        }
-
-        if (active) {
-            try {
-                await window.MapboxGlobeController?.init(globeContainer);
-                window.MapboxGlobeController?.setActive(true);
-                window.MapboxGlobeController?.updateStations(window.allStations || []);
-            } catch (err) {
-                console.warn('Mapbox 3D Globe không khả dụng:', err);
-                isGlobeActive = false;
-                btn.classList.remove('is-active');
-                if (label) label.textContent = 'Bản đồ 2D';
-                window.MapboxGlobeController?.setActive(false);
-            }
-        } else {
-            window.MapboxGlobeController?.setActive(false);
-            if (window.map) {
-                window.map.invalidateSize();
-            }
+    try {
+        await window.MapboxGlobeController?.init(globeContainer);
+        window.MapboxGlobeController?.setActive(true);
+        window.MapboxGlobeController?.updateStations(window.allStations || []);
+    } catch (err) {
+        console.warn('Mapbox 3D Globe không khả dụng, sử dụng bản đồ 2D fallback:', err);
+        window.MapboxGlobeController?.setActive(false);
+        if (window.map) {
+            window.map.invalidateSize();
         }
     }
+}
 
-    btn.addEventListener('click', () => {
-        if (!isGlobeActive) {
-            void setGlobeMode(true);
-            return;
-        }
-        const isGlobe = window.MapboxGlobeController?.projection === 'globe';
-        const nextProj = isGlobe ? 'mercator' : 'globe';
-        window.MapboxGlobeController?.setProjection(nextProj);
-        const label = document.getElementById('globe-toggle-label');
-        if (label) {
-            label.textContent = isGlobe ? 'Bản đồ 2D' : 'Địa cầu 3D';
-        }
-        btn.classList.toggle('is-active', !isGlobe);
-    });
+function setupGlobeToggleControl() {
+    const globeContainer = document.getElementById('mapbox-globe');
+    if (globeContainer) {
+        void initGlobeDefault();
+    }
 
     const focusGlobeBtn = document.getElementById('btn-focus-globe');
     focusGlobeBtn?.addEventListener('click', () => {
         if (window.MapboxGlobeController?.active) {
             window.MapboxGlobeController.setProjection('globe');
             window.MapboxGlobeController.focusGlobe();
-            btn.classList.add('is-active');
-            const label = document.getElementById('globe-toggle-label');
-            if (label) label.textContent = 'Địa cầu 3D';
         } else if (window.map) {
             window.map.setView([16.0, 108.2], 3);
         }
@@ -787,15 +757,4 @@ function setupGlobeToggleControl() {
             window.map.setView([16.0, 108.2], 6);
         }
     });
-
-    // Tự động khởi chạy Mapbox 3D Globe khi khả dụng
-    async function tryAutoStartGlobe() {
-        try {
-            await window.MapboxGlobeController?.init(globeContainer);
-            await setGlobeMode(true);
-        } catch (err) {
-            console.debug('Mapbox 3D Globe fallback to Leaflet:', err);
-        }
-    }
-    void tryAutoStartGlobe();
 }
