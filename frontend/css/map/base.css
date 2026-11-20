@@ -127,8 +127,8 @@ body {
 
 .map-globe-toggle-btn:hover,
 .map-globe-toggle-btn.is-active {
-    background-color: #0284c7;
-    border-color: #0284c7;
+    background-color: #0369a1;
+    border-color: #0369a1;
     color: #ffffff;
 }
 
@@ -170,8 +170,8 @@ body {
 
 .station-map-popup .btn-outline-info {
     background-color: transparent;
-    color: #0284c7;
-    border-color: #0284c7;
+    color: #0369a1;
+    border-color: #0369a1;
     font-weight: 600;
     transition-property: background-color, color, border-color;
     transition-duration: 0.2s;
@@ -179,8 +179,8 @@ body {
 }
 
 .station-map-popup .btn-outline-info:hover {
-    background-color: #0284c7;
-    border-color: #0284c7;
+    background-color: #0369a1;
+    border-color: #0369a1;
     color: #ffffff;
 }
 

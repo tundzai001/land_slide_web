@@ -36,11 +36,11 @@
 
     function escapeHtml(str) {
         return String(str ?? '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
     }
 
     function pointInRing(pt, ring) {
@@ -58,29 +58,22 @@
         return inside;
     }
 
+    function pointInPolygonCoords(pt, rings) {
+        if (!rings?.[0] || !pointInRing(pt, rings[0])) return false;
+        for (let i = 1; i < rings.length; i++) {
+            if (pointInRing(pt, rings[i])) return false;
+        }
+        return true;
+    }
+
     function pointInGeometry(pt, geom) {
         if (!geom?.coordinates) return false;
         if (geom.type === 'Polygon') {
-            const coords = geom.coordinates;
-            if (!coords[0] || !pointInRing(pt, coords[0])) return false;
-            for (let i = 1; i < coords.length; i++) {
-                if (pointInRing(pt, coords[i])) return false;
-            }
-            return true;
+            return pointInPolygonCoords(pt, geom.coordinates);
         }
         if (geom.type === 'MultiPolygon') {
-            for (let p = 0; p < geom.coordinates.length; p++) {
-                const coords = geom.coordinates[p];
-                if (coords[0] && pointInRing(pt, coords[0])) {
-                    let inHole = false;
-                    for (let i = 1; i < coords.length; i++) {
-                        if (pointInRing(pt, coords[i])) {
-                            inHole = true;
-                            break;
-                        }
-                    }
-                    if (!inHole) return true;
-                }
+            for (const polygonCoords of geom.coordinates) {
+                if (pointInPolygonCoords(pt, polygonCoords)) return true;
             }
         }
         return false;
