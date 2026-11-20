@@ -196,6 +196,9 @@ async function openProjectDashboard(project, center, trigger) {
     demSelect.hidden = dems.length < 2;
     demSelect.onchange = () => loadProjectDashboardDem(project, demSelect.value, requestId);
 
+    if (window.MapboxGlobeController?.active) {
+        window.MapboxGlobeController.flyTo(center[0], center[1], 14.5);
+    }
     const currentZoom = leafletMap.getZoom();
     const targetZoom = Math.max(currentZoom, 14);
     const animate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -544,6 +547,10 @@ async function loadProjectsAndClusters() {
             : await fetch('/api/projects');
         if (!res.ok) return;
         const projects = await res.json();
+        if (typeof window !== 'undefined') {
+            window.allProjects = projects;
+            window.MapboxGlobeController?.updateProjects(projects);
+        }
         if (mapInteractionActive) {
             pendingProjectsReload = true;
             return;
@@ -985,4 +992,9 @@ function updateMarker(station) {
         marker.on('click', () => selectStation(station.id));
         markers[station.id] = marker;
     }
+}
+
+if (typeof window !== 'undefined') {
+    window.openProjectDashboard = openProjectDashboard;
+    window._computeDemCenter = _computeDemCenter;
 }

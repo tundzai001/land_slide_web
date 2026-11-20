@@ -816,3 +816,13 @@ html[data-theme="dark"] .station-filter-bar { background:var(--map-surface) !imp
 .chart-data-scroll th { position:sticky; top:0; background:var(--map-surface-subtle); font-weight:600; }
 .chart-data-scroll td, .chart-data-scroll th { padding:9px 12px; border-bottom:1px solid var(--map-line); white-space:nowrap; text-align:right; }
 .chart-data-scroll td:first-child, .chart-data-scroll th:first-child { text-align:left; }
+
+.project-map-mapbox-popup .mapboxgl-popup-content {
+    background: transparent !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+}
+
+.project-map-mapbox-popup .mapboxgl-popup-tip {
+    border-top-color: var(--map-surface) !important;
+}

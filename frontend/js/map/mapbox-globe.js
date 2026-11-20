@@ -150,6 +150,76 @@
         return { type: 'FeatureCollection', features };
     }
 
+    function resolveProjectCenter(project, allStations = []) {
+        const stations = (allStations || []).filter(station => (
+            String(station.project_id) === String(project.id) &&
+            station.location?.lat != null && station.location?.lon != null
+        ));
+        const points = stations.map(station => [Number(station.location.lat), Number(station.location.lon)]);
+        const dems = Array.isArray(project.dems) ? project.dems : [];
+
+        let demCenter = null;
+        if (!points.length && !(project.location?.lat != null && project.location?.lon != null)) {
+            demCenter = typeof window._computeDemCenter === 'function' ? window._computeDemCenter(dems) : null;
+        }
+
+        if (!points.length && !(project.location?.lat != null && project.location?.lon != null) && !demCenter) {
+            return null;
+        }
+
+        const center = (project.location?.lat != null && project.location?.lon != null)
+            ? [Number(project.location.lat), Number(project.location.lon)]
+            : (demCenter || points.reduce((sum, p) => [sum[0] + p[0], sum[1] + p[1]], [0, 0]).map(v => v / points.length));
+
+        return {
+            center,
+            stationCount: stations.length,
+            demCount: dems.length,
+        };
+    }
+
+    function createProjectMarkerElement(project, stationCount, demCount) {
+        const el = document.createElement('div');
+        el.className = 'project-map-marker';
+        el.style.width = '52px';
+        el.style.height = '60px';
+        el.style.cursor = 'pointer';
+        el.setAttribute('role', 'button');
+        el.setAttribute('tabindex', '0');
+        const name = String(project.name || 'Dự án');
+        const countLabel = stationCount || (demCount ? '3D' : 0);
+        el.setAttribute('aria-label', `${name}: xem toàn bộ ${stationCount} trạm cảm biến`);
+        el.innerHTML = '<span class="project-map-halo" aria-hidden="true"></span>' +
+            '<span class="project-map-point" aria-hidden="true">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M4 20V8l8-4 8 4v12H4Z"/>' +
+            '<path d="M9 20v-5h6v5M8 10h.01M12 10h.01M16 10h.01"/>' +
+            '</svg></span>' +
+            `<span class="project-map-count" aria-hidden="true">${countLabel}</span>`;
+        return el;
+    }
+
+    function createProjectTooltip(project, stationCount) {
+        const name = String(project.name || 'Dự án');
+        const tooltipPopup = new window.mapboxgl.Popup({
+            offset: [0, -56],
+            closeButton: false,
+            closeOnClick: false,
+            className: 'project-map-mapbox-popup',
+        });
+        const tooltipContent = document.createElement('div');
+        tooltipContent.className = 'project-map-tooltip';
+        const titleEl = document.createElement('strong');
+        titleEl.textContent = name;
+        const hintEl = document.createElement('span');
+        hintEl.textContent = stationCount
+            ? `${stationCount} trạm · Bấm để mở dashboard`
+            : 'Mô hình DEM 3D · Bấm để xem địa hình';
+        tooltipContent.append(titleEl, hintEl);
+        tooltipPopup.setDOMContent(tooltipContent);
+        return tooltipPopup;
+    }
+
     class MapboxGlobeController {
         map = null;
         container = null;
@@ -163,6 +233,8 @@
         spinInterval = null;
         provincesGeoJson = null;
         popup = null;
+        projects = [];
+        projectMarkers = [];
 
         async init(container) {
             if (this.map) return this.map;
@@ -221,6 +293,13 @@
             map.on('load', () => {
                 this.ready = true;
                 this._startSpin();
+                if (this.projects.length === 0 && window.allProjects?.length) {
+                    this.projects = window.allProjects;
+                }
+                this._renderProjectMarkers();
+            });
+            map.on('zoom', () => {
+                this._updateMarkersVisibility();
             });
 
             const pause = () => {
@@ -378,7 +457,7 @@
             map.on('click', 'vietnam-island-labels', (e) => {
                 const p = e.features?.[0]?.properties;
                 if (!p) return;
-                const name = String(p.name || '').replace('\n', ' - ');
+                const name = String(p.name || '').replaceAll('\n', ' - ');
                 const desc = name.includes('Hoàng Sa') || name.includes('Trường Sa')
                     ? 'Quần đảo thuộc chủ quyền thiêng liêng của nước Cộng hòa Xã hội Chủ nghĩa Việt Nam.'
                     : 'Vùng biển chủ quyền thuộc quyền tài phán của Việt Nam.';
@@ -402,6 +481,7 @@
                 id: 'station-clusters-glow',
                 type: 'circle',
                 source: 'station-pins',
+                minzoom: 10,
                 filter: ['has', 'point_count'],
                 paint: {
                     'circle-radius': [
@@ -421,6 +501,7 @@
                 id: 'station-clusters',
                 type: 'circle',
                 source: 'station-pins',
+                minzoom: 10,
                 filter: ['has', 'point_count'],
                 paint: {
                     'circle-radius': [
@@ -448,6 +529,7 @@
                 id: 'station-cluster-count',
                 type: 'symbol',
                 source: 'station-pins',
+                minzoom: 10,
                 filter: ['has', 'point_count'],
                 layout: {
                     'text-field': '{point_count_abbreviated}',
@@ -463,6 +545,7 @@
                 id: 'station-pins-glow',
                 type: 'circle',
                 source: 'station-pins',
+                minzoom: 10,
                 filter: ['!', ['has', 'point_count']],
                 paint: {
                     'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 8, 8, 14],
@@ -476,6 +559,7 @@
                 id: 'station-pins-circle',
                 type: 'circle',
                 source: 'station-pins',
+                minzoom: 10,
                 filter: ['!', ['has', 'point_count']],
                 paint: {
                     'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 4, 8, 7],
@@ -629,6 +713,100 @@
         updateStations(stations) {
             const source = this.map?.getSource?.('station-pins');
             source?.setData?.(createStationGeoJson(stations));
+            if (this.ready) {
+                this._renderProjectMarkers();
+            }
+        }
+
+        updateProjects(projects) {
+            this.projects = Array.isArray(projects) ? projects : [];
+            if (this.ready) {
+                this._renderProjectMarkers();
+            }
+        }
+
+        _renderProjectMarkers() {
+            if (!this.map || !this.ready || typeof window.mapboxgl?.Marker !== 'function') return;
+
+            for (const item of this.projectMarkers) {
+                item.tooltipPopup?.remove();
+                item.marker?.remove();
+            }
+            this.projectMarkers = [];
+
+            const projects = this.projects.length > 0 ? this.projects : (window.allProjects || []);
+            const allStations = window.allStations || [];
+
+            for (const project of projects) {
+                const resolved = resolveProjectCenter(project, allStations);
+                if (!resolved) continue;
+
+                const { center, stationCount, demCount } = resolved;
+                const [lat, lon] = center;
+                if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+
+                const el = createProjectMarkerElement(project, stationCount, demCount);
+                const tooltipPopup = createProjectTooltip(project, stationCount);
+
+                el.addEventListener('mouseenter', () => {
+                    tooltipPopup.setLngLat([lon, lat]).addTo(this.map);
+                });
+                el.addEventListener('mouseleave', () => {
+                    tooltipPopup.remove();
+                });
+
+                const handleProjectClick = (evt) => {
+                    evt?.stopPropagation?.();
+                    tooltipPopup.remove();
+                    this._stopSpin();
+                    this.map?.flyTo({
+                        center: [lon, lat],
+                        zoom: Math.max(this.map.getZoom(), 14),
+                        duration: 1200,
+                    });
+                    document.getElementById('station-list-sidebar')?.classList.remove('is-open');
+                    document.getElementById('detail-sidebar')?.classList.remove('is-open');
+                    document.getElementById('gnss-advanced-sidepanel')?.classList.remove('is-open');
+                    document.getElementById('charts-panel')?.classList.remove('is-open');
+                    document.getElementById('longterm-overlay')?.classList.remove('active');
+
+                    if (typeof window.openProjectDashboard === 'function') {
+                        void window.openProjectDashboard(project, [lat, lon], el);
+                    }
+                };
+
+                el.addEventListener('click', handleProjectClick);
+                el.addEventListener('keydown', (e) => {
+                    if (['Enter', ' '].includes(e.key)) {
+                        e.preventDefault();
+                        handleProjectClick(e);
+                    }
+                });
+
+                const marker = new window.mapboxgl.Marker({ element: el, anchor: 'bottom' })
+                    .setLngLat([lon, lat])
+                    .addTo(this.map);
+
+                this.projectMarkers.push({
+                    marker,
+                    el,
+                    tooltipPopup,
+                    project,
+                    center: [lat, lon],
+                    stationCount,
+                });
+            }
+
+            this._updateMarkersVisibility();
+        }
+
+        _updateMarkersVisibility() {
+            if (!this.map) return;
+            const zoom = this.map.getZoom();
+            for (const item of this.projectMarkers) {
+                const hide = item.stationCount > 0 && zoom >= 13;
+                item.el.style.display = hide ? 'none' : '';
+            }
         }
 
         setProvincesVisible(visible) {
