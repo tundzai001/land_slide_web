@@ -1259,7 +1259,7 @@ if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
         .then(res => res.ok ? res.json() : null)
         .then(cfg => {
             const token = cfg?.mapbox_public_token || cfg?.mapbox_token || '';
-            if (token && token.startsWith('pk.') && token !== mapboxAccessToken) {
+            if (token?.startsWith('pk.') && token !== mapboxAccessToken) {
                 mapboxAccessToken = token;
                 window.mapboxAccessToken = mapboxAccessToken;
                 if (window.map && !mapboxFallbackActive && typeof switchMapTiles === 'function') {
