@@ -9,22 +9,30 @@ function switchMapTiles(forceFallback = false) {
         map.removeLayer(currentTileLayer);
     }
 
-    if (forceFallback) {
+    if (forceFallback && typeof mapboxFallbackActive !== 'undefined') {
         mapboxFallbackActive = true;
     }
 
-    const isUsingMapbox = !mapboxFallbackActive && Boolean(mapboxAccessToken);
-    const tileUrl = isUsingMapbox
-        ? getMapboxTileUrl(activeBasemap, mapboxAccessToken)
-        : GOOGLE_FALLBACK_BASEMAPS[activeBasemap].url;
+    const hasMapbox = typeof mapboxAccessToken !== 'undefined' && Boolean(mapboxAccessToken);
+    const isFallback = typeof mapboxFallbackActive !== 'undefined' && Boolean(mapboxFallbackActive);
+    const canUseMapbox = !isFallback && hasMapbox && typeof getMapboxTileUrl === 'function';
 
-    const attribution = isUsingMapbox
+    let tileUrl = '';
+    if (canUseMapbox) {
+        tileUrl = getMapboxTileUrl(activeBasemap, mapboxAccessToken);
+    } else if (typeof GOOGLE_FALLBACK_BASEMAPS !== 'undefined' && GOOGLE_FALLBACK_BASEMAPS[activeBasemap]?.url) {
+        tileUrl = GOOGLE_FALLBACK_BASEMAPS[activeBasemap].url;
+    } else if (typeof MAP_BASEMAPS !== 'undefined' && MAP_BASEMAPS[activeBasemap]?.url) {
+        tileUrl = MAP_BASEMAPS[activeBasemap].url;
+    }
+
+    const attribution = canUseMapbox
         ? '© <a href="https://www.mapbox.com/about/maps/" target="_blank">Mapbox</a> © <a href="http://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
         : '© Google Maps';
 
-    const tileOptions = isUsingMapbox
+    const tileOptions = canUseMapbox
         ? { maxZoom: 22, tileSize: 256, updateWhenIdle: true, keepBuffer: 2 }
-        : { ...TILE_OPTIONS.light };
+        : { ...(typeof TILE_OPTIONS !== 'undefined' ? TILE_OPTIONS.light : {}) };
 
     currentTileLayer = L.tileLayer(tileUrl, {
         ...tileOptions,
@@ -33,7 +41,7 @@ function switchMapTiles(forceFallback = false) {
 
     const layer = currentTileLayer;
     const status = document.getElementById('basemap-status');
-    const label = MAP_BASEMAPS[activeBasemap].label;
+    const label = (typeof MAP_BASEMAPS !== 'undefined' && MAP_BASEMAPS[activeBasemap]?.label) || 'Bản đồ';
 
     if (status) {
         status.textContent = `Đang tải ${label.toLowerCase()}…`;
@@ -44,12 +52,14 @@ function switchMapTiles(forceFallback = false) {
 
     layer.on('tileerror', () => {
         tileErrorCount++;
-        if (isUsingMapbox && tileErrorCount >= 2 && !failed && layer === currentTileLayer) {
+        if (canUseMapbox && tileErrorCount >= 2 && !failed && layer === currentTileLayer) {
             failed = true;
             console.warn(`⚠️ [MAP] Mapbox không khả dụng (${tileErrorCount} lỗi tile). Đang tự động chuyển sang bản đồ dự phòng Google Maps...`);
-            mapboxFallbackActive = true;
+            if (typeof mapboxFallbackActive !== 'undefined') {
+                mapboxFallbackActive = true;
+            }
             switchMapTiles(true);
-        } else if (!isUsingMapbox) {
+        } else if (!canUseMapbox) {
             failed = true;
             if (layer === currentTileLayer && status) {
                 status.textContent = 'Một số ô nền chưa tải được. Thử đổi nền hoặc tải lại.';
@@ -59,7 +69,8 @@ function switchMapTiles(forceFallback = false) {
 
     layer.on('load', () => {
         if (layer === currentTileLayer && status && !failed) {
-            status.textContent = mapboxFallbackActive ? `${label} (Dự phòng Google Maps)` : label;
+            const isFallbackNow = typeof mapboxFallbackActive !== 'undefined' && mapboxFallbackActive;
+            status.textContent = isFallbackNow ? `${label} (Dự phòng Google Maps)` : label;
         }
     });
 
