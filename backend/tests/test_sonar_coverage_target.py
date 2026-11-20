@@ -1734,6 +1734,88 @@ class TestStationAnalysisAndRuntimeCoverage:
         assert stats["stations"] == 5
         assert stats["devices"] == 5
 
+    def test_incident_read_conditions(self):
+        from app.features.incidents.read_router import IncidentQueryFilter, _build_incident_conditions
+
+        f_valid = IncidentQueryFilter(
+            status_filter="new",
+            priority="HIGH",
+            source_severity="CRITICAL",
+            signal_state="ACTIVE",
+            source_kind="SENSOR_ALERT",
+            project_id=1,
+            station_id=2,
+            assigned_to=3,
+            q="Test Incident",
+        )
+        conds = _build_incident_conditions(f_valid)
+        assert len(conds) == 9
+
+        with pytest.raises(HTTPException) as exc:
+            _build_incident_conditions(IncidentQueryFilter(status_filter="invalid_status"))
+        assert exc.value.status_code == 422
+
+        with pytest.raises(HTTPException) as exc:
+            _build_incident_conditions(IncidentQueryFilter(priority="invalid_priority"))
+        assert exc.value.status_code == 422
+
+    @pytest.mark.anyio
+    async def test_project_admin_extra_coverage(self):
+        from app.features.projects.admin import (
+            _validate_and_update_project_code,
+            _apply_project_metadata_updates,
+            update_project,
+        )
+
+        db = AsyncMock()
+        proj = MagicMock(project_code="OLD", id=1)
+
+        # _validate_and_update_project_code
+        await _validate_and_update_project_code(db, proj, 1, {})
+        assert proj.project_code == "OLD"
+
+        with pytest.raises(HTTPException) as exc:
+            await _validate_and_update_project_code(db, proj, 1, {"project_code": "  "})
+        assert exc.value.status_code == 422
+
+        # duplicate
+        mock_dup = MagicMock()
+        mock_dup.scalar_one_or_none.return_value = MagicMock()
+        db.execute.return_value = mock_dup
+        with pytest.raises(HTTPException) as exc:
+            await _validate_and_update_project_code(db, proj, 1, {"project_code": "NEW"})
+        assert exc.value.status_code == 409
+
+        # valid update
+        mock_dup.scalar_one_or_none.return_value = None
+        await _validate_and_update_project_code(db, proj, 1, {"project_code": "NEW"})
+        assert proj.project_code == "NEW"
+
+        # _apply_project_metadata_updates
+        with pytest.raises(HTTPException) as exc:
+            _apply_project_metadata_updates(proj, {"name": " "})
+        assert exc.value.status_code == 422
+
+        _apply_project_metadata_updates(proj, {
+            "name": "Project Name",
+            "description": "Desc",
+            "is_active": True,
+            "gnss_clusters": [{"c": 1}],
+            "auto_adjustment_config": {"enabled": True},
+        })
+        assert proj.name == "Project Name"
+        assert proj.description == "Desc"
+        assert proj.is_active is True
+
+        # update_project 404
+        mock_res_empty = MagicMock()
+        mock_res_empty.scalar_one_or_none.return_value = None
+        db.execute.return_value = mock_res_empty
+        with pytest.raises(HTTPException) as exc:
+            await update_project(999, {}, db, MagicMock())
+        assert exc.value.status_code == 404
+
+
 
 
 
