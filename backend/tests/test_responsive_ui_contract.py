@@ -90,7 +90,7 @@ class ResponsiveUiContractTests(unittest.TestCase):
             "admin-app.min.js", "admin.min.css", "app-base.min.css", "app-runtime.min.js",
             "aitogy.png", "app.html", "build-manifest.json", "digital-twin.min.js", "index.html",
             "about.html", "about.min.css", "about.min.js", "landing.min.css", "landing.min.js", "login.min.css", "map-app.min.js",
-            "map.html", "map.min.css", "shared.min.js", "social-card.png",
+            "map.html", "map.min.css", "mapbox-gl-sdk.min.css", "mapbox-gl-sdk.min.js", "shared.min.js", "social-card.png",
         }
         self.assertEqual({item.name for item in dist_dir.iterdir()}, expected)
         for name in ("index.html", "about.html", "map.html", "app.html"):
