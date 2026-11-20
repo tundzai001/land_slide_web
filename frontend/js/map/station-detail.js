@@ -1,3 +1,4 @@
+/* global stationHistoryController:writable, currentStationData:writable, stationSelectionSequence:writable, stationSelectionController:writable, realtimeImuTargetQuaternion:writable */
 // =====================================================
 const CHART_SENSOR_TYPES = Object.freeze(window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu']);
 const CHART_RANGE_OPTIONS = Object.freeze([

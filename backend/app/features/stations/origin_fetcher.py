@@ -134,7 +134,10 @@ class GNSSLiveFetcher:
 
             if self.use_tls:
                 import ssl
-                client.tls_set_context(ssl.create_default_context())
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = True
+                ctx.verify_mode = ssl.CERT_REQUIRED
+                client.tls_set_context(ctx)
 
             client.connect(self.broker, self.port, 60)
             client.loop_start()

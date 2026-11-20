@@ -110,11 +110,11 @@ class AuthManager {
         }, 60 * 1000);
     }
 
-    // ✅ NEW: Verify token by calling backend
+    // Verify token by calling server 
     async verifyToken() {
         if (!this.token) return false;
 
-        if (this._verifyPromise) return this._verifyPromise;
+        if (this._verifyPromise != null) return this._verifyPromise;
 
         const verification = (async () => {
             this._isVerifyingToken = true;
@@ -170,7 +170,7 @@ class AuthManager {
 
     handleUnauthorizedResponse(source = '') {
         if (!this.token || this._isVerifyingToken) return;
-        if (this._unauthorizedCheckPromise) return this._unauthorizedCheckPromise;
+        if (this._unauthorizedCheckPromise != null) return this._unauthorizedCheckPromise;
 
         const confirmation = (async () => {
             await new Promise(resolve => setTimeout(resolve, 200));

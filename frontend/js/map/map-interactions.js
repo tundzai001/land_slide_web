@@ -1,3 +1,4 @@
+/* global stationSelectionSequence:writable, realtimeImuActive:writable, gnssLayoutInteractionActive:writable, rainCorrelationAiRunning:writable, isRainCorrelationAiEnabled:writable */
 function _setupSidebarNavListeners(stationSidebar, hamburgerBtn, sidebarCloseTab) {
     // Hamburger → Toggle sidebar trái
     if (hamburgerBtn && stationSidebar) {

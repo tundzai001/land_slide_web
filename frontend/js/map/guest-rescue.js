@@ -1,3 +1,4 @@
+/* global guestRescueImageBlob:writable, guestRescueImagePreviewUrl:writable */
 let guestRescueEnabled = false;
 
 async function setupGuestRescueUI() {

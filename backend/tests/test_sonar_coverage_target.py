@@ -1247,6 +1247,287 @@ class TestStationAnalysisAndRuntimeCoverage:
                 assert rec_p == 1
                 assert len(summary) == 1
 
+    def test_simulation_reports_all_formats(self):
+        from app.features.data_export.reports.simulation import (
+            run_payload, build_json, build_xlsx, build_pdf, _sheet_from_rows, _build_line_chart, _pdf_font
+        )
+        mock_run = MagicMock(
+            schema_version="1.0",
+            engine_version="2.0",
+            id=123,
+            display_name="Test Simulation",
+            status="completed",
+            mode="deterministic",
+            created_by_user_id=1,
+            created_by_username="admin",
+            project_id=10,
+            project_code="PRJ10",
+            project_name="Dự án 10",
+            station_id=20,
+            station_code="ST20",
+            station_name="Trạm 20",
+            seed=42,
+            sim_duration_seconds=3600,
+            created_at=1700000000,
+            started_at=1700000005,
+            finished_at=1700003605,
+            parameters={"slope_deg": 35.0, "cohesion_kpa": 12.5},
+            parameter_sources={"slope_deg": "sensor", "cohesion_kpa": "lab"},
+            sensor_snapshot={"gnss": {"timestamp": 1700000000, "is_online": True, "data": {"x": 1.0}}},
+            time_series=[
+                {"time_s": 0, "fos": 1.5, "cumulative_rain_mm": 0, "pore_pressure_ratio": 0.1, "velocity_m_s": 0.0, "runout_m": 0, "houses_affected": 0, "state": "stable"},
+                {"time_s": 1800, "fos": 1.1, "cumulative_rain_mm": 50, "pore_pressure_ratio": 0.3, "velocity_m_s": 0.05, "runout_m": 2, "houses_affected": 1, "state": "warning"},
+                {"time_s": 3600, "fos": 0.9, "cumulative_rain_mm": 120, "pore_pressure_ratio": 0.6, "velocity_m_s": 0.5, "runout_m": 15, "houses_affected": 3, "state": "failure"},
+            ],
+            events=[{"time_s": 3600, "state": "failure", "label": "Vỡ cung trượt"}],
+            summary={"fos_min": 0.9, "houses_affected": 3, "trees_affected": 10, "runout_m": 15, "final_volume_m3": 5000},
+            terrain_profile=[
+                {"x_m": 0, "elevation_m": 100, "slip_elevation_m": 90},
+                {"x_m": 50, "elevation_m": 80, "slip_elevation_m": 70},
+                {"x_m": 120, "elevation_m": 30, "slip_elevation_m": 25},
+            ],
+            warnings=["Độ dốc lớn hơn 30 độ"],
+            error_detail=None,
+        )
+
+        payload = run_payload(mock_run)
+        assert payload["id"] == 123
+        assert payload["status"] == "completed"
+
+        json_bytes = build_json(mock_run)
+        assert isinstance(json_bytes, bytes)
+        assert b"Test Simulation" in json_bytes
+
+        xlsx_bytes = build_xlsx(mock_run)
+        assert isinstance(xlsx_bytes, bytes)
+        assert len(xlsx_bytes) > 500
+
+        pdf_bytes = build_pdf(mock_run)
+        assert isinstance(pdf_bytes, bytes)
+        assert len(pdf_bytes) > 500
+
+        mock_run.status = "failed"
+        mock_run.error_detail = "Sim execution error"
+        mock_run.warnings = []
+        pdf_bytes_failed = build_pdf(mock_run)
+        assert isinstance(pdf_bytes_failed, bytes)
+
+    def test_gnss_adjustment_clusters_functions(self):
+        from app.features.gnss_adjustment.clusters import (
+            _resolve_station_ids,
+            _normalize_candidate,
+            _validate_backup_candidate,
+            _extract_aicaster_users,
+            _build_cluster_entry,
+            normalize_active_clusters,
+            restrict_clusters_to_online_stations,
+            streaming_gnss_station_ids,
+        )
+        st1 = MagicMock(id=1, station_code="ST01", config={"gnss_aicaster_user": {"username": "u1", "caster_host": "c1"}})
+        st2 = MagicMock(id=2, station_code="ST02", config={})
+        st3 = MagicMock(id=3, station_code="ST03", config={})
+        stations_by_id = {1: st1, 2: st2, 3: st3}
+        stations_by_code = {"ST01": st1, "ST02": st2, "ST03": st3}
+
+        # _resolve_station_ids
+        resolved = _resolve_station_ids([1, "ST02", "INVALID"], stations_by_id, stations_by_code)
+        assert resolved == [1, 2]
+        assert _resolve_station_ids("not-a-list", stations_by_id, stations_by_code) == []
+
+        # _normalize_candidate
+        valid_source = {
+            "base_lat": 21.0,
+            "base_lon": 105.0,
+            "base_alt": 50.0,
+            "base_station": "BASE01",
+            "base_stream": "stream1",
+            "base_stream_host": "host1",
+            "base_stream_port": 2101,
+            "base_stream_mp": "MP1",
+        }
+        cand = _normalize_candidate(valid_source, "primary", 0)
+        assert cand["role"] == "primary"
+        assert cand["base_lat"] == 21.0
+
+        with pytest.raises(ValueError, match="missing a valid coordinate"):
+            _normalize_candidate({}, "primary", 0)
+
+        with pytest.raises(ValueError, match="invalid primary fixed-base coordinate"):
+            _normalize_candidate({"base_lat": 95.0, "base_lon": 105.0, "base_alt": 0.0}, "primary", 0)
+
+        with pytest.raises(ValueError, match="invalid primary fixed-base coordinate"):
+            _normalize_candidate({"base_lat": 0.0, "base_lon": 0.0, "base_alt": 0.0}, "primary", 0)
+
+        # _validate_backup_candidate
+        backup_valid = {
+            "base_station": "BASE02",
+            "base_stream_host": "host2",
+            "base_stream_mp": "MP1",
+        }
+        _validate_backup_candidate(cand, backup_valid, 0)
+
+        with pytest.raises(ValueError, match="must differ from its primary base"):
+            _validate_backup_candidate(cand, {"base_station": "BASE01", "base_stream_host": "h", "base_stream_mp": "MP1"}, 0)
+
+        with pytest.raises(ValueError, match="requires an explicit CORS stream"):
+            _validate_backup_candidate(cand, {"base_station": "BASE02", "base_stream_host": "", "base_stream_mp": "MP1"}, 0)
+
+        with pytest.raises(ValueError, match="same mountpoint"):
+            _validate_backup_candidate(cand, {"base_station": "BASE02", "base_stream_host": "h", "base_stream_mp": "MP2"}, 0)
+
+        # _extract_aicaster_users
+        users = _extract_aicaster_users([1, 2], stations_by_id)
+        assert "ST01" in users
+        assert users["ST01"]["username"] == "u1"
+
+        # _build_cluster_entry
+        assert _build_cluster_entry({"stations": [1]}, 0, stations_by_id, stations_by_code) is None
+
+        cluster_raw = dict(valid_source)
+        cluster_raw["stations"] = [1, 2]
+        entry = _build_cluster_entry(cluster_raw, 0, stations_by_id, stations_by_code)
+        assert entry is not None
+        assert entry["stations"] == [1, 2]
+        assert entry["rovers"] == ["ST01", "ST02"]
+
+        # normalize_active_clusters
+        stations_list = [st1, st2, st3]
+        norm = normalize_active_clusters([cluster_raw], stations_list, None)
+        assert len(norm) == 1
+
+        norm_sel = normalize_active_clusters([cluster_raw], stations_list, [[1, 2]])
+        assert len(norm_sel) == 1
+
+        with pytest.raises(ValueError, match="no valid GNSS cluster"):
+            normalize_active_clusters([], stations_list, None)
+
+        with pytest.raises(ValueError, match="at least two project stations"):
+            normalize_active_clusters([cluster_raw], stations_list, [[1]])
+
+        with pytest.raises(ValueError, match="do not match a configured GNSS cluster"):
+            normalize_active_clusters([cluster_raw], stations_list, [[1, 3]])
+
+        # restrict_clusters_to_online_stations
+        active_c, excl = restrict_clusters_to_online_stations(norm, {1, 2})
+        assert len(active_c) == 1
+        assert excl == []
+
+        with pytest.raises(ValueError, match="fewer than two online GNSS rovers"):
+            restrict_clusters_to_online_stations(norm, {1})
+
+        # streaming_gnss_station_ids
+        with patch("app.features.gnss_adjustment.clusters.mqtt_service") as mock_mqtt:
+            mock_mqtt.round_robin_manager.get_gnss_stream_health.return_value = {"payload_recent": True}
+            online_ids = streaming_gnss_station_ids(norm, stations_by_id)
+            assert online_ids == {1, 2}
+
+    def test_incident_cases_functions(self):
+        from app.features.incidents.cases import (
+            normalize_severity,
+            normalize_source_kind,
+            priority_for_severity,
+            normalize_episode_category,
+            incident_reference,
+            _text,
+            _event_payload,
+            _determine_scope_state,
+            serialize_case,
+        )
+        assert normalize_severity("CRITICAL") == "CRITICAL"
+        assert normalize_severity("invalid") == "UNKNOWN"
+        assert normalize_severity(None) == "UNKNOWN"
+
+        assert normalize_source_kind("SENSOR_ALERT") == "SENSOR_ALERT"
+        assert normalize_source_kind("rescue_request") == "RESCUE_REQUEST"
+        with pytest.raises(ValueError, match="unsupported incident source kind"):
+            normalize_source_kind("INVALID")
+
+        assert priority_for_severity("CRITICAL") == "URGENT"
+        assert priority_for_severity("MEDIUM") == "HIGH"
+        assert priority_for_severity("INFO") == "NORMAL"
+        assert priority_for_severity("UNKNOWN") == "UNTRIAGED"
+
+        assert normalize_episode_category("tilt_warning") == "tilt"
+        assert normalize_episode_category("gnss_velocity_critical") == "gnss_velocity"
+        assert normalize_episode_category("custom_cat") == "custom_cat"
+        assert normalize_episode_category("") == "unknown"
+
+        ref_alert = incident_reference("SENSOR_ALERT", 123, 1700000000)
+        assert ref_alert.startswith("INC-")
+        assert "-A123" in ref_alert
+
+        ref_rescue = incident_reference("RESCUE_REQUEST", 456, 1700000000)
+        assert "-R456" in ref_rescue
+
+        assert _text("hello", 3) == "hel"
+        assert _text(None, 10, "default") == "default"
+
+        payload = _event_payload({"source_kind": "SENSOR_ALERT", "secret": "123", "priority": "HIGH"})
+        assert "source_kind" in payload
+        assert "priority" in payload
+        assert "secret" not in payload
+        assert _event_payload(None) == {}
+
+        assert _determine_scope_state(1, "RESCUE_REQUEST") == "SCOPED"
+        assert _determine_scope_state(None, "RESCUE_REQUEST") == "UNSCOPED"
+        assert _determine_scope_state(None, "SENSOR_ALERT") == "LOOKUP_PENDING"
+
+        mock_case = MagicMock(
+            id=1,
+            reference="INC-001",
+            source_kind="SENSOR_ALERT",
+            source_id=10,
+            project_id=2,
+            station_id=3,
+            scope_state="SCOPED",
+            project_name_snapshot="P1",
+            project_code_snapshot="PR1",
+            station_name_snapshot="S1",
+            station_code_snapshot="ST1",
+            title="Title",
+            summary="Summary",
+            source_severity="HIGH",
+            signal_state="ACTIVE",
+            priority="URGENT",
+            status="new",
+            assigned_to_user_id=None,
+            assigned_to_username=None,
+            opened_at=1700000000,
+            last_signal_at=1700000000,
+            acknowledged_at=None,
+            resolved_at=None,
+            updated_at=1700000000,
+            version=1,
+            revision=1,
+            last_event_sequence=1,
+        )
+        serialized = serialize_case(mock_case)
+        assert serialized["id"] == 1
+        assert serialized["reference"] == "INC-001"
+
+    def test_project_admin_validation(self):
+        from app.features.projects.admin import validate_project_fields
+
+        valid_data = {"project_code": "PRJ01", "name": "Project 1", "description": "Some description"}
+        validate_project_fields(valid_data)
+        assert valid_data["project_code"] == "PRJ01"
+
+        valid_none_desc = {"project_code": "PRJ01", "name": "Project 1", "description": None}
+        validate_project_fields(valid_none_desc)
+
+        with pytest.raises(HTTPException) as exc:
+            validate_project_fields({"name": "Project 1"}, creating=True)
+        assert exc.value.status_code == 422
+
+        with pytest.raises(HTTPException) as exc:
+            validate_project_fields({"project_code": "x" * 51, "name": "P1"})
+        assert exc.value.status_code == 422
+
+        with pytest.raises(HTTPException) as exc:
+            validate_project_fields({"project_code": "PRJ01", "name": "   "})
+        assert exc.value.status_code == 422
+
+
 
 
 

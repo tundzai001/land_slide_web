@@ -1,3 +1,4 @@
+/* global longTermRequestSequence:writable, longTermRequestController:writable, rainCorrelationAiRunning:writable, realtimeImuScene:writable, realtimeImuCamera:writable, realtimeImuRenderer:writable, realtimeImuControls:writable, realtimeImuAnimationId:writable, realtimeImuSensorBlock:writable, realtimeImuTargetQuaternion:writable, _THREE:writable */
 async function loadLongTermAnalysis(options = {}) {
     console.log('📊 [MAP] Loading long-term analysis...');
 

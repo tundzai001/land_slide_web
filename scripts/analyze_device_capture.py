@@ -4,7 +4,11 @@ import re
 from collections import Counter
 from pathlib import Path
 
-records = json.loads(Path('mqtt_device_capture.json').read_text(encoding='utf-8'))
+capture_file = Path('mqtt_device_capture.json').resolve()
+if not capture_file.is_file():
+    raise FileNotFoundError(f"Missing capture file: {capture_file}")
+with open(capture_file, 'r', encoding='utf-8') as f:
+    records = json.load(f)
 stream = ''.join(row['payload'] for row in records)
 sentences = re.findall(r'[$#][^$#\r\n]*\*[0-9a-fA-F]+', stream)
 print('Sentence types:', Counter(s.split(',')[0] for s in sentences))
@@ -30,4 +34,6 @@ for index, name in fields.items():
 for row in rows:
     if max(float(v) for v in row[16:19]) > 0.1:
         print('uncertain baseline epoch', row[5:8], 'status',row[8], 'baseline',row[13:16], 'std', row[16:19], 'age',row[48])
-Path('mqtt_device_sentences.txt').write_text('\n'.join(sentences), encoding='utf-8')
+out_file = Path('mqtt_device_sentences.txt').resolve()
+with open(out_file, 'w', encoding='utf-8') as f:
+    f.write('\n'.join(sentences))

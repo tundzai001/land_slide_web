@@ -1,3 +1,4 @@
+/* global wsReconnectId:writable, wsConnection:writable, wsReconnectAttempt:writable, wsHeartbeatId:writable */
 // =====================================================
 // WEBSOCKET REALTIME CONNECTION
 // =====================================================

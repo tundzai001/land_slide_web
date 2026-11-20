@@ -1,3 +1,4 @@
+/* global showStationMarkers:writable, showRescueMarkers:writable, showCorsBaseMarkers:writable, mapInteractionDepth:writable, mapInteractionActive:writable, pendingStationsReload:writable, pendingProjectsReload:writable, pendingRescueMarkersReload:writable, pendingCorsBaseReload:writable, corsBaseFetchInFlight:writable, rescueMarkersFetchInFlight:writable, rescueMarkers:writable, rescueRequestsData:writable, rescueMarkersRenderSignature:writable, activeBasemap:writable */
 // =====================================================
 // RESCUE MARKER MANAGEMENT
 // =====================================================

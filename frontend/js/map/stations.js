@@ -1,3 +1,4 @@
+/* global currentTileLayer:writable, projectDetailsVisible:writable, map:writable, stationClusterGroup:writable, pendingProjectsReload:writable, projectsFetchInFlight:writable, clusterPolylines:writable, clusterRenderSignature:writable, pendingStationsReload:writable, stationsFetchInFlight:writable, allStations:writable, currentStationData:writable */
 // =====================================================
 // OTHER FUNCTIONS
 // =====================================================

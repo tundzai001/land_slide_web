@@ -160,7 +160,11 @@ if __name__ == '__main__':
     parser.add_argument('--config', required=True)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+    cfg_file = Path(args.config).resolve()
+    if not cfg_file.is_file():
+        raise FileNotFoundError(f"Config file not found: {cfg_file}")
     try:
-        asyncio.run(run(json.loads(Path(args.config).read_text(encoding='utf-8'))))
+        with open(cfg_file, 'r', encoding='utf-8') as f:
+            asyncio.run(run(json.load(f)))
     except KeyboardInterrupt:
         pass

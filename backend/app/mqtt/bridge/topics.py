@@ -167,7 +167,10 @@ class MQTTTopicMixin:
         if broker_tls:
             import ssl
             try:
-                client.tls_set_context(ssl.create_default_context())
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = True
+                ctx.verify_mode = ssl.CERT_REQUIRED
+                client.tls_set_context(ctx)
                 logger.info(f"🔒 Enabled TLS for client {broker_host}:{broker_port}")
             except Exception as tls_e:
                 logger.exception(f"❌ Failed to set TLS for {broker_host}:{broker_port}: {tls_e}")
