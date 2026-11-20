@@ -1186,15 +1186,89 @@ function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
     }, 1000);
 }
 
-const TILE_URLS = {
-    light: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
-};
-const MAP_BASEMAPS = Object.freeze({
+let mapboxAccessToken = typeof window !== 'undefined' && window.MAPBOX_TOKEN
+    ? window.MAPBOX_TOKEN
+    : '';
+let mapboxFallbackActive = false;
+
+window.mapboxAccessToken = mapboxAccessToken;
+window.mapboxFallbackActive = mapboxFallbackActive;
+
+const MAPBOX_STYLES = Object.freeze({
+    roadmap: 'streets-v12',
+    satellite: 'satellite-v9',
+    hybrid: 'satellite-streets-v12',
+    terrain: 'outdoors-v12',
+});
+
+function getMapboxTileUrl(styleKey, token) {
+    const styleId = MAPBOX_STYLES[styleKey] || MAPBOX_STYLES.hybrid;
+    return `https://api.mapbox.com/styles/v1/mapbox/${styleId}/tiles/256/{z}/{x}/{y}?access_token=${token}`;
+}
+window.getMapboxTileUrl = getMapboxTileUrl;
+
+const GOOGLE_FALLBACK_BASEMAPS = Object.freeze({
     roadmap: { label: 'Đường phố', url: 'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}' },
     satellite: { label: 'Vệ tinh', url: 'https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}' },
-    hybrid: { label: 'Vệ tinh có nhãn', url: TILE_URLS.light },
+    hybrid: { label: 'Vệ tinh có nhãn', url: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}' },
     terrain: { label: 'Địa hình', url: 'https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}' },
 });
+window.GOOGLE_FALLBACK_BASEMAPS = GOOGLE_FALLBACK_BASEMAPS;
+
+const TILE_URLS = {
+    light: GOOGLE_FALLBACK_BASEMAPS.hybrid.url,
+};
+const MAP_BASEMAPS = Object.freeze({
+    roadmap: {
+        label: 'Đường phố',
+        get url() {
+            return !mapboxFallbackActive && mapboxAccessToken
+                ? getMapboxTileUrl('roadmap', mapboxAccessToken)
+                : GOOGLE_FALLBACK_BASEMAPS.roadmap.url;
+        },
+    },
+    satellite: {
+        label: 'Vệ tinh',
+        get url() {
+            return !mapboxFallbackActive && mapboxAccessToken
+                ? getMapboxTileUrl('satellite', mapboxAccessToken)
+                : GOOGLE_FALLBACK_BASEMAPS.satellite.url;
+        },
+    },
+    hybrid: {
+        label: 'Vệ tinh có nhãn',
+        get url() {
+            return !mapboxFallbackActive && mapboxAccessToken
+                ? getMapboxTileUrl('hybrid', mapboxAccessToken)
+                : GOOGLE_FALLBACK_BASEMAPS.hybrid.url;
+        },
+    },
+    terrain: {
+        label: 'Địa hình',
+        get url() {
+            return !mapboxFallbackActive && mapboxAccessToken
+                ? getMapboxTileUrl('terrain', mapboxAccessToken)
+                : GOOGLE_FALLBACK_BASEMAPS.terrain.url;
+        },
+    },
+});
+window.MAP_BASEMAPS = MAP_BASEMAPS;
+
+if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
+    window.fetch('/api/public/map-config')
+        .then(res => res.ok ? res.json() : null)
+        .then(cfg => {
+            const token = (cfg && (cfg.mapbox_public_token || cfg.mapbox_token)) || '';
+            if (token && token.startsWith('pk.') && token !== mapboxAccessToken) {
+                mapboxAccessToken = token;
+                window.mapboxAccessToken = mapboxAccessToken;
+                if (typeof map !== 'undefined' && map && !mapboxFallbackActive && typeof switchMapTiles === 'function') {
+                    switchMapTiles();
+                }
+            }
+        })
+        .catch(() => {});
+}
 let activeBasemap = 'hybrid';
 try {
     const savedBasemap = localStorage.getItem('monitoring-basemap');

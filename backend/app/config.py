@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     OPERATIONS_LOG_RETENTION_DAYS: int = 365
     NTP_SERVER: str = Field(default="pool.ntp.org", min_length=1, max_length=253, pattern=r'^[A-Za-z0-9.-]+$')
     BOOTSTRAP_ADMIN_PASSWORD: str = ""
+    MAPBOX_PUBLIC_TOKEN: str = ""
+    MAPBOX_ACCESS_TOKEN: str = ""
 
     # The MQTT ingest spool is deliberately local and append-only.  It is a
     # last-resort handoff for a DB outage; normal traffic still drains through

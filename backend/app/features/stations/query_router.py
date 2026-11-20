@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...config import settings
 from ... import auth, schemas
 from ...database import get_auth_db, get_config_db, get_data_db
 from ...models import auth as model_auth
@@ -269,6 +270,16 @@ async def create_station_in_project(
         await db.rollback()
         logger.exception(f"Error creating station: {e}")
         raise HTTPException(status_code=500, detail=STATION_REQUEST_FAILED_DETAIL)
+
+
+@router.get("/api/public/map-config")
+async def get_public_map_config(response: Response):
+    """Expose only a browser-safe Mapbox token; never return secret credentials."""
+    response.headers["Cache-Control"] = "no-store"
+    token = (getattr(settings, "MAPBOX_PUBLIC_TOKEN", "") or getattr(settings, "MAPBOX_ACCESS_TOKEN", "") or "").strip()
+    return {
+        "mapbox_public_token": token if token.startswith("pk.") else "",
+    }
 
 
 @router.get("/api/public/dashboard-summary", responses={422: {"description": "Unprocessable Entity"}})
