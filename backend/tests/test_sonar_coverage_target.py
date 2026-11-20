@@ -1527,6 +1527,215 @@ class TestStationAnalysisAndRuntimeCoverage:
             validate_project_fields({"project_code": "PRJ01", "name": "   "})
         assert exc.value.status_code == 422
 
+    @pytest.mark.anyio
+    async def test_station_report_pdf_export(self):
+        from app.features.data_export.reports.station import (
+            export_station_pdf,
+            _build_station_info_table,
+            _build_sensor_cache_elements,
+            _build_gnss_summary_elements,
+            _build_alerts_elements,
+        )
+        from fastapi.responses import StreamingResponse
+
+        config_db = AsyncMock()
+        data_db = AsyncMock()
+
+        # 404 test
+        config_res_404 = MagicMock()
+        config_res_404.scalar_one_or_none.return_value = None
+        config_db.execute.return_value = config_res_404
+        with pytest.raises(HTTPException) as exc:
+            await export_station_pdf(999, config_db, data_db)
+        assert exc.value.status_code == 404
+
+        # Happy path test
+        mock_station = MagicMock(
+            id=1,
+            name="Trạm Kiểm Thử",
+            station_code="TK01",
+            status="online",
+            location={"lat": 21.0, "lon": 105.0},
+            last_update=1700000000,
+        )
+        config_res_ok = MagicMock()
+        config_res_ok.scalar_one_or_none.return_value = mock_station
+        config_db.execute.return_value = config_res_ok
+
+        mock_sensor = MagicMock(
+            sensor_type="gnss",
+            timestamp=1700000000,
+            data={"lat": 21.0, "lon": 105.0, "alt": 100.0},
+        )
+        mock_alert = MagicMock(
+            timestamp=1700000000,
+            level="CRITICAL",
+            category="gnss_velocity",
+            message="Vận tốc dịch chuyển vượt ngưỡng",
+        )
+        mock_summary = MagicMock(
+            day_start_ts=1700000000,
+            net_displacement_mm=5.234,
+            velocity_mm_day=1.2345,
+            risk_level="HIGH",
+            classification="warning",
+        )
+
+        res_sensors = MagicMock()
+        res_sensors.scalars.return_value.all.return_value = [mock_sensor]
+
+        res_alerts = MagicMock()
+        res_alerts.scalars.return_value.all.return_value = [mock_alert]
+
+        res_summaries = MagicMock()
+        res_summaries.scalars.return_value.all.return_value = [mock_summary]
+
+        data_db.execute.side_effect = [res_sensors, res_alerts, res_summaries]
+
+        response = await export_station_pdf(1, config_db, data_db)
+        assert isinstance(response, StreamingResponse)
+        assert response.media_type == "application/pdf"
+
+        # Test with empty sensor data
+        empty_res = MagicMock()
+        empty_res.scalars.return_value.all.return_value = []
+        data_db.execute.side_effect = [empty_res, empty_res, empty_res]
+        empty_response = await export_station_pdf(1, config_db, data_db)
+        assert isinstance(empty_response, StreamingResponse)
+
+    @pytest.mark.anyio
+    async def test_gnss_adjustment_router_coverage(self):
+        from app.features.gnss_adjustment.router import (
+            list_aicaster_users,
+            _check_existing_adjustment_session,
+            _build_cluster_index,
+            _resolve_online_station_ids,
+            _report_adjustment_failure,
+        )
+
+        # list_aicaster_users
+        mock_user = MagicMock()
+        with patch("app.features.gnss_adjustment.router.mqtt_service") as mock_mqtt:
+            mock_mqtt.round_robin_manager.list_aicaster_users = AsyncMock(
+                return_value=[{
+                    "Username": "rover1",
+                    "Mountpoints": ["MP1"],
+                    "Status": "online",
+                    "Identifier": "ID1",
+                    "ActiveClientCount": "1",
+                    "CasterHost": "caster.local",
+                    "CasterPort": 2101,
+                }]
+            )
+            res = await list_aicaster_users(mock_user)
+            assert "users" in res
+            assert len(res["users"]) == 1
+
+            mock_mqtt.round_robin_manager.list_aicaster_users = AsyncMock(side_effect=Exception("Timeout"))
+            with pytest.raises(HTTPException) as exc:
+                await list_aicaster_users(mock_user)
+            assert exc.value.status_code == 503
+
+        # _check_existing_adjustment_session
+        with patch("app.features.gnss_adjustment.router.mqtt_service") as mock_mqtt:
+            mock_mqtt.adjustment_phase = {1: "COLLECTING_BASELINE", 2: "IDLE"}
+            mock_mqtt.active_adjustment_clusters = {1: [{"stations": [10, 20]}]}
+            mock_mqtt.adjustment_run_rosters = {1: {"r": 1}}
+            mock_mqtt.round_robin_manager.get_seed_collection_status.return_value = "ready"
+
+            check1 = _check_existing_adjustment_session(1)
+            assert check1 is not None
+            assert check1["existing"] is True
+            assert check1["expected_station_ids"] == [10, 20]
+
+            check2 = _check_existing_adjustment_session(2)
+            assert check2 is None
+
+        # _build_cluster_index
+        active_clusters = [{"name": "Cluster A"}]
+        mock_proj = MagicMock(gnss_clusters=[{"name": "Cluster A"}, {"name": "Cluster B"}])
+        assert _build_cluster_index(active_clusters, mock_proj, 5) == 5
+        assert _build_cluster_index(active_clusters, mock_proj, None) == 0
+        assert _build_cluster_index([{"name": "Unknown"}], mock_proj, None) is None
+        assert _build_cluster_index([{"name": "C1"}, {"name": "C2"}], mock_proj, None) is None
+
+        # _resolve_online_station_ids
+        st1 = MagicMock(id=1, config={})
+        st2 = MagicMock(id=2, config={})
+        now = int(time.time())
+        dev1 = MagicMock(id=10, station_id=1, last_data_time=now - 10)
+        dev2 = MagicMock(id=20, station_id=2, last_data_time=now - 5000)
+        dev3 = MagicMock(id=30, station_id=999, last_data_time=now)
+        with patch("app.features.gnss_adjustment.router.mqtt_service") as mock_mqtt:
+            mock_mqtt._device_update_buffer = {}
+            with patch("app.features.gnss_adjustment.router.streaming_gnss_station_ids", return_value={1}):
+                online = _resolve_online_station_ids([st1, st2], [dev1, dev2, dev3], [])
+                assert 1 in online
+
+        # _report_adjustment_failure
+        mock_req_auto = MagicMock(source="automatic_scheduler")
+        mock_req_manual = MagicMock(source="manual")
+        with patch("app.features.gnss_adjustment.router.write_adjustment_failure_report", new_callable=AsyncMock) as mock_write:
+            await _report_adjustment_failure(Exception("Fail"), mock_req_auto, mock_proj, 1, [], [], [], [])
+            mock_write.assert_not_called()
+
+            with patch("app.features.gnss_adjustment.router.mqtt_service") as mock_mqtt:
+                mock_mqtt.round_robin_manager.get_adjustment_diagnostics.return_value = {}
+                await _report_adjustment_failure(Exception("Fail"), mock_req_manual, mock_proj, 1, active_clusters, [], [], [])
+                mock_write.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_database_admin_read_router_coverage(self):
+        from app.features.database_admin.read_router import (
+            _sensor_data_preview,
+            _coerce_int,
+            _device_runtime_state,
+            _build_stations_query,
+            _build_station_admin_row,
+            get_database_stats,
+        )
+
+        assert _sensor_data_preview(None) is None
+        assert _sensor_data_preview("raw string") == "raw string"
+        assert _sensor_data_preview({"key": "val"}) == '{"key":"val"}'
+
+        assert _coerce_int("123") == 123
+        assert _coerce_int("invalid", fallback=0) == 0
+        assert _coerce_int(None, fallback=-1) == -1
+
+        st = MagicMock(config={"offline_threshold_seconds": 60})
+        now = int(time.time())
+        dev_online = MagicMock(device_type="gnss", is_active=True, last_data_time=now - 10)
+        state_online = _device_runtime_state(dev_online, st, now)
+        assert state_online["effective_status"] == "online"
+
+        dev_offline = MagicMock(device_type="gnss", is_active=True, last_data_time=now - 200)
+        state_offline = _device_runtime_state(dev_offline, st, now)
+        assert state_offline["effective_status"] == "offline"
+
+        q1 = _build_stations_query("Tram 1", 10, "-created_at")
+        assert q1 is not None
+        with pytest.raises(HTTPException) as exc:
+            _build_stations_query(None, None, "bad_field")
+        assert exc.value.status_code == 422
+
+        row, status = _build_station_admin_row(st, [dev_online], now)
+        assert status == "online"
+        assert row["status"] == "online"
+
+        config_db = AsyncMock()
+        data_db = AsyncMock()
+        mock_c = MagicMock()
+        mock_c.scalar.return_value = 5
+        config_db.execute.return_value = mock_c
+        data_db.execute.return_value = mock_c
+
+        stats = await get_database_stats(config_db, data_db, MagicMock())
+        assert stats["stations"] == 5
+        assert stats["devices"] == 5
+
+
+
 
 
 
