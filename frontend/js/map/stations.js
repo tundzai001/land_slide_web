@@ -3,50 +3,32 @@
 // OTHER FUNCTIONS
 // =====================================================
 
-function switchMapTiles(forceFallback = false) {
-    if (!map) return;
-    if (currentTileLayer) {
-        map.removeLayer(currentTileLayer);
-    }
-
-    if (forceFallback && typeof mapboxFallbackActive !== 'undefined') {
-        mapboxFallbackActive = true;
-    }
-
-    const hasMapbox = typeof mapboxAccessToken !== 'undefined' && Boolean(mapboxAccessToken);
-    const isFallback = typeof mapboxFallbackActive !== 'undefined' && Boolean(mapboxFallbackActive);
+function resolveBasemapTileConfig(key) {
+    const hasMapbox = Boolean(window.mapboxAccessToken);
+    const isFallback = Boolean(window.mapboxFallbackActive);
     const canUseMapbox = !isFallback && hasMapbox && typeof getMapboxTileUrl === 'function';
 
-    let tileUrl = '';
     if (canUseMapbox) {
-        tileUrl = getMapboxTileUrl(activeBasemap, mapboxAccessToken);
-    } else if (typeof GOOGLE_FALLBACK_BASEMAPS !== 'undefined' && GOOGLE_FALLBACK_BASEMAPS[activeBasemap]?.url) {
-        tileUrl = GOOGLE_FALLBACK_BASEMAPS[activeBasemap].url;
-    } else if (typeof MAP_BASEMAPS !== 'undefined' && MAP_BASEMAPS[activeBasemap]?.url) {
-        tileUrl = MAP_BASEMAPS[activeBasemap].url;
+        return {
+            url: getMapboxTileUrl(key, window.mapboxAccessToken),
+            attribution: '© <a href="https://www.mapbox.com/about/maps/" target="_blank">Mapbox</a> © <a href="http://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>',
+            options: { maxZoom: 22, tileSize: 256, updateWhenIdle: true, keepBuffer: 2 },
+            canUseMapbox: true,
+        };
     }
 
-    const attribution = canUseMapbox
-        ? '© <a href="https://www.mapbox.com/about/maps/" target="_blank">Mapbox</a> © <a href="http://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
-        : '© Google Maps';
+    const fallbackUrl = (typeof GOOGLE_FALLBACK_BASEMAPS !== 'undefined' && GOOGLE_FALLBACK_BASEMAPS[key]?.url)
+        || (typeof MAP_BASEMAPS !== 'undefined' && MAP_BASEMAPS[key]?.url)
+        || '';
+    return {
+        url: fallbackUrl,
+        attribution: '© Google Maps',
+        options: { ...(typeof TILE_OPTIONS !== 'undefined' ? TILE_OPTIONS.light : {}) },
+        canUseMapbox: false,
+    };
+}
 
-    const tileOptions = canUseMapbox
-        ? { maxZoom: 22, tileSize: 256, updateWhenIdle: true, keepBuffer: 2 }
-        : { ...(typeof TILE_OPTIONS !== 'undefined' ? TILE_OPTIONS.light : {}) };
-
-    currentTileLayer = L.tileLayer(tileUrl, {
-        ...tileOptions,
-        attribution,
-    });
-
-    const layer = currentTileLayer;
-    const status = document.getElementById('basemap-status');
-    const label = (typeof MAP_BASEMAPS !== 'undefined' && MAP_BASEMAPS[activeBasemap]?.label) || 'Bản đồ';
-
-    if (status) {
-        status.textContent = `Đang tải ${label.toLowerCase()}…`;
-    }
-
+function attachBasemapTileEvents(layer, canUseMapbox, label, status) {
     let failed = false;
     let tileErrorCount = 0;
 
@@ -55,9 +37,7 @@ function switchMapTiles(forceFallback = false) {
         if (canUseMapbox && tileErrorCount >= 2 && !failed && layer === currentTileLayer) {
             failed = true;
             console.warn(`⚠️ [MAP] Mapbox không khả dụng (${tileErrorCount} lỗi tile). Đang tự động chuyển sang bản đồ dự phòng Google Maps...`);
-            if (typeof mapboxFallbackActive !== 'undefined') {
-                mapboxFallbackActive = true;
-            }
+            window.mapboxFallbackActive = true;
             switchMapTiles(true);
         } else if (!canUseMapbox) {
             failed = true;
@@ -69,11 +49,37 @@ function switchMapTiles(forceFallback = false) {
 
     layer.on('load', () => {
         if (layer === currentTileLayer && status && !failed) {
-            const isFallbackNow = typeof mapboxFallbackActive !== 'undefined' && mapboxFallbackActive;
-            status.textContent = isFallbackNow ? `${label} (Dự phòng Google Maps)` : label;
+            const isFallback = Boolean(window.mapboxFallbackActive);
+            status.textContent = isFallback ? `${label} (Dự phòng Google Maps)` : label;
         }
     });
+}
 
+function switchMapTiles(forceFallback = false) {
+    if (!map) return;
+    if (currentTileLayer) {
+        map.removeLayer(currentTileLayer);
+    }
+
+    if (forceFallback) {
+        window.mapboxFallbackActive = true;
+    }
+
+    const tileConfig = resolveBasemapTileConfig(activeBasemap);
+    currentTileLayer = L.tileLayer(tileConfig.url, {
+        ...tileConfig.options,
+        attribution: tileConfig.attribution,
+    });
+
+    const layer = currentTileLayer;
+    const status = document.getElementById('basemap-status');
+    const label = (typeof MAP_BASEMAPS !== 'undefined' && MAP_BASEMAPS[activeBasemap]?.label) || 'Bản đồ';
+
+    if (status) {
+        status.textContent = `Đang tải ${label.toLowerCase()}…`;
+    }
+
+    attachBasemapTileEvents(layer, tileConfig.canUseMapbox, label, status);
     layer.addTo(map);
     layer.bringToBack();
 }

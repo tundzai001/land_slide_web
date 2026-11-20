@@ -1258,11 +1258,11 @@ if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
     window.fetch('/api/public/map-config')
         .then(res => res.ok ? res.json() : null)
         .then(cfg => {
-            const token = (cfg && (cfg.mapbox_public_token || cfg.mapbox_token)) || '';
+            const token = cfg?.mapbox_public_token || cfg?.mapbox_token || '';
             if (token && token.startsWith('pk.') && token !== mapboxAccessToken) {
                 mapboxAccessToken = token;
                 window.mapboxAccessToken = mapboxAccessToken;
-                if (typeof map !== 'undefined' && map && !mapboxFallbackActive && typeof switchMapTiles === 'function') {
+                if (window.map && !mapboxFallbackActive && typeof switchMapTiles === 'function') {
                     switchMapTiles();
                 }
             }
