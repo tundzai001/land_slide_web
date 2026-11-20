@@ -70,11 +70,23 @@ function _setupLayerAndZoomControlsListeners() {
     // === Custom Glass Zoom Controls ===
     const zoomInBtn = document.getElementById('map-zoom-in');
     const zoomOutBtn = document.getElementById('map-zoom-out');
-    if (zoomInBtn && map) {
-        zoomInBtn.addEventListener('click', () => map.zoomIn());
+    if (zoomInBtn) {
+        zoomInBtn.addEventListener('click', () => {
+            if (window.MapboxGlobeController?.active) {
+                window.MapboxGlobeController.zoomIn();
+            } else if (map) {
+                map.zoomIn();
+            }
+        });
     }
-    if (zoomOutBtn && map) {
-        zoomOutBtn.addEventListener('click', () => map.zoomOut());
+    if (zoomOutBtn) {
+        zoomOutBtn.addEventListener('click', () => {
+            if (window.MapboxGlobeController?.active) {
+                window.MapboxGlobeController.zoomOut();
+            } else if (map) {
+                map.zoomOut();
+            }
+        });
     }
 }
 

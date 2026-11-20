@@ -171,6 +171,13 @@ window.LegacyTemplateParts['shell'] = `
             </button>
         </div>
         <span class="map-control-divider" aria-hidden="true"></span>
+        <button class="map-ctrl-btn" id="btn-focus-globe" title="Xem Quả địa cầu 3D toàn cảnh" aria-label="Xem toàn cầu 3D">
+            <i class="bi bi-globe"></i>
+        </button>
+        <button class="map-ctrl-btn" id="btn-focus-vietnam" title="Thu phóng vào Việt Nam" aria-label="Thu phóng vào Việt Nam">
+            <i class="bi bi-geo-alt"></i>
+        </button>
+        <span class="map-control-divider" aria-hidden="true"></span>
         <button class="map-ctrl-btn" id="map-zoom-in" title="Phóng to" aria-label="Phóng to bản đồ">
             <i class="bi bi-plus-lg"></i>
         </button>

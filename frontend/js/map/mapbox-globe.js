@@ -34,6 +34,98 @@
         { type: 'Feature', properties: { name: 'Biển Đông' }, geometry: { type: 'Point', coordinates: [113.0, 13.2] } },
     ]);
 
+    function escapeHtml(str) {
+        return String(str ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function pointInRing(pt, ring) {
+        let inside = false;
+        const x = pt[0];
+        const y = pt[1];
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+            const xi = ring[i][0];
+            const yi = ring[i][1];
+            const xj = ring[j][0];
+            const yj = ring[j][1];
+            const intersect = ((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    }
+
+    function pointInGeometry(pt, geom) {
+        if (!geom?.coordinates) return false;
+        if (geom.type === 'Polygon') {
+            const coords = geom.coordinates;
+            if (!coords[0] || !pointInRing(pt, coords[0])) return false;
+            for (let i = 1; i < coords.length; i++) {
+                if (pointInRing(pt, coords[i])) return false;
+            }
+            return true;
+        }
+        if (geom.type === 'MultiPolygon') {
+            for (let p = 0; p < geom.coordinates.length; p++) {
+                const coords = geom.coordinates[p];
+                if (coords[0] && pointInRing(pt, coords[0])) {
+                    let inHole = false;
+                    for (let i = 1; i < coords.length; i++) {
+                        if (pointInRing(pt, coords[i])) {
+                            inHole = true;
+                            break;
+                        }
+                    }
+                    if (!inHole) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    function renderProvincePopupHtml(feature, stations = []) {
+        const p = feature?.properties || {};
+        const inProvince = (stations || []).filter(s => {
+            const lat = Number(s?.location?.lat ?? s?.latitude);
+            const lon = Number(s?.location?.lon ?? s?.longitude);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+            return pointInGeometry([lon, lat], feature.geometry);
+        });
+
+        const safeCount = inProvince.filter(s => (s.status || 'safe') === 'safe').length;
+        const alertCount = inProvince.filter(s => s.status === 'warning' || s.status === 'critical').length;
+
+        const areaStr = p.areaKm2 ? `${Number(p.areaKm2).toLocaleString('vi-VN')} km²` : '--';
+        const postalStr = p.postalCodePrefix || '--';
+
+        let stationText = '<span style="color:#22c55e;font-weight:700;">0 trạm</span>';
+        if (inProvince.length > 0) {
+            stationText = `<span style="color:#22c55e;font-weight:700;">${safeCount} an toàn</span> / ` +
+                `<span style="color:#f59e0b;font-weight:700;">${alertCount} cảnh báo</span> / ` +
+                `<span style="color:#64748b;">${inProvince.length} tổng</span>`;
+        }
+
+        return `
+            <div class="station-map-popup">
+                <div class="station-map-popup-title">${escapeHtml(p.fullName || p.name || 'Tỉnh / Thành')}</div>
+                <div style="font-size:0.75rem;color:#64748b;margin-bottom:6px;">${escapeHtml(p.fullNameEn || p.nameEn || '')}</div>
+                <div class="station-map-popup-grid">
+                    <span class="station-map-popup-label">Mã hành chính</span>
+                    <span class="station-map-popup-value">${escapeHtml(p.code || '--')}</span>
+                    <span class="station-map-popup-label">Mã bưu chính</span>
+                    <span class="station-map-popup-value">${escapeHtml(postalStr)}</span>
+                    <span class="station-map-popup-label">Diện tích</span>
+                    <span class="station-map-popup-value">${escapeHtml(areaStr)}</span>
+                    <span class="station-map-popup-label">Trạm quan trắc</span>
+                    <span class="station-map-popup-value">${stationText}</span>
+                </div>
+            </div>
+        `;
+    }
+
     function resolveStationColor(status) {
         if (status === 'critical') return '#ef4444';
         if (status === 'warning') return '#f59e0b';
@@ -72,15 +164,33 @@
         spinning = true;
         interacting = false;
         ready = false;
+        projection = 'globe';
         selectedProvinceCode = '';
         resumeTimer = null;
         spinInterval = null;
         provincesGeoJson = null;
+        popup = null;
 
         async init(container) {
             if (this.map) return this.map;
             this.container = container;
-            const token = window.mapboxAccessToken;
+
+            let token = window.mapboxAccessToken;
+            if (!token?.startsWith('pk.')) {
+                try {
+                    const res = await fetch('/api/public/map-config');
+                    if (res.ok) {
+                        const cfg = await res.json();
+                        token = cfg?.mapbox_public_token || cfg?.mapbox_token || '';
+                        if (token?.startsWith('pk.')) {
+                            window.mapboxAccessToken = token;
+                        }
+                    }
+                } catch {
+                    // ignore
+                }
+            }
+
             if (!token?.startsWith('pk.')) {
                 throw new Error('Chưa cấu hình token Mapbox hợp lệ.');
             }
@@ -96,12 +206,17 @@
                 style: 'mapbox://styles/mapbox/satellite-streets-v12',
                 projection: 'globe',
                 center: [108.2, 16.0],
-                zoom: 3.2,
-                minZoom: 1,
-                maxZoom: 18,
+                zoom: 4.8,
+                minZoom: 0,
+                maxZoom: 19,
+                maxPitch: 65,
+                renderWorldCopies: false,
                 attributionControl: { compact: true },
+                antialias: false,
+                fadeDuration: 300,
             });
 
+            this.map.scrollZoom.setWheelZoomRate(1 / 200);
             this.map.addControl(new sdk.NavigationControl({ visualizePitch: true }), 'top-right');
             this._setupEvents();
             return this.map;
@@ -115,20 +230,29 @@
                 this._startSpin();
             });
 
-            map.on('movestart', () => {
+            const pause = () => {
                 this.interacting = true;
                 this._stopSpin();
-            });
+                clearTimeout(this.resumeTimer);
+            };
 
-            map.on('moveend', () => {
+            const resume = () => {
                 clearTimeout(this.resumeTimer);
                 this.resumeTimer = setTimeout(() => {
                     this.interacting = false;
-                    if (this.spinning && this.active && map.getZoom() < 5) {
+                    if (this.spinning && this.active && this.projection === 'globe' && map.getZoom() < 5) {
                         this._startSpin();
                     }
-                }, 1000);
-            });
+                }, 650);
+            };
+
+            map.on('movestart', pause);
+            map.on('moveend', resume);
+
+            const canvas = map.getCanvas();
+            canvas.addEventListener('pointerdown', pause);
+            canvas.addEventListener('wheel', resume, { passive: true });
+            window.addEventListener('pointerup', resume);
         }
 
         _onStyleLoad() {
@@ -141,23 +265,39 @@
                 'star-intensity': 0.0,
             });
 
-            this._installProvinceLayers();
+            void this._installProvinceLayers();
             this._installIslandLayers();
             this._installStationLayers();
         }
 
-        _installProvinceLayers() {
+        async _loadProvincesData() {
+            if (this.provincesGeoJson) return this.provincesGeoJson;
+            try {
+                const res = await fetch('/api/public/vietnam-provinces-geojson');
+                if (res.ok) {
+                    this.provincesGeoJson = await res.json();
+                }
+            } catch {
+                // ignore
+            }
+            return this.provincesGeoJson;
+        }
+
+        async _installProvinceLayers() {
             const map = this.map;
+            const data = await this._loadProvincesData();
+            if (map.getSource('vietnam-provinces')) return;
+
             map.addSource('vietnam-provinces', {
                 type: 'geojson',
-                data: this.provincesGeoJson || '/api/public/vietnam-provinces-geojson',
+                data: data || '/api/public/vietnam-provinces-geojson',
             });
 
             map.addLayer({
                 id: 'vietnam-provinces-fill',
                 type: 'fill',
                 source: 'vietnam-provinces',
-                paint: { 'fill-color': '#38bdf8', 'fill-opacity': 0.04 },
+                paint: { 'fill-color': '#38bdf8', 'fill-opacity': 0.05 },
             });
 
             map.addLayer({
@@ -184,7 +324,7 @@
                 type: 'fill',
                 source: 'vietnam-provinces',
                 filter: selFilter,
-                paint: { 'fill-color': '#0ea5e9', 'fill-opacity': 0.16 },
+                paint: { 'fill-color': '#0ea5e9', 'fill-opacity': 0.18 },
             });
 
             map.addLayer({
@@ -198,8 +338,7 @@
             map.on('click', 'vietnam-provinces-fill', (e) => {
                 const feature = e.features?.[0];
                 if (!feature?.properties) return;
-                const p = feature.properties;
-                this.selectProvince(p.code);
+                this.fitProvince(feature.properties.code, { lngLat: e.lngLat, fit: false });
             });
 
             map.on('mouseenter', 'vietnam-provinces-fill', () => { map.getCanvas().style.cursor = 'pointer'; });
@@ -230,6 +369,16 @@
                     'text-halo-color': '#0369a1',
                     'text-halo-width': 2.5,
                 },
+            });
+
+            map.on('click', 'vietnam-island-labels', (e) => {
+                const p = e.features?.[0]?.properties;
+                if (!p) return;
+                const name = String(p.name || '').replace('\n', ' - ');
+                const desc = name.includes('Hoàng Sa') || name.includes('Trường Sa')
+                    ? 'Quần đảo thuộc chủ quyền thiêng liêng của nước Cộng hòa Xã hội Chủ nghĩa Việt Nam.'
+                    : 'Vùng biển chủ quyền thuộc quyền tài phán của Việt Nam.';
+                this._showTextPopup(e.lngLat, name, desc);
             });
         }
 
@@ -293,11 +442,81 @@
             map.on('mouseleave', 'station-pins-circle', () => { map.getCanvas().style.cursor = ''; });
         }
 
-        selectProvince(code) {
-            this.selectedProvinceCode = String(code || '');
-            const filter = ['==', ['to-string', ['get', 'code']], this.selectedProvinceCode];
-            this.map?.setFilter?.('vietnam-province-selected-fill', filter);
-            this.map?.setFilter?.('vietnam-province-selected-line', filter);
+        fitProvince(code, options = {}) {
+            const feature = this.provincesGeoJson?.features?.find(item => String(item.properties.code) === String(code));
+            if (!feature) return;
+
+            const points = [];
+            const collect = val => {
+                if (typeof val[0] === 'number') points.push(val);
+                else val.forEach(collect);
+            };
+            collect(feature.geometry.coordinates);
+
+            this.selectedProvinceCode = String(code);
+            for (const id of ['vietnam-province-selected-fill', 'vietnam-province-selected-line']) {
+                if (this.map?.getLayer(id)) {
+                    this.map.setFilter(id, ['==', ['to-string', ['get', 'code']], this.selectedProvinceCode]);
+                }
+            }
+
+            let west = Infinity;
+            let east = -Infinity;
+            let south = Infinity;
+            let north = -Infinity;
+            for (const [lon, lat] of points) {
+                west = Math.min(west, lon);
+                east = Math.max(east, lon);
+                south = Math.min(south, lat);
+                north = Math.max(north, lat);
+            }
+
+            if (options.fit) {
+                this._stopSpin();
+                this.map?.fitBounds([[west, south], [east, north]], { padding: 60, maxZoom: 11, duration: 900 });
+            }
+
+            const content = document.createElement('div');
+            content.className = 'station-map-popup';
+            content.innerHTML = renderProvincePopupHtml(feature, window.allStations || []);
+
+            const zoomBtn = document.createElement('button');
+            zoomBtn.type = 'button';
+            zoomBtn.className = 'btn btn-sm btn-outline-info w-100 mt-2';
+            zoomBtn.textContent = 'Phóng tới tỉnh / thành';
+            zoomBtn.addEventListener('click', () => {
+                this.fitProvince(code, { fit: true, lngLat: options.lngLat });
+            });
+            content.appendChild(zoomBtn);
+
+            const targetPos = options.lngLat || [(west + east) / 2, (south + north) / 2];
+            this._showPopup(content, targetPos);
+        }
+
+        _showPopup(content, lngLat) {
+            this.popup?.remove();
+            if (typeof window.mapboxgl?.Popup !== 'function' || !this.map) return;
+            this.popup = new window.mapboxgl.Popup({ offset: 12, maxWidth: '340px', focusAfterOpen: false })
+                .setLngLat(lngLat)
+                .setDOMContent(content)
+                .addTo(this.map);
+            const closeBtn = this.popup.getElement()?.querySelector('.mapboxgl-popup-close-button');
+            closeBtn?.removeAttribute('aria-hidden');
+            closeBtn?.setAttribute('aria-label', 'Đóng thông tin');
+        }
+
+        _showTextPopup(lngLat, title, desc) {
+            const content = document.createElement('div');
+            content.className = 'station-map-popup';
+            const titleEl = document.createElement('div');
+            titleEl.className = 'station-map-popup-title';
+            titleEl.textContent = title;
+            const descEl = document.createElement('p');
+            descEl.className = 'small text-muted mb-0 mt-1';
+            descEl.textContent = desc;
+            content.appendChild(titleEl);
+            content.appendChild(descEl);
+            this._showPopup(content, lngLat);
         }
 
         updateStations(stations) {
@@ -316,7 +535,7 @@
 
         _startSpin() {
             this._stopSpin();
-            if (!this.spinning || !this.active || !this.map) return;
+            if (!this.spinning || !this.active || this.projection !== 'globe' || !this.map) return;
             this.spinInterval = setInterval(() => {
                 if (!this.map || this.interacting || this.map.getZoom() >= 5) return;
                 const center = this.map.getCenter();
@@ -332,6 +551,48 @@
             }
         }
 
+        setProjection(proj) {
+            this.projection = proj;
+            this.map?.setProjection(proj);
+            if (proj !== 'globe') {
+                this._stopSpin();
+            } else if (this.active && (this.map?.getZoom() ?? 0) < 5) {
+                this._startSpin();
+            }
+        }
+
+        focusGlobe() {
+            this.interacting = false;
+            this.map?.stop();
+            this.map?.flyTo({
+                center: [108.2, 16.0],
+                zoom: 1.8,
+                pitch: 0,
+                bearing: 0,
+                duration: 1800,
+            });
+        }
+
+        focusVietnam() {
+            this.interacting = false;
+            this.map?.stop();
+            this.map?.flyTo({
+                center: [108.2, 16.2],
+                zoom: 5.6,
+                pitch: 0,
+                bearing: 0,
+                duration: 1500,
+            });
+        }
+
+        zoomIn() {
+            this.map?.zoomIn({ duration: 300 });
+        }
+
+        zoomOut() {
+            this.map?.zoomOut({ duration: 300 });
+        }
+
         setActive(active) {
             this.active = active;
             if (this.container) {
@@ -339,8 +600,9 @@
             }
             if (active) {
                 this.map?.resize();
-                if (this.map?.getZoom() < 5) this._startSpin();
+                if (this.map?.getZoom() < 5 && this.projection === 'globe') this._startSpin();
             } else {
+                this.popup?.remove();
                 this._stopSpin();
             }
         }
@@ -351,5 +613,7 @@
         }
     }
 
+    window.pointInGeometry = pointInGeometry;
+    window.renderProvincePopupHtml = renderProvincePopupHtml;
     window.MapboxGlobeController = new MapboxGlobeController();
 })();

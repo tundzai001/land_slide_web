@@ -693,6 +693,7 @@ async function loadStations() {
         }
         allStations = stations;
         if (typeof window !== 'undefined') window.allStations = stations;
+        window.MapboxGlobeController?.updateStations(stations);
         refreshHeatmapData();
 
         const validStationIds = new Set(stations.filter(station => hasValidLatLon(station.location)).map(station => String(station.id)));

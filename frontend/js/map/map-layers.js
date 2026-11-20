@@ -676,11 +676,32 @@ async function loadAndRenderProvinces(show = true) {
             fillOpacity: 0.04
         }),
         onEachFeature: (feature, layer) => {
-            const name = feature?.properties?.name || '';
+            const name = feature?.properties?.fullName || feature?.properties?.name || '';
             if (name) {
                 layer.bindTooltip(name, { sticky: true, className: 'map-province-tooltip' });
             }
             layer.on({
+                click: (e) => {
+                    const content = document.createElement('div');
+                    content.className = 'station-map-popup';
+                    if (typeof window.renderProvincePopupHtml === 'function') {
+                        content.innerHTML = window.renderProvincePopupHtml(feature, window.allStations || []);
+                    } else {
+                        content.textContent = name;
+                    }
+                    const zoomBtn = document.createElement('button');
+                    zoomBtn.type = 'button';
+                    zoomBtn.className = 'btn btn-sm btn-outline-info w-100 mt-2';
+                    zoomBtn.textContent = 'Phóng tới tỉnh / thành';
+                    zoomBtn.addEventListener('click', () => {
+                        window.map?.fitBounds(layer.getBounds(), { padding: [50, 50], maxZoom: 11 });
+                    });
+                    content.appendChild(zoomBtn);
+                    L.popup({ maxWidth: 340 })
+                        .setLatLng(e.latlng)
+                        .setContent(content)
+                        .openOn(window.map);
+                },
                 mouseover: (e) => {
                     e.target.setStyle({ weight: 2.5, color: '#38bdf8', fillColor: '#0ea5e9', fillOpacity: 0.16 });
                 },
@@ -707,7 +728,7 @@ function setupGlobeToggleControl() {
         btn.classList.toggle('is-active', active);
         const label = document.getElementById('globe-toggle-label');
         if (label) {
-            label.textContent = active ? 'Bản đồ 2D' : 'Địa cầu 3D';
+            label.textContent = active ? 'Địa cầu 3D' : 'Bản đồ 2D';
         }
 
         if (active) {
@@ -719,7 +740,7 @@ function setupGlobeToggleControl() {
                 console.warn('Mapbox 3D Globe không khả dụng:', err);
                 isGlobeActive = false;
                 btn.classList.remove('is-active');
-                if (label) label.textContent = 'Địa cầu 3D';
+                if (label) label.textContent = 'Bản đồ 2D';
                 window.MapboxGlobeController?.setActive(false);
             }
         } else {
@@ -731,13 +752,50 @@ function setupGlobeToggleControl() {
     }
 
     btn.addEventListener('click', () => {
-        void setGlobeMode(!isGlobeActive);
+        if (!isGlobeActive) {
+            void setGlobeMode(true);
+            return;
+        }
+        const isGlobe = window.MapboxGlobeController?.projection === 'globe';
+        const nextProj = isGlobe ? 'mercator' : 'globe';
+        window.MapboxGlobeController?.setProjection(nextProj);
+        const label = document.getElementById('globe-toggle-label');
+        if (label) {
+            label.textContent = isGlobe ? 'Bản đồ 2D' : 'Địa cầu 3D';
+        }
+        btn.classList.toggle('is-active', !isGlobe);
     });
 
-    // Auto-activate 3D globe if valid Mapbox token is present
-    if (window.mapboxAccessToken?.startsWith('pk.')) {
-        setTimeout(() => {
-            void setGlobeMode(true);
-        }, 500);
+    const focusGlobeBtn = document.getElementById('btn-focus-globe');
+    focusGlobeBtn?.addEventListener('click', () => {
+        if (window.MapboxGlobeController?.active) {
+            window.MapboxGlobeController.setProjection('globe');
+            window.MapboxGlobeController.focusGlobe();
+            btn.classList.add('is-active');
+            const label = document.getElementById('globe-toggle-label');
+            if (label) label.textContent = 'Địa cầu 3D';
+        } else if (window.map) {
+            window.map.setView([16.0, 108.2], 3);
+        }
+    });
+
+    const focusVnBtn = document.getElementById('btn-focus-vietnam');
+    focusVnBtn?.addEventListener('click', () => {
+        if (window.MapboxGlobeController?.active) {
+            window.MapboxGlobeController.focusVietnam();
+        } else if (window.map) {
+            window.map.setView([16.0, 108.2], 6);
+        }
+    });
+
+    // Tự động khởi chạy Mapbox 3D Globe khi khả dụng
+    async function tryAutoStartGlobe() {
+        try {
+            await window.MapboxGlobeController?.init(globeContainer);
+            await setGlobeMode(true);
+        } catch (err) {
+            console.debug('Mapbox 3D Globe fallback to Leaflet:', err);
+        }
     }
+    void tryAutoStartGlobe();
 }
