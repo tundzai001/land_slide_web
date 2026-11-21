@@ -235,6 +235,7 @@
         popup = null;
         projects = [];
         projectMarkers = [];
+        suppressProvinceClick = false;
 
         async init(container) {
             if (this.map) return this.map;
@@ -419,13 +420,35 @@
             });
 
             map.on('click', 'vietnam-provinces-fill', (e) => {
+                if (this.suppressProvinceClick || map.getZoom() >= 10.5) return;
+                if (this._isInteractiveFeatureHit(e.point)) return;
                 const feature = e.features?.[0];
                 if (!feature?.properties) return;
                 this.fitProvince(feature.properties.code, { lngLat: e.lngLat, fit: false });
             });
 
-            map.on('mouseenter', 'vietnam-provinces-fill', () => { map.getCanvas().style.cursor = 'pointer'; });
-            map.on('mouseleave', 'vietnam-provinces-fill', () => { map.getCanvas().style.cursor = ''; });
+            map.on('mouseenter', 'vietnam-provinces-fill', () => {
+                if (map.getZoom() < 10.5) {
+                    map.getCanvas().style.cursor = 'pointer';
+                }
+            });
+            map.on('mouseleave', 'vietnam-provinces-fill', () => {
+                map.getCanvas().style.cursor = '';
+            });
+        }
+
+        _isInteractiveFeatureHit(point) {
+            const map = this.map;
+            if (!map) return false;
+            const interactiveLayers = ['station-clusters', 'station-pins-circle', 'station-pins-glow', 'station-pins-label', 'vietnam-island-labels']
+                .filter(id => map.getLayer(id));
+            if (interactiveLayers.length === 0) return false;
+            const bbox = [
+                [point.x - 8, point.y - 8],
+                [point.x + 8, point.y + 8],
+            ];
+            const hitFeatures = map.queryRenderedFeatures(bbox, { layers: interactiveLayers });
+            return Boolean(hitFeatures && hitFeatures.length > 0);
         }
 
         _installIslandLayers() {
@@ -591,6 +614,10 @@
 
             // Click cluster to zoom in
             map.on('click', 'station-clusters', (e) => {
+                this.clearProvinceSelection();
+                this.popup?.remove();
+                this.suppressProvinceClick = true;
+                setTimeout(() => { this.suppressProvinceClick = false; }, 350);
                 const features = map.queryRenderedFeatures(e.point, { layers: ['station-clusters'] });
                 const clusterId = features[0]?.properties?.cluster_id;
                 const source = map.getSource('station-pins');
@@ -610,6 +637,10 @@
 
             // Click individual station pin
             map.on('click', 'station-pins-circle', (e) => {
+                this.clearProvinceSelection();
+                this.popup?.remove();
+                this.suppressProvinceClick = true;
+                setTimeout(() => { this.suppressProvinceClick = false; }, 350);
                 const stationId = e.features?.[0]?.properties?.id;
                 if (stationId && typeof window.selectStation === 'function') {
                     void window.selectStation(stationId);
@@ -757,6 +788,10 @@
 
                 const handleProjectClick = (evt) => {
                     evt?.stopPropagation?.();
+                    this.clearProvinceSelection();
+                    this.popup?.remove();
+                    this.suppressProvinceClick = true;
+                    setTimeout(() => { this.suppressProvinceClick = false; }, 350);
                     tooltipPopup.remove();
                     this._stopSpin();
                     this.map?.flyTo({

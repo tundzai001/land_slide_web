@@ -317,6 +317,10 @@ async function selectStation(stationId, options = {}) {
     if (currentMapMode === 'rescue') {
         return;
     }
+    if (window.MapboxGlobeController) {
+        window.MapboxGlobeController.clearProvinceSelection?.();
+        window.MapboxGlobeController.popup?.remove?.();
+    }
     const chartsPanel = document.getElementById('charts-panel');
     setChartsPanelOpen(chartsPanel, false);
     destroyStationCharts();
