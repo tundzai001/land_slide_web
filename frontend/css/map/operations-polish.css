@@ -697,7 +697,7 @@ html[data-app-view="map"] :is(.map-icon-button,.sidebar-close-tab,.map-bottom-na
 /* Continuous workspace bar and a docked station directory. */
 .top-navbar .brand-text,.top-navbar .app-brand-product strong { color:var(--workspace-chrome-text) !important; }
 .top-navbar .app-brand-product small { color:var(--workspace-chrome-muted) !important; }
-.top-navbar .app-brand-plate { background:#fff !important; padding:4px 6px !important; border-radius:4px !important; }
+.top-navbar .app-brand-plate,html[data-theme="dark"] .top-navbar .app-brand-plate { background:transparent !important; padding:0 !important; border:0 !important; border-radius:0 !important; }
 .top-navbar .navbar-hamburger,.top-navbar .map-icon-button,
 .top-navbar .btn-outline-primary,html[data-theme="dark"] .top-navbar .btn-outline-primary,
 .top-navbar .map-simulation-nav {

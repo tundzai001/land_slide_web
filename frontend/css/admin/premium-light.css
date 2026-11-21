@@ -894,7 +894,8 @@ html[data-app-view="admin"] body { font-family: var(--font-base); background: va
 /* Precision workspace: common surfaces, compact navigation, calm hierarchy. */
 .admin-sidebar .sidebar-brand { margin: 0; text-decoration: none; height: 72px; flex-shrink: 0; color: var(--workspace-chrome-text) !important; border-bottom: 1px solid var(--workspace-chrome-line); }
 .admin-sidebar .sidebar-brand::after { display: none; }
-.admin-sidebar .sidebar-brand .app-brand-plate { width: 72px; margin: 0; flex-shrink: 0; background: #fff; padding: 4px 6px; border-radius: 4px; }
+.admin-sidebar .sidebar-brand .app-brand-plate { width: 72px; margin: 0; flex-shrink: 0; background: transparent; padding: 0; border: 0; border-radius: 0; }
+[data-theme="dark"] .admin-sidebar .sidebar-brand .app-brand-plate { background: transparent !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; }
 .admin-sidebar .sidebar-brand .app-brand-product { text-align: left; gap: 4px; }
 .admin-sidebar .sidebar-brand .app-brand-product strong { font-size: 16px; font-weight: 650; }
 .admin-sidebar .sidebar-brand .app-brand-product small { font-size: 11px; letter-spacing: 0; text-transform: none; color: var(--admin-muted); }
