@@ -877,6 +877,13 @@ function formatAgeFromTimestamp(ts) {
     return `${Math.floor(diff / 86400)} ngày trước`;
 }
 
+function _safeEpochMs(value) {
+    if (typeof normalizeEpochMs === 'function') return normalizeEpochMs(value);
+    if (typeof window !== 'undefined' && typeof window.normalizeEpochMs === 'function') return window.normalizeEpochMs(value);
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? (Math.abs(numeric) < 1e12 ? numeric * 1000 : numeric) : Date.parse(String(value));
+}
+
 function renderStaleInfo(data, mqttConnected, latestSensorTs) {
     const staleEl = document.getElementById('st-stale-info');
     if (!staleEl) return;
@@ -887,17 +894,30 @@ function renderStaleInfo(data, mqttConnected, latestSensorTs) {
         return;
     }
 
-    const ageText = formatAgeFromTimestamp(latestSensorTs);
-    const localTime = new Date(normalizeEpochMs(latestSensorTs)).toLocaleString('vi-VN');
+    const now = Math.floor(Date.now() / 1000);
+    const diff = Math.max(0, now - Number(latestSensorTs));
 
-    if (!mqttConnected) {
+    // Dữ liệu mới (trong vòng 60s) và trạm không offline -> kết nối bình thường, xóa banner mất kết nối
+    const isFresh = diff < 60;
+    const isStationOnline = data.status === 'online' || (!data.status && isFresh);
+    if (isFresh && isStationOnline) {
+        staleEl.style.display = 'none';
+        staleEl.innerHTML = '';
+        return;
+    }
+
+    const ageText = formatAgeFromTimestamp(latestSensorTs);
+    const localTime = new Date(_safeEpochMs(latestSensorTs)).toLocaleString('vi-VN');
+
+    if (!mqttConnected && !isFresh) {
         staleEl.innerHTML = `<span class="badge-label">MẤT KẾT NỐI</span> Dữ liệu cuối: ${ageText} (${localTime})`;
         staleEl.style.display = 'flex';
         return;
     }
 
-    if (data.status === 'offline') {
-        staleEl.innerHTML = `<span class="badge-label">NGOẠI TUYẾN</span> Dữ liệu cuối: ${ageText} (${localTime})`;
+    if (data.status === 'offline' || !isFresh) {
+        const label = !mqttConnected ? 'MẤT KẾT NỐI' : 'NGOẠI TUYẾN';
+        staleEl.innerHTML = `<span class="badge-label">${label}</span> Dữ liệu cuối: ${ageText} (${localTime})`;
         staleEl.style.display = 'flex';
         return;
     }

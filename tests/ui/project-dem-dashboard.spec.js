@@ -117,3 +117,67 @@ test('DEM upload explains an upstream 413 with the file details', async ({ page 
   await expect(page.locator('#management-dem-selection')).toContainText('IIS hoặc proxy');
   await expect.poll(() => page.evaluate(() => window.lastToast)).toContain('HTTP 413');
 });
+
+test('project overview hides empty DEM block, formats non-redundant stations, and clears fresh disconnect banner', async ({ page }) => {
+  const source = file => readFileSync(join(__dirname, '../..', file), 'utf8');
+  await page.setContent(`
+    <main id="map" style="width:100%;height:100%"></main>
+    <div id="st-stale-info" class="stale-info" style="display:none"></div>
+  `);
+  await page.addScriptTag({ content: source('frontend/js/dem-grid.js') });
+  await page.addScriptTag({ content: source('frontend/js/map/analysis.js') });
+  await page.addScriptTag({ content: source('frontend/js/map/stations.js') });
+  await page.evaluate(() => {
+    window.DemGrid.mount = async () => ({ destroy() {}, fit() {} });
+    const center = { lat: 21.05, lng: 107.32 };
+    window.getLeafletMap = () => ({
+      getCenter: () => center,
+      getZoom: () => 14,
+      panBy() {},
+      once() {},
+      flyTo() {},
+      setView() {},
+    });
+    window.allStations = [
+      { id: 101, project_id: 20, station_code: 'CP03', name: 'CP03', status: 'online', sensor_types: ['gnss'] },
+      { id: 102, project_id: 20, station_code: 'Dap1_1', name: 'Đập 1 số 1', status: 'offline', sensor_types: ['gnss', 'imu'] }
+    ];
+    window.matchMedia = () => ({ matches: true });
+  });
+
+  await page.evaluate(async () => {
+    await window.openProjectDashboard({
+      id: 20,
+      name: 'Mông Dương',
+      location: { lat: 21.05, lon: 107.32 },
+      dems: [] // No DEM
+    }, [21.05, 107.32], document.createElement('button'));
+  });
+
+  // 1. Empty DEM block must be hidden
+  await expect(page.locator('#project-dashboard-terrain')).toBeHidden();
+
+  // 2. Station list must not duplicate name when station_code === name
+  const cp03Item = page.locator('.project-station-item[data-station-id="101"]');
+  await expect(cp03Item).toContainText('CP03');
+  await expect(cp03Item.locator('.station-name-sub')).toHaveCount(0);
+
+  // But station with different name must display the distinct name
+  const dapItem = page.locator('.project-station-item[data-station-id="102"]');
+  await expect(dapItem.locator('.station-name-sub')).toHaveText('Đập 1 số 1');
+
+  // 3. Stale banner logic: fresh data clears/hides stale banner
+  const now = Math.floor(Date.now() / 1000);
+  await page.evaluate(({ nowTs }) => {
+    // If data timestamp is 2s ago (< 60s) and station is online, banner must be hidden
+    window.renderStaleInfo({ status: 'online' }, false, nowTs - 2);
+  }, { nowTs: now });
+  await expect(page.locator('#st-stale-info')).toBeHidden();
+
+  // If data timestamp is old (300s ago), banner must be shown
+  await page.evaluate(({ nowTs }) => {
+    window.renderStaleInfo({ status: 'online' }, false, nowTs - 300);
+  }, { nowTs: now });
+  await expect(page.locator('#st-stale-info')).toBeVisible();
+  await expect(page.locator('#st-stale-info')).toContainText('MẤT KẾT NỐI');
+});

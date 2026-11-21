@@ -1087,7 +1087,19 @@ function _syncRealtimeSensorCache(stationId, sensor_type, data, timestamp) {
         if (stationSensorCatalog(currentStationData).some(sensor => sensor.key === sensor_type && !sensor.legacy)) {
             currentStationData.sensors[sensor_type].is_online = true;
         }
-        currentStationData.sensors[sensor_type].latest_timestamp = Number(timestamp || Date.now() / 1000);
+        const tsSec = Number(timestamp || Date.now() / 1000);
+        currentStationData.sensors[sensor_type].latest_timestamp = tsSec;
+        currentStationData.last_update = tsSec;
+        currentStationData.mqtt_connected = true;
+        if (currentStationData.status === 'offline' || currentStationData.status === 'stale') {
+            currentStationData.status = 'online';
+            if (typeof _renderStationRiskBadge === 'function') {
+                _renderStationRiskBadge(currentStationData, 'online');
+            }
+        }
+        if (typeof renderStaleInfo === 'function') {
+            renderStaleInfo(currentStationData, true, tsSec);
+        }
     }
 }
 

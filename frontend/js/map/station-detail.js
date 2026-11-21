@@ -669,7 +669,10 @@ function resetStationSensorCards() {
 
 function _renderSensorCardStatusText(sensor, mqttConnected) {
     if (!sensor.latest) return 'Chưa có dữ liệu';
-    if (sensor.is_online && mqttConnected) return 'Đang nhận dữ liệu';
+    const now = Math.floor(Date.now() / 1000);
+    const ts = Number(sensor.latest_timestamp || sensor.latest?.timestamp || 0);
+    const isFresh = ts && Math.max(0, now - ts) < 60;
+    if ((sensor.is_online && mqttConnected) || isFresh) return 'Đang nhận dữ liệu';
     return 'Dữ liệu cuối · mất kết nối';
 }
 
@@ -751,14 +754,17 @@ function _determineSensorOnlineStates(data, effectiveStatus, isOfflineDisplayEna
     const rainLatest = data.sensors?.rain?.latest;
     const waterLatest = data.sensors?.water?.latest;
     const imuLatest = data.sensors?.imu?.latest;
-    const mqttConnected = data.mqtt_connected !== false;
-    const isStationOffline = effectiveStatus === 'offline';
+    const latestSensorTs = getLatestSensorTimestamp(data);
+    const now = Math.floor(Date.now() / 1000);
+    const isFresh = latestSensorTs && Math.max(0, now - Number(latestSensorTs)) < 60;
+    const mqttConnected = data.mqtt_connected !== false || isFresh;
+    const isStationOffline = effectiveStatus === 'offline' && !isFresh;
     const staleDisplay = (effectiveStatus === 'stale' || data.status === 'stale') && isOfflineDisplayEnabled;
     return {
-        gnssOnline: mqttConnected && !isStationOffline && ((data.sensors?.gnss?.is_online ?? false) || (staleDisplay && !!gnssLatest)),
-        rainOnline: mqttConnected && !isStationOffline && ((data.sensors?.rain?.is_online ?? false) || (staleDisplay && !!rainLatest)),
-        waterOnline: mqttConnected && !isStationOffline && ((data.sensors?.water?.is_online ?? false) || (staleDisplay && !!waterLatest)),
-        imuOnline: mqttConnected && !isStationOffline && ((data.sensors?.imu?.is_online ?? false) || (staleDisplay && !!imuLatest)),
+        gnssOnline: mqttConnected && !isStationOffline && ((data.sensors?.gnss?.is_online ?? false) || isFresh || (staleDisplay && !!gnssLatest)),
+        rainOnline: mqttConnected && !isStationOffline && ((data.sensors?.rain?.is_online ?? false) || isFresh || (staleDisplay && !!rainLatest)),
+        waterOnline: mqttConnected && !isStationOffline && ((data.sensors?.water?.is_online ?? false) || isFresh || (staleDisplay && !!waterLatest)),
+        imuOnline: mqttConnected && !isStationOffline && ((data.sensors?.imu?.is_online ?? false) || isFresh || (staleDisplay && !!imuLatest)),
     };
 }
 

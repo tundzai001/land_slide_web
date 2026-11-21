@@ -158,7 +158,7 @@ function ensureProjectDashboard() {
                     <div class="project-stations-list" id="project-stations-list"></div>
                 </div>
 
-                <section class="project-dashboard-terrain" aria-labelledby="project-dashboard-terrain-title">
+                <section class="project-dashboard-terrain" id="project-dashboard-terrain" aria-labelledby="project-dashboard-terrain-title">
                     <div class="project-dashboard-terrain-head">
                         <div><h3 id="project-dashboard-terrain-title">Địa hình số của công trình</h3><p id="project-dashboard-terrain-description">DEM · EPSG:32648 · ô lưới theo file</p></div>
                         <select class="project-dashboard-dem-select" id="project-dashboard-dem-select" aria-label="Chọn khu địa hình" hidden></select>
@@ -202,6 +202,8 @@ function closeProjectDashboard() {
     panel.inert = true;
     projectDashboardViewer?.destroy();
     projectDashboardViewer = null;
+    const terrainSection = document.getElementById('project-dashboard-terrain') || panel.querySelector('.project-dashboard-terrain');
+    if (terrainSection) terrainSection.hidden = true;
     projectDashboardTrigger?.focus?.({ preventScroll: true });
     projectDashboardTrigger = null;
 }
@@ -255,18 +257,21 @@ function _renderProjectStationsList(projectStations, container) {
         if (st.has_water || types.includes('water')) chips.push('Nước');
         if (st.has_rain || types.includes('rain')) chips.push('Mưa');
 
-        const code = _safeEscapeHtml(st.station_code || st.name);
-        const name = _safeEscapeHtml(st.name || '');
+        const code = _safeEscapeHtml(st.station_code || st.name || '');
+        const rawName = (st.name || '').trim();
+        const rawCode = (st.station_code || '').trim();
+        const hasDifferentName = rawName && rawCode && rawName.toLowerCase() !== rawCode.toLowerCase();
+        const name = hasDifferentName ? _safeEscapeHtml(rawName) : '';
         const tagsHtml = chips.map(c => `<span class="sensor-mini-tag">${c}</span>`).join('');
 
         return `
             <div class="project-station-item" role="button" tabindex="0" data-station-id="${st.id}">
-                <div class="d-flex align-items-center justify-content-between mb-1">
+                <div class="d-flex align-items-center justify-content-between">
                     <span class="station-code-title"><i class="bi bi-broadcast me-1 text-teal"></i><strong>${code}</strong></span>
                     <span class="badge ${badgeClass}">${badgeText}</span>
                 </div>
-                <div class="station-name-sub text-muted small">${name}</div>
-                <div class="station-sensor-tags mt-1">${tagsHtml}</div>
+                ${hasDifferentName ? `<div class="station-name-sub text-muted small">${name}</div>` : ''}
+                ${chips.length ? `<div class="station-sensor-tags">${tagsHtml}</div>` : ''}
             </div>`;
     }).join('');
 
@@ -356,17 +361,23 @@ async function openProjectDashboard(project, center, trigger) {
     const projectStations = allStations.filter(station => String(station.project_id) === String(project.id));
     _renderProjectDashboardStationSummary(projectStations);
 
+    const terrainSection = document.getElementById('project-dashboard-terrain') || panel.querySelector('.project-dashboard-terrain');
+    const hasDem = dems.length > 0;
+    if (terrainSection) {
+        terrainSection.hidden = !hasDem;
+    }
+
     const message = document.getElementById('project-dashboard-message');
-    const messageText = message.querySelector('span');
+    const messageText = message?.querySelector('span');
     const viewport = document.getElementById('project-dashboard-viewport');
     const status = document.getElementById('project-dashboard-status');
     const controls = document.getElementById('project-dashboard-controls');
-    viewport.hidden = true;
-    message.hidden = false;
-    status.textContent = '';
-    messageText.textContent = dems.length ? 'Đang tải mô hình địa hình…' : 'Dự án này chưa có DEM. Tải mô hình lên trong trang Quản lý dự án để xem địa hình 3D tại đây.';
-    if (controls) {
-        controls.hidden = !dems.length;
+    if (viewport) viewport.hidden = true;
+    if (status) status.textContent = '';
+    if (controls) controls.hidden = !hasDem;
+    if (message) {
+        message.hidden = !hasDem;
+        if (messageText && hasDem) messageText.textContent = 'Đang tải mô hình địa hình…';
     }
 
     const demSelect = document.getElementById('project-dashboard-dem-select');
@@ -1031,6 +1042,10 @@ function renderStationList(stations) {
         const badgeClass = getRiskBadgeClass(riskUi.className);
         const riskLabel = getStationListRiskLabel(riskUi.normalized);
         
+        const rawName = (st.name || '').trim();
+        const rawCode = (st.station_code || '').trim();
+        const hasDifferentCode = rawCode && rawName && rawCode.toLowerCase() !== rawName.toLowerCase();
+
         let div = container.querySelector(`[data-station-id="${st.id}"]`);
         
         if (div) {
@@ -1042,11 +1057,14 @@ function renderStationList(stations) {
             }
             div.dataset.state = riskUi.normalized.toLowerCase();
             div.dataset.connection = getStationListConnection(st, riskUi);
-            div.setAttribute('aria-label', `${st.name}: ${riskLabel}`);
+            div.setAttribute('aria-label', `${rawName || rawCode}: ${riskLabel}`);
             const name = div.querySelector('.station-item-name');
             const code = div.querySelector('.station-item-code');
-            if (name) name.textContent = st.name;
-            if (code) code.textContent = st.station_code || 'Chưa có mã';
+            if (name) name.textContent = rawName || rawCode || 'Trạm quan trắc';
+            if (code) {
+                code.textContent = hasDifferentCode ? rawCode : '';
+                code.style.display = hasDifferentCode ? '' : 'none';
+            }
         } else {
             div = document.createElement('button');
             div.type = 'button';
@@ -1054,12 +1072,12 @@ function renderStationList(stations) {
             div.dataset.stationId = st.id;
             div.dataset.state = riskUi.normalized.toLowerCase();
             div.dataset.connection = getStationListConnection(st, riskUi);
-            div.setAttribute('aria-label', `${st.name}: ${riskLabel}`);
+            div.setAttribute('aria-label', `${rawName || rawCode}: ${riskLabel}`);
             div.innerHTML = `
                 <span class="station-state-mark" aria-hidden="true"><i class="bi bi-broadcast-pin"></i></span>
                 <span class="station-item-copy">
-                    <strong class="station-item-name">${escapeHtml(st.name)}</strong>
-                    <small class="station-item-code">${escapeHtml(st.station_code || 'Chưa có mã')}</small>
+                    <strong class="station-item-name">${escapeHtml(rawName || rawCode || 'Trạm quan trắc')}</strong>
+                    ${hasDifferentCode ? `<small class="station-item-code">${escapeHtml(rawCode)}</small>` : ''}
                 </span>
                 <span id="list-badge-${st.id}" class="badge station-status ${badgeClass}">${riskLabel}</span>
                 <i class="bi bi-chevron-right station-item-chevron" aria-hidden="true"></i>
