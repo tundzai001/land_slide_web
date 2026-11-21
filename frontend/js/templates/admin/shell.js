@@ -71,7 +71,7 @@ window.LegacyTemplateParts['shell'] = `
         <div class="sidebar-guides" aria-label="Tài liệu hướng dẫn">
             <button type="button" title="Tải hướng dẫn tích hợp PDF" onclick="window.adminManager.downloadGuide(this, 'integration')"><i class="bi bi-file-earmark-arrow-down" aria-hidden="true"></i><span>Hướng dẫn tích hợp</span></button>
             <button type="button" title="Tải hướng dẫn sử dụng PDF" onclick="window.adminManager.downloadGuide(this, 'user')"><i class="bi bi-book" aria-hidden="true"></i><span>Hướng dẫn sử dụng</span></button>
-            <span class="sidebar-guide-status" role="status" aria-live="polite"></span>
+            <span class="sidebar-guide-status" role="status" aria-live="polite" onclick="this.textContent=''" title="Nhấp để đóng"></span>
         </div>
     </div>
 

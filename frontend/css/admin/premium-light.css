@@ -886,7 +886,7 @@ html[data-app-view="admin"] body { font-family: var(--font-base); background: va
 .sidebar-guides button:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
 .sidebar-guides button:disabled { opacity: .65; cursor: wait; }
 .sidebar-guides i { flex-shrink: 0; font-size: 1rem; }
-.sidebar-guide-status { display: block; font-size: .72rem; color: var(--text-secondary); padding-inline: 12px; }
+.sidebar-guide-status { display: block; font-size: .72rem; color: var(--text-secondary); padding-inline: 12px; margin-top: 4px; cursor: pointer; transition: opacity 160ms ease; }
 .sidebar-guide-status:empty { display: none; }
 @media (max-width: 999px) { .sidebar-guides button { justify-content: center; padding-inline: 4px; } .sidebar-guides button span { display: none; } .sidebar-guide-status { padding: 0; overflow-wrap: anywhere; } }
 @media (prefers-reduced-motion: reduce) { .sidebar-guides button { transition: none; transform: none; } }

@@ -211,15 +211,31 @@ class AdminOperationsFeature extends window.AdminManager {
     }
 
     async downloadGuide(button, kind) {
-        const status = button.closest('.sidebar-guides').querySelector('[role="status"]');
+        const status = button.closest('.sidebar-guides')?.querySelector('[role="status"]');
         button.disabled = true;
         button.setAttribute('aria-busy', 'true');
-        status.textContent = 'Đang tải tài liệu…';
+        if (status) status.textContent = 'Đang tải tài liệu…';
         try {
             const name = kind === 'user' ? 'huong-dan-su-dung-web.pdf' : 'huong-dan-van-hanh-tich-hop.pdf';
             await this.operationDownload(`/${kind === 'user' ? 'user' : 'integration'}-guide/download`, name, true);
-            status.textContent = 'Đã tải tài liệu.';
-        } catch (error) { status.textContent = error.message; }
+            if (status) {
+                status.textContent = 'Đã tải tài liệu.';
+                clearTimeout(this._guideStatusTimer);
+                this._guideStatusTimer = setTimeout(() => {
+                    if (status && status.textContent === 'Đã tải tài liệu.') {
+                        status.textContent = '';
+                    }
+                }, 3000);
+            }
+        } catch (error) {
+            if (status) {
+                status.textContent = error.message;
+                clearTimeout(this._guideStatusTimer);
+                this._guideStatusTimer = setTimeout(() => {
+                    if (status) status.textContent = '';
+                }, 4000);
+            }
+        }
         finally { button.disabled = false; button.removeAttribute('aria-busy'); }
     }
 
