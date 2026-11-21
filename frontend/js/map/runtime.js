@@ -1200,6 +1200,7 @@ const MAPBOX_STYLES = Object.freeze({
     hybrid: 'satellite-streets-v12',
     terrain: 'outdoors-v12',
 });
+window.MAPBOX_STYLES = MAPBOX_STYLES;
 
 function getMapboxTileUrl(styleKey, token) {
     const styleId = MAPBOX_STYLES[styleKey] || MAPBOX_STYLES.hybrid;
@@ -1274,6 +1275,7 @@ try {
     const savedBasemap = localStorage.getItem('monitoring-basemap');
     if (Object.hasOwn(MAP_BASEMAPS, savedBasemap)) activeBasemap = savedBasemap;
 } catch (err) { console.debug('Browser storage unavailable:', err); }
+window.activeBasemap = activeBasemap;
 const TILE_OPTIONS = {
     light: {
         maxZoom: 20,

@@ -236,6 +236,9 @@
         projects = [];
         projectMarkers = [];
         suppressProvinceClick = false;
+        currentBasemap = 'hybrid';
+        currentStyleUrl = '';
+        layerEventsBound = false;
 
         async init(container) {
             if (this.map) return this.map;
@@ -266,10 +269,23 @@
                 throw new Error('Trình duyệt chưa hỗ trợ WebGL 3D.');
             }
 
+            const initialKey = (typeof activeBasemap !== 'undefined' && activeBasemap)
+                || (typeof window !== 'undefined' && window.activeBasemap)
+                || 'hybrid';
+            const styles = (typeof MAPBOX_STYLES !== 'undefined' && MAPBOX_STYLES) || window.MAPBOX_STYLES || {
+                roadmap: 'streets-v12',
+                satellite: 'satellite-v9',
+                hybrid: 'satellite-streets-v12',
+                terrain: 'outdoors-v12',
+            };
+            const styleId = styles[initialKey] || styles.hybrid;
+            this.currentBasemap = initialKey;
+            this.currentStyleUrl = `mapbox://styles/mapbox/${styleId}`;
+
             this.map = new sdk.Map({
                 container,
                 accessToken: token,
-                style: 'mapbox://styles/mapbox/satellite-streets-v12',
+                style: this.currentStyleUrl,
                 projection: 'globe',
                 center: [108.2, 16.0],
                 zoom: 4.8,
@@ -339,8 +355,35 @@
             });
         }
 
+        setBasemap(styleKey) {
+            const styles = (typeof MAPBOX_STYLES !== 'undefined' && MAPBOX_STYLES) || window.MAPBOX_STYLES || {
+                roadmap: 'streets-v12',
+                satellite: 'satellite-v9',
+                hybrid: 'satellite-streets-v12',
+                terrain: 'outdoors-v12',
+            };
+            const styleId = styles[styleKey] || styles.hybrid;
+            const styleUrl = `mapbox://styles/mapbox/${styleId}`;
+            this.currentBasemap = styleKey;
+            if (this.currentStyleUrl === styleUrl) return;
+            this.currentStyleUrl = styleUrl;
+
+            const status = document.getElementById('basemap-status');
+            const label = (typeof MAP_BASEMAPS !== 'undefined' && MAP_BASEMAPS[styleKey]?.label) || 'Bản đồ';
+            if (status) {
+                status.textContent = `Đang tải ${label.toLowerCase()}…`;
+            }
+
+            if (this.map) {
+                this.map.setStyle(styleUrl);
+            }
+        }
+
         _onStyleLoad() {
             const map = this.map;
+            if (this.projection) {
+                map.setProjection(this.projection);
+            }
             map.setFog({
                 color: 'rgb(186, 210, 235)',
                 'high-color': 'rgb(36, 92, 223)',
@@ -352,6 +395,19 @@
             void this._installProvinceLayers();
             this._installIslandLayers();
             this._installStationLayers();
+            this._setupLayerEvents();
+
+            const status = document.getElementById('basemap-status');
+            const currentKey = this.currentBasemap || (typeof activeBasemap !== 'undefined' ? activeBasemap : 'hybrid');
+            const label = (typeof MAP_BASEMAPS !== 'undefined' && MAP_BASEMAPS[currentKey]?.label) || 'Bản đồ';
+            if (status) {
+                status.textContent = label;
+            }
+
+            const provCheckbox = document.getElementById('layer-provinces');
+            if (provCheckbox && !provCheckbox.checked) {
+                this.setProvincesVisible(false);
+            }
         }
 
         async _loadProvincesData() {
@@ -418,23 +474,6 @@
                 filter: selFilter,
                 paint: { 'line-color': '#fbbf24', 'line-width': 3.5, 'line-opacity': 1 },
             });
-
-            map.on('click', 'vietnam-provinces-fill', (e) => {
-                if (this.suppressProvinceClick || map.getZoom() >= 10.5) return;
-                if (this._isInteractiveFeatureHit(e.point)) return;
-                const feature = e.features?.[0];
-                if (!feature?.properties) return;
-                this.fitProvince(feature.properties.code, { lngLat: e.lngLat, fit: false });
-            });
-
-            map.on('mouseenter', 'vietnam-provinces-fill', () => {
-                if (map.getZoom() < 10.5) {
-                    map.getCanvas().style.cursor = 'pointer';
-                }
-            });
-            map.on('mouseleave', 'vietnam-provinces-fill', () => {
-                map.getCanvas().style.cursor = '';
-            });
         }
 
         _isInteractiveFeatureHit(point) {
@@ -453,6 +492,7 @@
 
         _installIslandLayers() {
             const map = this.map;
+            if (map.getSource('vietnam-islands')) return;
             map.addSource('vietnam-islands', {
                 type: 'geojson',
                 data: { type: 'FeatureCollection', features: [...ISLAND_FEATURES] },
@@ -476,20 +516,11 @@
                     'text-halo-width': 2.5,
                 },
             });
-
-            map.on('click', 'vietnam-island-labels', (e) => {
-                const p = e.features?.[0]?.properties;
-                if (!p) return;
-                const name = String(p.name || '').replaceAll('\n', ' - ');
-                const desc = name.includes('Hoàng Sa') || name.includes('Trường Sa')
-                    ? 'Quần đảo thuộc chủ quyền thiêng liêng của nước Cộng hòa Xã hội Chủ nghĩa Việt Nam.'
-                    : 'Vùng biển chủ quyền thuộc quyền tài phán của Việt Nam.';
-                this._showTextPopup(e.lngLat, name, desc);
-            });
         }
 
         _installStationLayers() {
             const map = this.map;
+            if (map.getSource('station-pins')) return;
             const stations = window.allStations || [];
             map.addSource('station-pins', {
                 type: 'geojson',
@@ -610,6 +641,40 @@
                     'text-halo-color': '#0f172a',
                     'text-halo-width': 2,
                 },
+            });
+        }
+
+        _setupLayerEvents() {
+            if (this.layerEventsBound) return;
+            const map = this.map;
+            if (!map) return;
+            this.layerEventsBound = true;
+
+            map.on('click', 'vietnam-provinces-fill', (e) => {
+                if (this.suppressProvinceClick || map.getZoom() >= 10.5) return;
+                if (this._isInteractiveFeatureHit(e.point)) return;
+                const feature = e.features?.[0];
+                if (!feature?.properties) return;
+                this.fitProvince(feature.properties.code, { lngLat: e.lngLat, fit: false });
+            });
+
+            map.on('mouseenter', 'vietnam-provinces-fill', () => {
+                if (map.getZoom() < 10.5) {
+                    map.getCanvas().style.cursor = 'pointer';
+                }
+            });
+            map.on('mouseleave', 'vietnam-provinces-fill', () => {
+                map.getCanvas().style.cursor = '';
+            });
+
+            map.on('click', 'vietnam-island-labels', (e) => {
+                const p = e.features?.[0]?.properties;
+                if (!p) return;
+                const name = String(p.name || '').replaceAll('\n', ' - ');
+                const desc = name.includes('Hoàng Sa') || name.includes('Trường Sa')
+                    ? 'Quần đảo thuộc chủ quyền thiêng liêng của nước Cộng hòa Xã hội Chủ nghĩa Việt Nam.'
+                    : 'Vùng biển chủ quyền thuộc quyền tài phán của Việt Nam.';
+                this._showTextPopup(e.lngLat, name, desc);
             });
 
             // Click cluster to zoom in

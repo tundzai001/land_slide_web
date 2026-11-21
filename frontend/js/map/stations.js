@@ -56,6 +56,9 @@ function attachBasemapTileEvents(layer, canUseMapbox, label, status) {
 }
 
 function switchMapTiles(forceFallback = false) {
+    if (window.MapboxGlobeController) {
+        window.MapboxGlobeController.setBasemap?.(activeBasemap);
+    }
     if (!map) return;
     if (currentTileLayer) {
         map.removeLayer(currentTileLayer);

@@ -607,7 +607,12 @@ function setupBasemapControls() {
     };
     const sync = () => {
         popover.querySelectorAll('input[name="basemap"]').forEach(input => { input.checked = input.value === activeBasemap; });
-        toggle.setAttribute('aria-label', `Đổi nền bản đồ: ${MAP_BASEMAPS[activeBasemap].label}`);
+        const label = (typeof MAP_BASEMAPS !== 'undefined' && MAP_BASEMAPS[activeBasemap]?.label) || 'Bản đồ';
+        toggle.setAttribute('aria-label', `Đổi nền bản đồ: ${label}`);
+        const status = document.getElementById('basemap-status');
+        if (status) {
+            status.textContent = label;
+        }
     };
     sync();
     toggle.addEventListener('click', () => {
@@ -624,6 +629,7 @@ function setupBasemapControls() {
         const value = event.target.value;
         if (!Object.hasOwn(MAP_BASEMAPS, value) || value === activeBasemap) return;
         activeBasemap = value;
+        window.activeBasemap = value;
         try { localStorage.setItem('monitoring-basemap', value); } catch (err) { console.debug('Cannot persist basemap choice:', err); }
         switchMapTiles();
         sync();
