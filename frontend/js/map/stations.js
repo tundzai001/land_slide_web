@@ -216,6 +216,16 @@ function _buildSensorCounts(projectStations) {
     return counts;
 }
 
+function _safeEscapeHtml(str) {
+    if (typeof escapeHtml === 'function') return escapeHtml(str);
+    return String(str ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
 function _renderProjectStationsList(projectStations, container) {
     if (!container) return;
     if (!projectStations.length) {
@@ -235,8 +245,8 @@ function _renderProjectStationsList(projectStations, container) {
         if (st.has_water || types.includes('water')) chips.push('Nước');
         if (st.has_rain || types.includes('rain')) chips.push('Mưa');
 
-        const code = escapeHtml(st.station_code || st.name);
-        const name = escapeHtml(st.name || '');
+        const code = _safeEscapeHtml(st.station_code || st.name);
+        const name = _safeEscapeHtml(st.name || '');
         const tagsHtml = chips.map(c => `<span class="sensor-mini-tag">${c}</span>`).join('');
 
         return `
