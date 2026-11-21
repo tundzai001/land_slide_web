@@ -450,6 +450,8 @@ async def get_stations(
         stations_with_status = []
         for station in stations:
             devices = devices_by_station[int(station.id)]
+            dev_types = {str(d.device_type) for d in devices if getattr(d, 'device_type', None)}
+            sensor_types = sorted(list(dev_types))
             station_online = _compute_station_online(station, devices, latest_by_key, current_time)
             risk_assessment = _summarize_station_alerts(
                 alerts_by_station[int(station.id)], station.config
@@ -467,7 +469,12 @@ async def get_stations(
                 "offline_display_enabled": offline_display_enabled,
                 "project_id": station.project_id,
                 "last_update": station.last_update,
-                "risk_level": computed_risk
+                "risk_level": computed_risk,
+                "sensor_types": sensor_types,
+                "has_gnss": "gnss" in dev_types,
+                "has_water": "water" in dev_types,
+                "has_rain": "rain" in dev_types,
+                "has_imu": "imu" in dev_types,
             })
 
         filtered_rows = _filter_station_rows(stations_with_status, status, risk, bbox_bounds)

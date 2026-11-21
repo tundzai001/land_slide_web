@@ -1688,7 +1688,36 @@ body:has(#guestRescueModal.show) .modal-backdrop.show {
 .project-dashboard-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
 .project-dashboard-controls p { margin: 0; color: var(--map-muted); font-size: .76rem; }
 .project-dashboard-controls button { min-width: 38px; min-height: 38px; border: 1px solid var(--map-line); border-radius: 10px; background: var(--map-surface); color: var(--map-text); }
+.project-dashboard-controls[hidden] { display: none !important; }
 .project-dashboard-status { min-height: 20px; margin: 8px 2px 0; color: var(--map-text-soft); font-size: .78rem; }
+
+/* Rich Project Dashboard Stats & Stations */
+.project-stat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 2px; }
+.project-stat-card { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 6px; border: 1px solid var(--map-line); border-radius: 12px; background: var(--map-surface-subtle); text-align: center; transition: transform 0.15s ease, background 0.15s ease; }
+.project-stat-card:hover { background: var(--map-surface); transform: translateY(-1px); }
+.project-stat-icon { font-size: 1.15rem; margin-bottom: 2px; }
+.project-stat-val { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.project-stat-lbl { font-size: 0.68rem; color: var(--map-text-soft); text-transform: uppercase; font-weight: 600; margin-top: 3px; letter-spacing: 0.02em; }
+
+.project-section-header { display: flex; align-items: center; justify-content: space-between; font-size: 0.82rem; font-weight: 700; color: var(--map-text); margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1px dashed var(--map-line); }
+
+.project-sensor-chips { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 2px; }
+.project-sensor-chip { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--map-line); border-radius: 10px; background: var(--map-surface-subtle); font-size: 0.78rem; color: var(--map-text-soft); }
+.project-sensor-chip.active { color: var(--map-text); border-color: rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.06); }
+.project-sensor-chip strong { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 0.9rem; color: var(--map-text); font-weight: 700; }
+
+.project-stations-section { display: flex; flex-direction: column; min-height: 0; }
+.project-stations-list { display: flex; flex-direction: column; gap: 6px; max-height: 210px; overflow-y: auto; padding-right: 4px; }
+.project-station-item { padding: 8px 12px; border: 1px solid var(--map-line); border-radius: 10px; background: var(--map-surface-subtle); cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease; }
+.project-station-item:hover { background: var(--map-surface); border-color: var(--map-teal); transform: translateX(2px); }
+.project-station-item:focus-visible { outline: 2px solid var(--map-teal); outline-offset: 1px; }
+.station-code-title { font-size: 0.86rem; color: var(--map-text); }
+.station-name-sub { font-size: 0.76rem; color: var(--map-text-soft); }
+.badge-st-safe { background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; font-weight: 600; }
+.badge-st-alert { background: rgba(248, 113, 113, 0.15); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.3); font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; font-weight: 600; }
+.badge-st-offline { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; font-weight: 600; }
+.station-sensor-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.sensor-mini-tag { font-size: 0.65rem; font-weight: 600; padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); color: var(--map-text-soft); border: 1px solid var(--map-line); }
 @keyframes project-dem-enter { from { opacity: 0; transform: perspective(900px) rotateX(7deg) scale(.94); filter: saturate(.65) brightness(.8); } to { opacity: 1; transform: perspective(900px) rotateX(0) scale(1); filter: saturate(1) brightness(1); } }
 @media (max-width: 700px) {
     .project-dashboard-panel { top: auto; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); left: 8px; width: auto; max-height: min(84svh, 760px); border-radius: 20px; transform: translate3d(0,18px,0) scale(.99); }

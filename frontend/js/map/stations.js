@@ -109,10 +109,52 @@ function ensureProjectDashboard() {
                 <button type="button" class="project-dashboard-close" id="project-dashboard-close" aria-label="Đóng bảng dự án"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
             </header>
             <div class="project-dashboard-content">
-                <div class="project-dashboard-summary">
-                    <span><strong id="project-dashboard-stations">0</strong> trạm</span>
-                    <span id="project-dashboard-dem-badge">Chưa có mô hình DEM</span>
+                <div class="project-stat-cards">
+                    <div class="project-stat-card">
+                        <div class="project-stat-icon text-primary"><i class="bi bi-broadcast-pin"></i></div>
+                        <div class="project-stat-info">
+                            <span class="project-stat-val text-primary" id="project-stat-total">0</span>
+                            <span class="project-stat-lbl">Tổng trạm</span>
+                        </div>
+                    </div>
+                    <div class="project-stat-card">
+                        <div class="project-stat-icon text-success"><i class="bi bi-shield-check"></i></div>
+                        <div class="project-stat-info">
+                            <span class="project-stat-val text-success" id="project-stat-safe">0</span>
+                            <span class="project-stat-lbl">An toàn</span>
+                        </div>
+                    </div>
+                    <div class="project-stat-card">
+                        <div class="project-stat-icon text-danger"><i class="bi bi-exclamation-triangle"></i></div>
+                        <div class="project-stat-info">
+                            <span class="project-stat-val text-danger" id="project-stat-alert">0</span>
+                            <span class="project-stat-lbl">Cảnh báo</span>
+                        </div>
+                    </div>
+                    <div class="project-stat-card">
+                        <div class="project-stat-icon text-secondary"><i class="bi bi-wifi-off"></i></div>
+                        <div class="project-stat-info">
+                            <span class="project-stat-val text-secondary" id="project-stat-offline">0</span>
+                            <span class="project-stat-lbl">Ngoại tuyến</span>
+                        </div>
+                    </div>
                 </div>
+
+                <div class="project-sensors-section">
+                    <div class="project-section-header">
+                        <span><i class="bi bi-cpu me-1 text-teal"></i> Hệ thống cảm biến giám sát</span>
+                    </div>
+                    <div class="project-sensor-chips" id="project-sensors-list"></div>
+                </div>
+
+                <div class="project-stations-section">
+                    <div class="project-section-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-diagram-3 me-1 text-teal"></i> Danh sách trạm quan trắc</span>
+                        <span class="badge bg-secondary-subtle text-secondary" id="project-stations-badge">0 trạm</span>
+                    </div>
+                    <div class="project-stations-list" id="project-stations-list"></div>
+                </div>
+
                 <section class="project-dashboard-terrain" aria-labelledby="project-dashboard-terrain-title">
                     <div class="project-dashboard-terrain-head">
                         <div><h3 id="project-dashboard-terrain-title">Địa hình số của công trình</h3><p id="project-dashboard-terrain-description">DEM · EPSG:32648 · ô lưới theo file</p></div>
@@ -121,7 +163,7 @@ function ensureProjectDashboard() {
                     <div class="project-dashboard-terrain-body">
                         <div class="project-dashboard-message" id="project-dashboard-message" role="status" aria-live="polite"><i class="bi bi-mountains" aria-hidden="true"></i><span></span></div>
                         <div class="dem-grid-viewport project-dashboard-dem-viewport" id="project-dashboard-viewport" hidden><canvas id="project-dashboard-canvas" aria-label="Mô hình địa hình số của dự án"></canvas></div>
-                        <div class="project-dashboard-controls">
+                        <div class="project-dashboard-controls" id="project-dashboard-controls">
                             <p>Kéo để xoay · cuộn để zoom mô hình 3D</p>
                             <div class="dem-grid-toolbar" aria-label="Điều khiển mô hình DEM">
                                 <button type="button" data-dem-action="out" aria-label="Thu nhỏ mô hình">−</button>
@@ -161,6 +203,116 @@ function closeProjectDashboard() {
     projectDashboardTrigger = null;
 }
 
+function _buildSensorCounts(projectStations) {
+    const counts = { gnss: 0, imu: 0, water: 0, rain: 0 };
+    projectStations.forEach(st => {
+        const types = Array.isArray(st.sensor_types) && st.sensor_types.length ? st.sensor_types : [];
+        const isCpStation = /^CP\d+/i.test(st.station_code || '');
+        if (st.has_gnss || types.includes('gnss') || isCpStation) counts.gnss++;
+        if (st.has_imu || types.includes('imu') || isCpStation) counts.imu++;
+        if (st.has_water || types.includes('water')) counts.water++;
+        if (st.has_rain || types.includes('rain')) counts.rain++;
+    });
+    return counts;
+}
+
+function _renderProjectStationsList(projectStations, container) {
+    if (!container) return;
+    if (!projectStations.length) {
+        container.innerHTML = '<div class="text-muted small p-3 text-center">Dự án này chưa có trạm quan trắc nào.</div>';
+        return;
+    }
+    container.innerHTML = projectStations.map(st => {
+        const isOffline = st.status === 'offline';
+        const isAlert = !isOffline && (st.risk_level === 'CRITICAL' || st.risk_level === 'WARNING');
+        const badgeClass = isOffline ? 'badge-st-offline' : (isAlert ? 'badge-st-alert' : 'badge-st-safe');
+        const badgeText = isOffline ? 'Ngoại tuyến' : (isAlert ? 'Cảnh báo' : 'An toàn');
+        const isCpStation = /^CP\d+/i.test(st.station_code || '');
+        const types = Array.isArray(st.sensor_types) && st.sensor_types.length ? st.sensor_types : [];
+        const chips = [];
+        if (st.has_gnss || types.includes('gnss') || isCpStation) chips.push('GNSS');
+        if (st.has_imu || types.includes('imu') || isCpStation) chips.push('IMU');
+        if (st.has_water || types.includes('water')) chips.push('Nước');
+        if (st.has_rain || types.includes('rain')) chips.push('Mưa');
+
+        const code = escapeHtml(st.station_code || st.name);
+        const name = escapeHtml(st.name || '');
+        const tagsHtml = chips.map(c => `<span class="sensor-mini-tag">${c}</span>`).join('');
+
+        return `
+            <div class="project-station-item" role="button" tabindex="0" data-station-id="${st.id}">
+                <div class="d-flex align-items-center justify-content-between mb-1">
+                    <span class="station-code-title"><i class="bi bi-broadcast me-1 text-teal"></i><strong>${code}</strong></span>
+                    <span class="badge ${badgeClass}">${badgeText}</span>
+                </div>
+                <div class="station-name-sub text-muted small">${name}</div>
+                <div class="station-sensor-tags mt-1">${tagsHtml}</div>
+            </div>`;
+    }).join('');
+
+    container.querySelectorAll('.project-station-item').forEach(item => {
+        const onSelect = () => {
+            const stId = item.dataset.stationId;
+            if (stId && typeof window.selectStation === 'function') {
+                void window.selectStation(stId);
+            }
+        };
+        item.addEventListener('click', onSelect);
+        item.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect();
+            }
+        });
+    });
+}
+
+function _renderProjectDashboardStationSummary(projectStations) {
+    const total = projectStations.length;
+    const offline = projectStations.filter(s => s.status === 'offline').length;
+    const alert = projectStations.filter(s => s.status !== 'offline' && (s.risk_level === 'CRITICAL' || s.risk_level === 'WARNING')).length;
+    const safe = projectStations.filter(s => s.status !== 'offline' && s.risk_level !== 'CRITICAL' && s.risk_level !== 'WARNING').length;
+
+    const setTxt = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = String(val);
+    };
+
+    setTxt('project-stat-total', total);
+    setTxt('project-stat-safe', safe);
+    setTxt('project-stat-alert', alert);
+    setTxt('project-stat-offline', offline);
+    setTxt('project-stations-badge', `${total} trạm`);
+
+    const sensorCounts = _buildSensorCounts(projectStations);
+    const sensorChipsContainer = document.getElementById('project-sensors-list');
+    if (sensorChipsContainer) {
+        sensorChipsContainer.innerHTML = `
+            <div class="project-sensor-chip ${sensorCounts.gnss ? 'active' : ''}">
+                <i class="bi bi-geo-alt-fill text-primary"></i>
+                <span class="sensor-name">GNSS 3D:</span>
+                <strong>${sensorCounts.gnss}</strong>
+            </div>
+            <div class="project-sensor-chip ${sensorCounts.imu ? 'active' : ''}">
+                <i class="bi bi-compass text-warning"></i>
+                <span class="sensor-name">IMU Độ nghiêng:</span>
+                <strong>${sensorCounts.imu}</strong>
+            </div>
+            <div class="project-sensor-chip ${sensorCounts.water ? 'active' : ''}">
+                <i class="bi bi-water text-info"></i>
+                <span class="sensor-name">Mực nước ngầm:</span>
+                <strong>${sensorCounts.water}</strong>
+            </div>
+            <div class="project-sensor-chip ${sensorCounts.rain ? 'active' : ''}">
+                <i class="bi bi-cloud-rain-fill text-primary"></i>
+                <span class="sensor-name">Lượng mưa:</span>
+                <strong>${sensorCounts.rain}</strong>
+            </div>`;
+    }
+
+    _renderProjectStationsList(projectStations, document.getElementById('project-stations-list'));
+}
+
 async function openProjectDashboard(project, center, trigger) {
     const requestId = ++projectDashboardRequest;
     const leafletMap = getLeafletMap();
@@ -168,24 +320,35 @@ async function openProjectDashboard(project, center, trigger) {
     projectDashboardTrigger = trigger;
     projectDashboardViewer?.destroy();
     projectDashboardViewer = null;
+
+    const detailSidebar = document.getElementById('detail-sidebar');
+    if (detailSidebar?.classList.contains('active')) {
+        detailSidebar.classList.remove('active');
+        detailSidebar.setAttribute('aria-hidden', 'true');
+    }
+
     const location = project.location;
     const dems = Array.isArray(project.dems) ? project.dems : [];
     document.getElementById('project-dashboard-name').textContent = project.name || 'Dự án';
     document.getElementById('project-dashboard-location').textContent = location?.address
         ? `${location.address} · ${Number(center[0]).toFixed(6)}, ${Number(center[1]).toFixed(6)}`
         : `Vị trí dự án · ${Number(center[0]).toFixed(6)}, ${Number(center[1]).toFixed(6)}`;
-    const stationCount = allStations.filter(station => String(station.project_id) === String(project.id)).length;
-    document.getElementById('project-dashboard-stations').textContent = String(stationCount);
-    document.getElementById('project-dashboard-dem-badge').textContent = dems.length
-        ? `${dems.length} khu địa hình` : 'Chưa có mô hình DEM';
+    const projectStations = allStations.filter(station => String(station.project_id) === String(project.id));
+    _renderProjectDashboardStationSummary(projectStations);
+
     const message = document.getElementById('project-dashboard-message');
     const messageText = message.querySelector('span');
     const viewport = document.getElementById('project-dashboard-viewport');
     const status = document.getElementById('project-dashboard-status');
+    const controls = document.getElementById('project-dashboard-controls');
     viewport.hidden = true;
     message.hidden = false;
     status.textContent = '';
-    messageText.textContent = dems.length ? 'Đang tải mô hình địa hình…' : 'Dự án này chưa có DEM. Tải mô hình lên trong trang Quản lý dự án để xem địa hình tại đây.';
+    messageText.textContent = dems.length ? 'Đang tải mô hình địa hình…' : 'Dự án này chưa có DEM. Tải mô hình lên trong trang Quản lý dự án để xem địa hình 3D tại đây.';
+    if (controls) {
+        controls.hidden = !dems.length;
+    }
+
     const demSelect = document.getElementById('project-dashboard-dem-select');
     demSelect.replaceChildren(...dems.map(model => {
         const option = document.createElement('option');
@@ -996,5 +1159,6 @@ function updateMarker(station) {
 
 if (typeof window !== 'undefined') {
     window.openProjectDashboard = openProjectDashboard;
+    window.closeProjectDashboard = closeProjectDashboard;
     window._computeDemCenter = _computeDemCenter;
 }

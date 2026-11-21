@@ -317,6 +317,9 @@ async function selectStation(stationId, options = {}) {
     if (currentMapMode === 'rescue') {
         return;
     }
+    if (typeof window.closeProjectDashboard === 'function') {
+        window.closeProjectDashboard();
+    }
     if (window.MapboxGlobeController) {
         window.MapboxGlobeController.clearProvinceSelection?.();
         window.MapboxGlobeController.popup?.remove?.();
