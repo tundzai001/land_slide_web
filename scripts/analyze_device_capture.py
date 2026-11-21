@@ -4,7 +4,9 @@ import re
 from collections import Counter
 from pathlib import Path
 
-capture_file = Path('mqtt_device_capture.json').resolve()
+capture_file = Path(__file__).resolve().parent / 'probes' / 'mqtt_device_capture.json'
+if not capture_file.is_file():
+    capture_file = Path('mqtt_device_capture.json').resolve()
 if not capture_file.is_file():
     raise FileNotFoundError(f"Missing capture file: {capture_file}")
 with open(capture_file, 'r', encoding='utf-8') as f:
@@ -34,6 +36,6 @@ for index, name in fields.items():
 for row in rows:
     if max(float(v) for v in row[16:19]) > 0.1:
         print('uncertain baseline epoch', row[5:8], 'status',row[8], 'baseline',row[13:16], 'std', row[16:19], 'age',row[48])
-out_file = Path('mqtt_device_sentences.txt').resolve()
+out_file = capture_file.parent / 'mqtt_device_sentences.txt'
 with open(out_file, 'w', encoding='utf-8') as f:
     f.write('\n'.join(sentences))

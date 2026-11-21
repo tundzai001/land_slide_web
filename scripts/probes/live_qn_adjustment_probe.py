@@ -16,20 +16,22 @@ from pathlib import Path
 import sys
 import time
 
-ROOT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = Path(__file__).resolve().parents[2]
 BACKEND_DIR = ROOT_DIR / "backend"
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from backend.app.config import settings
-from backend.app.features.gnss_adjustment.store import (
+from app.config import settings
+from app.features.gnss_adjustment.store import (
     add_report_links,
     compact_adjustment_payload,
 )
-from backend.app.mqtt.ntrip_pusher import ntrip_manager
-from backend.mqtt_bridge import MQTTBridge
-from backend.processors.gnss_adjustment.runtime import parse_agrica
-from backend.processors.gnss_adjustment.round_robin import RoundRobinAdjustmentManager
+from app.mqtt.ntrip_pusher import ntrip_manager
+from app.mqtt.bridge import MQTTBridge
+from processors.gnss_adjustment.runtime import parse_agrica
+from processors.gnss_adjustment.round_robin import RoundRobinAdjustmentManager
 from live_base_output_probe import LiveFeed, _UnusedPublisher
 
 

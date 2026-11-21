@@ -5,14 +5,21 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import sys
 import threading
 import time
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+BACKEND_DIR = ROOT_DIR / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 import paho.mqtt.client as mqtt
 
-from backend.app.config import settings
-from backend.processors.gnss_adjustment.runtime import parse_agrica
-from backend.processors.gnss_adjustment.round_robin import RoundRobinAdjustmentManager
+from app.config import settings
+from processors.gnss_adjustment.runtime import parse_agrica
+from processors.gnss_adjustment.round_robin import RoundRobinAdjustmentManager
 from live_gnss_probe import AGRICA_RE, TOPICS, TopicStats
 
 

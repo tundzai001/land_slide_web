@@ -11,10 +11,15 @@ import time
 from io import BytesIO
 from pathlib import Path
 
-from backend.app.config import settings
-from backend.app.mqtt.ntrip_pusher import ntrip_manager
-from backend.processors.gnss_adjustment.runtime import parse_agrica
-from backend.processors.gnss_adjustment.round_robin import RoundRobinAdjustmentManager
+ROOT_DIR = Path(__file__).resolve().parents[2]
+BACKEND_DIR = ROOT_DIR / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from app.config import settings
+from app.mqtt.ntrip_pusher import ntrip_manager
+from processors.gnss_adjustment.runtime import parse_agrica
+from processors.gnss_adjustment.round_robin import RoundRobinAdjustmentManager
 from live_base_output_probe import LiveFeed, _UnusedPublisher
 from live_gnss_probe import TOPICS
 

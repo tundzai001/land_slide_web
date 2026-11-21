@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+BACKEND_DIR = ROOT_DIR / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 import paho.mqtt.client as mqtt
 
-from backend.app.config import settings
-from backend.app.mqtt.ntrip_pusher import Rtcm3FrameFilter
+from app.config import settings
+from app.mqtt.ntrip_pusher import Rtcm3FrameFilter
 
 
 TOPICS = {

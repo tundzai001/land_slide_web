@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from pathlib import Path
 import re
+import sys
 import threading
 import time
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
+BACKEND_DIR = ROOT_DIR / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 import paho.mqtt.client as mqtt
 
-from backend.app.config import settings
+from app.config import settings
 
 
 AGRICA_RE = re.compile(rb"#AGRICA[^*\r\n]*\*[0-9A-Fa-f]{8}")
