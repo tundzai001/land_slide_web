@@ -155,7 +155,7 @@ class GNSSOriginMixin:
         }
         self._origin_locked_at = existing.locked_at
         self._origin_record_id = existing.id
-        if getattr(existing, 'tracking_offset', None) and np.all(self.tracking_offset_enu == 0.0):
+        if getattr(existing, 'tracking_offset', None) and np.allclose(self.tracking_offset_enu, 0.0):
             try:
                 self.tracking_offset_enu = self._validated_tracking_offset(existing.tracking_offset)
             except Exception as ex:

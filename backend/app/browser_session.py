@@ -77,6 +77,13 @@ def set_cookies(response: Response, request: Request, token, jti, max_age=None):
     response.headers["Cache-Control"] = "private, no-store"
 
 
+def set_csrf_cookie(response: Response, request: Request, jti: str):
+    _, csrf_name = cookie_names()
+    secure = settings.ENVIRONMENT.lower() == "production" or request.url.scheme == "https"
+    options = {"path": "/", "secure": secure, "samesite": "lax", "httponly": False}
+    response.set_cookie(csrf_name, csrf_token(jti), **options)
+
+
 def clear_cookies(response: Response):
     for name in cookie_names():
         response.delete_cookie(name, path="/", secure=settings.ENVIRONMENT.lower() == "production", samesite="lax")

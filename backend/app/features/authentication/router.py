@@ -112,9 +112,7 @@ async def get_current_user_info(
     if claims.get("transport") == "cookie":
         csrf_name = browser_session.cookie_names()[1]
         if request.cookies.get(csrf_name) != browser_session.csrf_token(claims["jti"]):
-            response.set_cookie(csrf_name, browser_session.csrf_token(claims["jti"]),
-                                httponly=False, secure=settings.ENVIRONMENT.lower() == "production"
-                                or request.url.scheme == "https", samesite="lax", path="/")
+            browser_session.set_csrf_cookie(response, request, claims["jti"])
     permissions = auth.get_user_permissions(current_user)
     user_response = schemas.UserResponse.from_orm(current_user)
     user_response.permissions = permissions
