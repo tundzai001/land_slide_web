@@ -1199,7 +1199,7 @@ function buildChartTimeLabels(history) {
 }
 
 function _resolveChartItemTimestampTitle(items, fallbackHistory = []) {
-    if (!items || !items.length) return '';
+    if (!items?.length) return '';
     const idx = items[0].dataIndex;
     const chartInst = items[0].chart;
     const ts = chartInst?._monitoringTimestamps?.[idx];

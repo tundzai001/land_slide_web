@@ -828,6 +828,98 @@ function _renderGnssTheilSenDetails(data, velocityMmS, advancedVisible) {
     `;
 }
 
+function _updateStationGnssCache(data, advancedVisible) {
+    if (data.adv_x === undefined) return;
+    if (advancedVisible) {
+        setText('adv-val-lat', safeNumber(data.adv_x, 3));
+        setText('adv-val-lon', safeNumber(data.adv_y, 3));
+        setText('adv-val-alt', safeNumber(data.adv_h, 3));
+        setText('adv-val-dx', safeNumber(data.adv_dx, 2));
+        setText('adv-val-dy', safeNumber(data.adv_dy, 2));
+        setText('adv-val-dh', safeNumber(data.adv_dh, 2));
+        setText('adv-val-vdx', formatGnssVelocityValue(data.adv_vdx, data, 2));
+        setText('adv-val-vdy', formatGnssVelocityValue(data.adv_vdy, data, 2));
+        setText('adv-val-vdh', formatGnssVelocityValue(data.adv_vdh, data, 2));
+    }
+
+    if (!currentStationData?.sensors?.gnss?.latest) return;
+    if (!currentStationData.sensors.gnss.latest.data) {
+        currentStationData.sensors.gnss.latest.data = {};
+    }
+    Object.assign(currentStationData.sensors.gnss.latest.data, {
+        lat: data.lat, lon: data.lon, h: data.h,
+        adv_x: data.adv_x, adv_y: data.adv_y, adv_h: data.adv_h,
+        adv_dx: data.adv_dx, adv_dy: data.adv_dy, adv_dh: data.adv_dh,
+        adv_vdx: data.adv_vdx, adv_vdy: data.adv_vdy, adv_vdh: data.adv_vdh,
+        velocity_method: data.velocity_method,
+        velocity_sample_count: data.velocity_sample_count,
+        velocity_window_duration_s: data.velocity_window_duration_s,
+        velocity_residual_rms_mm: data.velocity_residual_rms_mm,
+        velocity_residual_mad_mm: data.velocity_residual_mad_mm,
+        velocity_uncertainty_mm_s: data.velocity_uncertainty_mm_s,
+        velocity_confidence_95_mm_s: data.velocity_confidence_95_mm_s,
+        velocity_detection_threshold_mm_s: data.velocity_detection_threshold_mm_s,
+        velocity_z_score: data.velocity_z_score,
+        velocity_min_sigma: data.velocity_min_sigma,
+        velocity_significant: data.velocity_significant,
+        velocity_statistically_significant: data.velocity_statistically_significant,
+        velocity_persistent: data.velocity_persistent,
+        velocity_confirmed: data.velocity_confirmed,
+        velocity_confirmation_sample_count: data.velocity_confirmation_sample_count,
+        velocity_confirmation_duration_s: data.velocity_confirmation_duration_s,
+        velocity_confirmation_direction_cosine: data.velocity_confirmation_direction_cosine,
+        velocity_confirmation_accepted_sample: data.velocity_confirmation_accepted_sample,
+        velocity_confirmation_min_gap_s: data.velocity_confirmation_min_gap_s,
+        velocity_confirmation_required_samples: data.velocity_confirmation_required_samples,
+        velocity_confirmation_required_duration_s: data.velocity_confirmation_required_duration_s,
+        velocity_reliable: data.velocity_reliable,
+        vel_e: data.vel_e, vel_n: data.vel_n, vel_u: data.vel_u,
+        raw_vel_e_mm_s: data.raw_vel_e_mm_s,
+        raw_vel_n_mm_s: data.raw_vel_n_mm_s,
+        raw_vel_u_mm_s: data.raw_vel_u_mm_s,
+        raw_speed_2d_mm_s: data.raw_speed_2d_mm_s,
+        speed_2d_mm_s: data.speed_2d_mm_s,
+        total_displacement_mm: data.total_displacement_mm,
+        peak_displacement_mm: data.peak_displacement_mm,
+        displacement_noise_floor_mm: data.displacement_noise_floor_mm,
+        displacement_uncertainty_mm: data.displacement_uncertainty_mm,
+        candidate_step_displacement_mm: data.candidate_step_displacement_mm,
+        displacement_change_threshold_mm: data.displacement_change_threshold_mm,
+        position_change_significant: data.position_change_significant,
+        displacement_sample_count: data.displacement_sample_count,
+        integrity: data.integrity || data.data,
+        displacement_window_duration_s: data.displacement_window_duration_s,
+        num_sats: data.num_sats, hdop: data.hdop
+    });
+}
+
+function _updateRealtimeGnssChart(velocityMmS, timestamp, data) {
+    const chart = charts['chart-gnss'];
+    if (!chart || velocityMmS === null) return;
+
+    const tsMs = normalizeEpochMs(timestamp || data.measured_at || Date.now());
+    const timeLabel = new Date(tsMs).toLocaleTimeString('vi-VN', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+    });
+    chart.data.labels.push(timeLabel);
+    chart.data.datasets[0].data.push(velocityMmS);
+    if (!Array.isArray(chart._monitoringTimestamps)) {
+        chart._monitoringTimestamps = [];
+    }
+    chart._monitoringTimestamps.push(tsMs);
+    if (chart.data.labels.length > 50) {
+        chart.data.labels.shift();
+        chart.data.datasets[0].data.shift();
+        chart._monitoringTimestamps.shift();
+    }
+    chart.update('none');
+
+    const numericValues = chart.data.datasets[0].data.filter(v => typeof v === 'number' && Number.isFinite(v));
+    if (typeof window._updateChartStatsElements === 'function') {
+        window._updateChartStatsElements('chart-gnss', numericValues);
+    }
+}
+
 function _handleRealtimeGnss(data, timestamp, advancedVisible, chartsVisible) {
     updateGnssFixBadge(data.fix_mode, data.fix_quality);
     updateGnssIntegrityStatus(data);
@@ -837,99 +929,15 @@ function _handleRealtimeGnss(data, timestamp, advancedVisible, chartsVisible) {
         setHTML('val-gnss-vel', `${velocityMmS.toFixed(4)}<span class="sensor-unit">mm/s</span>`);
     }
 
-    if (data.adv_x !== undefined) {
-        if (advancedVisible) {
-            setText('adv-val-lat', safeNumber(data.adv_x, 3));
-            setText('adv-val-lon', safeNumber(data.adv_y, 3));
-            setText('adv-val-alt', safeNumber(data.adv_h, 3));
-            setText('adv-val-dx', safeNumber(data.adv_dx, 2));
-            setText('adv-val-dy', safeNumber(data.adv_dy, 2));
-            setText('adv-val-dh', safeNumber(data.adv_dh, 2));
-            setText('adv-val-vdx', formatGnssVelocityValue(data.adv_vdx, data, 2));
-            setText('adv-val-vdy', formatGnssVelocityValue(data.adv_vdy, data, 2));
-            setText('adv-val-vdh', formatGnssVelocityValue(data.adv_vdh, data, 2));
-        }
-
-        if (currentStationData?.sensors?.gnss?.latest) {
-            if (!currentStationData.sensors.gnss.latest.data) {
-                currentStationData.sensors.gnss.latest.data = {};
-            }
-            Object.assign(currentStationData.sensors.gnss.latest.data, {
-                lat: data.lat, lon: data.lon, h: data.h,
-                adv_x: data.adv_x, adv_y: data.adv_y, adv_h: data.adv_h,
-                adv_dx: data.adv_dx, adv_dy: data.adv_dy, adv_dh: data.adv_dh,
-                adv_vdx: data.adv_vdx, adv_vdy: data.adv_vdy, adv_vdh: data.adv_vdh,
-                velocity_method: data.velocity_method,
-                velocity_sample_count: data.velocity_sample_count,
-                velocity_window_duration_s: data.velocity_window_duration_s,
-                velocity_residual_rms_mm: data.velocity_residual_rms_mm,
-                velocity_residual_mad_mm: data.velocity_residual_mad_mm,
-                velocity_uncertainty_mm_s: data.velocity_uncertainty_mm_s,
-                velocity_confidence_95_mm_s: data.velocity_confidence_95_mm_s,
-                velocity_detection_threshold_mm_s: data.velocity_detection_threshold_mm_s,
-                velocity_z_score: data.velocity_z_score,
-                velocity_min_sigma: data.velocity_min_sigma,
-                velocity_significant: data.velocity_significant,
-                velocity_statistically_significant: data.velocity_statistically_significant,
-                velocity_persistent: data.velocity_persistent,
-                velocity_confirmed: data.velocity_confirmed,
-                velocity_confirmation_sample_count: data.velocity_confirmation_sample_count,
-                velocity_confirmation_duration_s: data.velocity_confirmation_duration_s,
-                velocity_confirmation_direction_cosine: data.velocity_confirmation_direction_cosine,
-                velocity_confirmation_accepted_sample: data.velocity_confirmation_accepted_sample,
-                velocity_confirmation_min_gap_s: data.velocity_confirmation_min_gap_s,
-                velocity_confirmation_required_samples: data.velocity_confirmation_required_samples,
-                velocity_confirmation_required_duration_s: data.velocity_confirmation_required_duration_s,
-                velocity_reliable: data.velocity_reliable,
-                vel_e: data.vel_e, vel_n: data.vel_n, vel_u: data.vel_u,
-                raw_vel_e_mm_s: data.raw_vel_e_mm_s,
-                raw_vel_n_mm_s: data.raw_vel_n_mm_s,
-                raw_vel_u_mm_s: data.raw_vel_u_mm_s,
-                raw_speed_2d_mm_s: data.raw_speed_2d_mm_s,
-                speed_2d_mm_s: data.speed_2d_mm_s,
-                total_displacement_mm: data.total_displacement_mm,
-                peak_displacement_mm: data.peak_displacement_mm,
-                displacement_noise_floor_mm: data.displacement_noise_floor_mm,
-                displacement_uncertainty_mm: data.displacement_uncertainty_mm,
-                candidate_step_displacement_mm: data.candidate_step_displacement_mm,
-                displacement_change_threshold_mm: data.displacement_change_threshold_mm,
-                position_change_significant: data.position_change_significant,
-                displacement_sample_count: data.displacement_sample_count,
-                integrity: data.integrity || data.data,
-                displacement_window_duration_s: data.displacement_window_duration_s,
-                num_sats: data.num_sats, hdop: data.hdop
-            });
-        }
-    }
+    _updateStationGnssCache(data, advancedVisible);
 
     clearGnssEvaluationSummary();
     if (data.velocity_method === 'theil_sen_enu') {
         _renderGnssTheilSenDetails(data, velocityMmS, advancedVisible);
     }
 
-    if (chartsVisible && charts['chart-gnss'] && velocityMmS !== null) {
-        const chart = charts['chart-gnss'];
-        const tsMs = normalizeEpochMs(timestamp || data.measured_at || Date.now());
-        const timeLabel = new Date(tsMs).toLocaleTimeString('vi-VN', {
-            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-        });
-        chart.data.labels.push(timeLabel);
-        chart.data.datasets[0].data.push(velocityMmS);
-        if (!Array.isArray(chart._monitoringTimestamps)) {
-            chart._monitoringTimestamps = [];
-        }
-        chart._monitoringTimestamps.push(tsMs);
-        if (chart.data.labels.length > 50) {
-            chart.data.labels.shift();
-            chart.data.datasets[0].data.shift();
-            chart._monitoringTimestamps.shift();
-        }
-        chart.update('none');
-
-        const numericValues = chart.data.datasets[0].data.filter(v => typeof v === 'number' && Number.isFinite(v));
-        if (typeof window._updateChartStatsElements === 'function') {
-            window._updateChartStatsElements('chart-gnss', numericValues);
-        }
+    if (chartsVisible) {
+        _updateRealtimeGnssChart(velocityMmS, timestamp, data);
     }
 }
 
@@ -987,6 +995,43 @@ function _handleRealtimeWater(data, timestamp, chartsVisible) {
     }
 }
 
+function _updateRealtimeImuBattery(data) {
+    const batteryVal = data.battery;
+    if (batteryVal === undefined || batteryVal === null || Number.parseFloat(batteryVal) <= 0) return;
+    const batteryContainer = document.getElementById('battery-container');
+    if (batteryContainer) batteryContainer.style.display = '';
+    animateValue('val-battery', batteryVal, 2, 'V');
+}
+
+function _updateRealtimeImuChart(data, timestamp) {
+    const imuCanvas = document.getElementById('chart-imu');
+    if (!charts['chart-imu'] && imuCanvas) {
+        renderImuChart(currentStationData?.sensors?.imu?.history || []);
+    }
+    const chart = charts['chart-imu'];
+    if (!chart) return;
+
+    const tsMs = normalizeEpochMs(Number(timestamp) || Math.floor(Date.now() / 1000));
+    const timeLabel = new Date(tsMs).toLocaleTimeString('vi-VN', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+    });
+    chart.data.labels.push(timeLabel);
+    chart.data.datasets[0].data.push(finiteMetric(data.roll));
+    chart.data.datasets[1].data.push(finiteMetric(data.pitch));
+    chart.data.datasets[2].data.push(finiteMetric(data.yaw));
+    if (!Array.isArray(chart._monitoringTimestamps)) {
+        chart._monitoringTimestamps = [];
+    }
+    chart._monitoringTimestamps.push(tsMs);
+
+    if (chart.data.labels.length > 50) {
+        chart.data.labels.shift();
+        chart.data.datasets.forEach(ds => ds.data.shift());
+        chart._monitoringTimestamps.shift();
+    }
+    chart.update('none');
+}
+
 function _handleRealtimeImu(data, stationId, timestamp, chartsVisible) {
     if (stationId && timestamp) {
         console.debug(`🧭 [IMU][WS] station=${stationId} ts=${timestamp}`, data);
@@ -1007,38 +1052,10 @@ function _handleRealtimeImu(data, stationId, timestamp, chartsVisible) {
         updateImuDrift(data.roll, data.pitch);
     }
 
-    const batteryContainer = document.getElementById('battery-container');
-    const batteryVal = data.battery;
-    if (batteryVal !== undefined && batteryVal !== null && Number.parseFloat(batteryVal) > 0) {
-        if (batteryContainer) batteryContainer.style.display = '';
-        animateValue('val-battery', batteryVal, 2, 'V');
-    }
+    _updateRealtimeImuBattery(data);
 
-    const imuCanvas = document.getElementById('chart-imu');
-    if (chartsVisible && !charts['chart-imu'] && imuCanvas) {
-        renderImuChart(currentStationData?.sensors?.imu?.history || []);
-    }
-    if (chartsVisible && charts['chart-imu']) {
-        const chart = charts['chart-imu'];
-        const tsMs = normalizeEpochMs(Number(timestamp) || Math.floor(Date.now() / 1000));
-        const timeLabel = new Date(tsMs).toLocaleTimeString('vi-VN', {
-            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-        });
-        chart.data.labels.push(timeLabel);
-        chart.data.datasets[0].data.push(finiteMetric(data.roll));
-        chart.data.datasets[1].data.push(finiteMetric(data.pitch));
-        chart.data.datasets[2].data.push(finiteMetric(data.yaw));
-        if (!Array.isArray(chart._monitoringTimestamps)) {
-            chart._monitoringTimestamps = [];
-        }
-        chart._monitoringTimestamps.push(tsMs);
-
-        if (chart.data.labels.length > 50) {
-            chart.data.labels.shift();
-            chart.data.datasets.forEach(ds => ds.data.shift());
-            chart._monitoringTimestamps.shift();
-        }
-        chart.update('none');
+    if (chartsVisible) {
+        _updateRealtimeImuChart(data, timestamp);
     }
 
     maybeTriggerLocalImuCriticalFallback(stationId, data);

@@ -1,7 +1,14 @@
 // Inspect and export the rendered measurements without additional API requests.
 function formatChartTimestamp(value) {
     if (value === null || value === undefined || value === '') return 'Không có thời gian';
-    const ms = typeof value === 'number' ? value : (window.normalizeEpochMs ? window.normalizeEpochMs(value) : Date.parse(String(value)));
+    let ms;
+    if (typeof value === 'number') {
+        ms = value;
+    } else if (typeof window !== 'undefined' && typeof window.normalizeEpochMs === 'function') {
+        ms = window.normalizeEpochMs(value);
+    } else {
+        ms = Date.parse(String(value));
+    }
     return Number.isFinite(ms) ? new Date(ms).toLocaleString('vi-VN', { hour12: false }) : 'Không có thời gian';
 }
 
