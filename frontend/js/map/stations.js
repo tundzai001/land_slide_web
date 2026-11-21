@@ -1026,7 +1026,23 @@ async function refreshCurrentStationDetail() {
     }
 }
 
-function _updateStationListItem(div, st, riskUi, badgeClass, riskLabel, nameText, rawCode, hasDifferentCode) {
+function _getStationItemMeta(st) {
+    const riskUi = getRiskPresentation(st.risk_level, st.status);
+    const rawName = (st.name || '').trim();
+    const rawCode = (st.station_code || '').trim();
+    return {
+        st,
+        riskUi,
+        badgeClass: getRiskBadgeClass(riskUi.className),
+        riskLabel: getStationListRiskLabel(riskUi.normalized),
+        nameText: rawName || rawCode || 'Trạm quan trắc',
+        rawCode,
+        hasDifferentCode: Boolean(rawCode && rawName && rawCode.toLowerCase() !== rawName.toLowerCase()),
+    };
+}
+
+function _updateStationListItem(div, meta) {
+    const { st, riskUi, badgeClass, riskLabel, nameText, rawCode, hasDifferentCode } = meta;
     const badge = div.querySelector('.badge');
     if (badge) {
         const targetClass = `badge station-status ${badgeClass}`;
@@ -1045,7 +1061,8 @@ function _updateStationListItem(div, st, riskUi, badgeClass, riskLabel, nameText
     }
 }
 
-function _createStationListItem(st, riskUi, badgeClass, riskLabel, nameText, rawCode, hasDifferentCode) {
+function _createStationListItem(meta) {
+    const { st, riskUi, badgeClass, riskLabel, nameText, rawCode, hasDifferentCode } = meta;
     const div = document.createElement('button');
     div.type = 'button';
     div.className = 'station-item';
@@ -1098,20 +1115,12 @@ function renderStationList(stations) {
     if (emptyPlaceholder) emptyPlaceholder.remove();
 
     stations.forEach(st => {
-        const riskUi = getRiskPresentation(st.risk_level, st.status);
-        const badgeClass = getRiskBadgeClass(riskUi.className);
-        const riskLabel = getStationListRiskLabel(riskUi.normalized);
-        
-        const rawName = (st.name || '').trim();
-        const rawCode = (st.station_code || '').trim();
-        const hasDifferentCode = Boolean(rawCode && rawName && rawCode.toLowerCase() !== rawName.toLowerCase());
-        const nameText = rawName || rawCode || 'Trạm quan trắc';
-
+        const meta = _getStationItemMeta(st);
         const div = container.querySelector(`[data-station-id="${st.id}"]`);
         if (div) {
-            _updateStationListItem(div, st, riskUi, badgeClass, riskLabel, nameText, rawCode, hasDifferentCode);
+            _updateStationListItem(div, meta);
         } else {
-            container.appendChild(_createStationListItem(st, riskUi, badgeClass, riskLabel, nameText, rawCode, hasDifferentCode));
+            container.appendChild(_createStationListItem(meta));
         }
     });
     if (typeof filterStations === 'function') {
