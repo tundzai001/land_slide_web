@@ -1713,9 +1713,9 @@ body:has(#guestRescueModal.show) .modal-backdrop.show {
 .project-station-item:focus-visible { outline: 2px solid var(--map-teal); outline-offset: 1px; }
 .station-code-title { font-size: 0.86rem; color: var(--map-text); }
 .station-name-sub { font-size: 0.76rem; color: var(--map-text-soft); }
-.badge-st-safe { background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; font-weight: 600; }
-.badge-st-alert { background: rgba(248, 113, 113, 0.15); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.3); font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; font-weight: 600; }
-.badge-st-offline { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; font-weight: 600; }
+.badge-st-safe { background: #065f46; color: #ecfdf5; border: 1px solid #047857; font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; font-weight: 600; }
+.badge-st-alert { background: #7f1d1d; color: #fef2f2; border: 1px solid #b91c1c; font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; font-weight: 600; }
+.badge-st-offline { background: #334155; color: #f8fafc; border: 1px solid #475569; font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; font-weight: 600; }
 .station-sensor-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .sensor-mini-tag { font-size: 0.65rem; font-weight: 600; padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); color: var(--map-text-soft); border: 1px solid var(--map-line); }
 @keyframes project-dem-enter { from { opacity: 0; transform: perspective(900px) rotateX(7deg) scale(.94); filter: saturate(.65) brightness(.8); } to { opacity: 1; transform: perspective(900px) rotateX(0) scale(1); filter: saturate(1) brightness(1); } }
@@ -1729,4 +1729,5 @@ body:has(#guestRescueModal.show) .modal-backdrop.show {
 @media (prefers-reduced-motion: reduce) {
     .project-dashboard-panel { transition: none; }
     .project-dashboard-dem-viewport canvas { animation: none; }
+    .project-stat-card, .project-station-item { transition: none !important; transform: none !important; }
 }

@@ -235,8 +235,15 @@ function _renderProjectStationsList(projectStations, container) {
     container.innerHTML = projectStations.map(st => {
         const isOffline = st.status === 'offline';
         const isAlert = !isOffline && (st.risk_level === 'CRITICAL' || st.risk_level === 'WARNING');
-        const badgeClass = isOffline ? 'badge-st-offline' : (isAlert ? 'badge-st-alert' : 'badge-st-safe');
-        const badgeText = isOffline ? 'Ngoại tuyến' : (isAlert ? 'Cảnh báo' : 'An toàn');
+        let badgeClass = 'badge-st-safe';
+        let badgeText = 'An toàn';
+        if (isOffline) {
+            badgeClass = 'badge-st-offline';
+            badgeText = 'Ngoại tuyến';
+        } else if (isAlert) {
+            badgeClass = 'badge-st-alert';
+            badgeText = 'Cảnh báo';
+        }
         const isCpStation = /^CP\d+/i.test(st.station_code || '');
         const types = Array.isArray(st.sensor_types) && st.sensor_types.length ? st.sensor_types : [];
         const chips = [];

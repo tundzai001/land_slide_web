@@ -451,7 +451,7 @@ async def get_stations(
         for station in stations:
             devices = devices_by_station[int(station.id)]
             dev_types = {str(d.device_type) for d in devices if getattr(d, 'device_type', None)}
-            sensor_types = sorted(list(dev_types))
+            sensor_types = sorted(dev_types)
             station_online = _compute_station_online(station, devices, latest_by_key, current_time)
             risk_assessment = _summarize_station_alerts(
                 alerts_by_station[int(station.id)], station.config

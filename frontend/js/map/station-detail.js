@@ -313,10 +313,7 @@ function _restoreSilentAlertBanner(data, skipBannerRestore) {
     }
 }
 
-async function selectStation(stationId, options = {}) {
-    if (currentMapMode === 'rescue') {
-        return;
-    }
+function _resetPanelsForStationSelection(stationId) {
     if (typeof window.closeProjectDashboard === 'function') {
         window.closeProjectDashboard();
     }
@@ -331,6 +328,13 @@ async function selectStation(stationId, options = {}) {
     if (advancedPanel?.classList.contains('active') && Number(currentStationData?.id) !== Number(stationId)) {
         setGnssAdvancedPanelOpen(advancedPanel, false);
     }
+}
+
+async function selectStation(stationId, options = {}) {
+    if (currentMapMode === 'rescue') {
+        return;
+    }
+    _resetPanelsForStationSelection(stationId);
     setMapState({ selectedStation: Number(stationId) });
 
     _updateStationItemSelection(stationId);
