@@ -6,9 +6,11 @@ import copy
 import json
 import logging
 import time
+import uuid
 from typing import Any, Iterable
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from ...database import DataSessionLocal
 from ...models import data as model_data
@@ -206,20 +208,27 @@ async def persist_adjustment_snapshot(
             .limit(1)
         )
         if existing.scalar_one_or_none() is None:
-            db.add(
-                model_data.SensorData(
-                    station_id=station_id,
-                    timestamp=timestamp,
-                    sensor_type=sensor_type,
-                    adjustment_key=adjustment_key,
-                    adjustment_project_id=project_id,
-                    adjustment_cluster_index=cluster_index,
-                    data=compact,
+            try:
+                db.add(
+                    model_data.SensorData(
+                        station_id=station_id,
+                        timestamp=timestamp,
+                        sensor_type=sensor_type,
+                        adjustment_key=adjustment_key,
+                        adjustment_project_id=project_id,
+                        adjustment_cluster_index=cluster_index,
+                        data=compact,
+                    )
                 )
-            )
-            if rows:
-                db.add_all(rows)
-            await db.commit()
+                if rows:
+                    db.add_all(rows)
+                await db.commit()
+            except IntegrityError:
+                await db.rollback()
+                logger.warning(
+                    "Adjustment snapshot with key %s already exists (concurrent insert)",
+                    adjustment_key,
+                )
     return compact
 
 
@@ -237,6 +246,9 @@ async def write_adjustment_failure_report(
     filename_timestamp = int(time.time_ns() // 1_000_000)
     error_type = error.__class__.__name__ if isinstance(error, Exception) else "AdjustmentError"
     error_message = str(error).strip()[:4000] or error_type
+    cluster_idx = (context or {}).get("cluster_index")
+    cluster_token = f"c{cluster_idx}" if cluster_idx is not None else "c0"
+    unique_suffix = uuid.uuid4().hex[:6]
     payload: dict[str, Any] = {
         "status": "failed",
         "phase": "ERROR",
@@ -244,11 +256,11 @@ async def write_adjustment_failure_report(
         "project_id": int(project_id),
         "project_code": str(project_code or "") or None,
         "cluster_name": str(cluster_name or "") or None,
-        "cluster_index": (context or {}).get("cluster_index"),
+        "cluster_index": cluster_idx,
         "timestamp": timestamp,
         "error": {"type": error_type, "message": error_message},
         "context": dict(context or {}),
-        "adjustment_key": f"failure:{int(project_id)}:{filename_timestamp}",
+        "adjustment_key": f"failure:{int(project_id)}:{cluster_token}:{filename_timestamp}_{unique_suffix}",
     }
     payload.update(
         adjustment_report_links(

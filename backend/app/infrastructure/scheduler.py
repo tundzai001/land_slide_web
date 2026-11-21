@@ -9,6 +9,7 @@ from sqlalchemy.future import select
 
 from app.database import ConfigSessionLocal
 from app.models.config import Project
+from app.models import auth as model_auth
 from app.features.gnss_adjustment.store import write_adjustment_failure_report
 
 logger = logging.getLogger(__name__)

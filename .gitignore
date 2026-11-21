@@ -36,3 +36,5 @@ Thumbs.db
 # Local database backup archives
 /backend/backups/
 .coverage
+
+server_logs/

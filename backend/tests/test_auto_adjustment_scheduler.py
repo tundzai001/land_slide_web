@@ -155,6 +155,26 @@ class AutoAdjustmentSchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("receiver did not enter rover mode", payload["error"]["message"])
         write_failure.assert_awaited_once()
 
+    async def test_start_normal_adjustment_constructs_system_user_without_name_error(self):
+        mock_db = AsyncMock()
+        mock_start = AsyncMock(return_value={"phase": "COLLECTING_BASELINE"})
+        with patch(
+            "app.features.gnss_adjustment.router.start_gnss_adjustment",
+            mock_start,
+        ):
+            res = await scheduler_service._start_normal_adjustment(
+                project_id=1,
+                selected_clusters=[["S1", "S2"]],
+                db=mock_db,
+                run_id=-1001,
+                cluster_index=0,
+            )
+            self.assertEqual(res, {"phase": "COLLECTING_BASELINE"})
+            mock_start.assert_awaited_once()
+            call_kwargs = mock_start.await_args.kwargs
+            self.assertEqual(call_kwargs["current_user"].username, "system")
+            self.assertEqual(call_kwargs["current_user"].role, "system")
+
 
 if __name__ == "__main__":
     unittest.main()

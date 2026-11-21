@@ -86,6 +86,28 @@ class AdjustmentFailureArtifactTests(unittest.TestCase):
         finally:
             workbook.close()
 
+    def test_failure_adjustment_key_unique_across_clusters(self):
+        keys = []
+        persist = AsyncMock(
+            side_effect=lambda payload, **kwargs: keys.append(payload.get("adjustment_key")) or payload
+        )
+        with patch.object(adjustment_store, "persist_adjustment_snapshot", persist):
+            async def run_both():
+                await asyncio.gather(
+                    adjustment_store.write_adjustment_failure_report(
+                        3, "err 1", source="automatic_scheduler", context={"cluster_index": 0}
+                    ),
+                    adjustment_store.write_adjustment_failure_report(
+                        3, "err 2", source="automatic_scheduler", context={"cluster_index": 1}
+                    ),
+                )
+
+            asyncio.run(run_both())
+        self.assertEqual(len(keys), 2)
+        self.assertNotEqual(keys[0], keys[1])
+        self.assertIn(":c0:", keys[0])
+        self.assertIn(":c1:", keys[1])
+
 
 if __name__ == "__main__":
     unittest.main()
