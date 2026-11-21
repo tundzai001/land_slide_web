@@ -338,6 +338,62 @@ function _renderProjectDashboardStationSummary(projectStations) {
     _renderProjectStationsList(projectStations, document.getElementById('project-stations-list'));
 }
 
+function _setupProjectDashboardTerrainUI(panel, dems, project, requestId) {
+    const terrainSection = document.getElementById('project-dashboard-terrain') || panel.querySelector('.project-dashboard-terrain');
+    const hasDem = dems.length > 0;
+    if (terrainSection) {
+        terrainSection.hidden = !hasDem;
+    }
+
+    const message = document.getElementById('project-dashboard-message');
+    const messageText = message?.querySelector('span');
+    const viewport = document.getElementById('project-dashboard-viewport');
+    const status = document.getElementById('project-dashboard-status');
+    const controls = document.getElementById('project-dashboard-controls');
+    if (viewport) viewport.hidden = true;
+    if (status) status.textContent = '';
+    if (controls) controls.hidden = !hasDem;
+    if (message) {
+        message.hidden = !hasDem;
+        if (messageText && hasDem) messageText.textContent = 'Đang tải mô hình địa hình…';
+    }
+
+    const demSelect = document.getElementById('project-dashboard-dem-select');
+    if (demSelect) {
+        demSelect.replaceChildren(...dems.map(model => {
+            const option = document.createElement('option');
+            option.value = model.id;
+            option.textContent = model.name;
+            return option;
+        }));
+        demSelect.hidden = dems.length < 2;
+        demSelect.onchange = () => loadProjectDashboardDem(project, demSelect.value, requestId);
+    }
+}
+
+async function _flyMapToProject(leafletMap, center) {
+    if (window.MapboxGlobeController?.active) {
+        window.MapboxGlobeController.flyTo(center[0], center[1], 14.5);
+    }
+    const currentZoom = leafletMap.getZoom();
+    const targetZoom = Math.max(currentZoom, 14);
+    const animate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const moved = Math.abs(leafletMap.getCenter().lat - center[0]) > 0.00001
+        || Math.abs(leafletMap.getCenter().lng - center[1]) > 0.00001
+        || Math.abs(currentZoom - targetZoom) > 0.01;
+    if (!moved) return;
+    if (animate) {
+        await new Promise(resolve => {
+            const finish = () => resolve();
+            leafletMap.once('moveend', finish);
+            leafletMap.flyTo(center, targetZoom, { animate: true, duration: 1.05 });
+            window.setTimeout(finish, 1300);
+        });
+    } else {
+        leafletMap.setView(center, targetZoom, { animate: false });
+    }
+}
+
 async function openProjectDashboard(project, center, trigger) {
     const requestId = ++projectDashboardRequest;
     const leafletMap = getLeafletMap();
@@ -361,52 +417,9 @@ async function openProjectDashboard(project, center, trigger) {
     const projectStations = allStations.filter(station => String(station.project_id) === String(project.id));
     _renderProjectDashboardStationSummary(projectStations);
 
-    const terrainSection = document.getElementById('project-dashboard-terrain') || panel.querySelector('.project-dashboard-terrain');
-    const hasDem = dems.length > 0;
-    if (terrainSection) {
-        terrainSection.hidden = !hasDem;
-    }
+    _setupProjectDashboardTerrainUI(panel, dems, project, requestId);
 
-    const message = document.getElementById('project-dashboard-message');
-    const messageText = message?.querySelector('span');
-    const viewport = document.getElementById('project-dashboard-viewport');
-    const status = document.getElementById('project-dashboard-status');
-    const controls = document.getElementById('project-dashboard-controls');
-    if (viewport) viewport.hidden = true;
-    if (status) status.textContent = '';
-    if (controls) controls.hidden = !hasDem;
-    if (message) {
-        message.hidden = !hasDem;
-        if (messageText && hasDem) messageText.textContent = 'Đang tải mô hình địa hình…';
-    }
-
-    const demSelect = document.getElementById('project-dashboard-dem-select');
-    demSelect.replaceChildren(...dems.map(model => {
-        const option = document.createElement('option');
-        option.value = model.id;
-        option.textContent = model.name;
-        return option;
-    }));
-    demSelect.hidden = dems.length < 2;
-    demSelect.onchange = () => loadProjectDashboardDem(project, demSelect.value, requestId);
-
-    if (window.MapboxGlobeController?.active) {
-        window.MapboxGlobeController.flyTo(center[0], center[1], 14.5);
-    }
-    const currentZoom = leafletMap.getZoom();
-    const targetZoom = Math.max(currentZoom, 14);
-    const animate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const moved = Math.abs(leafletMap.getCenter().lat - center[0]) > 0.00001
-        || Math.abs(leafletMap.getCenter().lng - center[1]) > 0.00001
-        || Math.abs(currentZoom - targetZoom) > 0.01;
-    if (moved && animate) {
-        await new Promise(resolve => {
-            const finish = () => resolve();
-            leafletMap.once('moveend', finish);
-            leafletMap.flyTo(center, targetZoom, { animate: true, duration: 1.05 });
-            window.setTimeout(finish, 1300);
-        });
-    } else if (moved) leafletMap.setView(center, targetZoom, { animate: false });
+    await _flyMapToProject(leafletMap, center);
     if (requestId !== projectDashboardRequest) return;
 
     panel.inert = false;
@@ -414,6 +427,7 @@ async function openProjectDashboard(project, center, trigger) {
     panel.classList.add('is-open');
     panel.querySelector('#project-dashboard-close').focus({ preventScroll: true });
     if (window.innerWidth > 700) {
+        const animate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         leafletMap.panBy([Math.min(panel.getBoundingClientRect().width * 0.22, 160), 0], { animate, duration: 0.3 });
     }
     if (dems.length) await loadProjectDashboardDem(project, dems[0].id, requestId);
@@ -1012,6 +1026,52 @@ async function refreshCurrentStationDetail() {
     }
 }
 
+function _updateStationListItem(div, st, riskUi, badgeClass, riskLabel, nameText, rawCode, hasDifferentCode) {
+    const badge = div.querySelector('.badge');
+    if (badge) {
+        const targetClass = `badge station-status ${badgeClass}`;
+        if (badge.className !== targetClass) badge.className = targetClass;
+        if (badge.textContent.trim() !== riskLabel) badge.textContent = riskLabel;
+    }
+    div.dataset.state = riskUi.normalized.toLowerCase();
+    div.dataset.connection = getStationListConnection(st, riskUi);
+    div.setAttribute('aria-label', `${nameText}: ${riskLabel}`);
+    const name = div.querySelector('.station-item-name');
+    const code = div.querySelector('.station-item-code');
+    if (name) name.textContent = nameText;
+    if (code) {
+        code.textContent = hasDifferentCode ? rawCode : '';
+        code.style.display = hasDifferentCode ? '' : 'none';
+    }
+}
+
+function _createStationListItem(st, riskUi, badgeClass, riskLabel, nameText, rawCode, hasDifferentCode) {
+    const div = document.createElement('button');
+    div.type = 'button';
+    div.className = 'station-item';
+    div.dataset.stationId = st.id;
+    div.dataset.state = riskUi.normalized.toLowerCase();
+    div.dataset.connection = getStationListConnection(st, riskUi);
+    div.setAttribute('aria-label', `${nameText}: ${riskLabel}`);
+    div.innerHTML = `
+        <span class="station-state-mark" aria-hidden="true"><i class="bi bi-broadcast-pin"></i></span>
+        <span class="station-item-copy">
+            <strong class="station-item-name">${escapeHtml(nameText)}</strong>
+            ${hasDifferentCode ? `<small class="station-item-code">${escapeHtml(rawCode)}</small>` : ''}
+        </span>
+        <span id="list-badge-${st.id}" class="badge station-status ${badgeClass}">${riskLabel}</span>
+        <i class="bi bi-chevron-right station-item-chevron" aria-hidden="true"></i>
+    `;
+    div.addEventListener('click', () => {
+        void selectStation(st.id);
+        if (window.innerWidth < 768) {
+            const sidebar = document.getElementById('station-list-sidebar');
+            setStationListSidebarOpen(sidebar, false);
+        }
+    });
+    return div;
+}
+
 function renderStationList(stations) {
     const container = document.getElementById('station-list-container');
     if (!container) return;
@@ -1044,52 +1104,14 @@ function renderStationList(stations) {
         
         const rawName = (st.name || '').trim();
         const rawCode = (st.station_code || '').trim();
-        const hasDifferentCode = rawCode && rawName && rawCode.toLowerCase() !== rawName.toLowerCase();
+        const hasDifferentCode = Boolean(rawCode && rawName && rawCode.toLowerCase() !== rawName.toLowerCase());
+        const nameText = rawName || rawCode || 'Trạm quan trắc';
 
-        let div = container.querySelector(`[data-station-id="${st.id}"]`);
-        
+        const div = container.querySelector(`[data-station-id="${st.id}"]`);
         if (div) {
-            const badge = div.querySelector('.badge');
-            if (badge) {
-                const targetClass = `badge station-status ${badgeClass}`;
-                if (badge.className !== targetClass) badge.className = targetClass;
-                if (badge.textContent.trim() !== riskLabel) badge.textContent = riskLabel;
-            }
-            div.dataset.state = riskUi.normalized.toLowerCase();
-            div.dataset.connection = getStationListConnection(st, riskUi);
-            div.setAttribute('aria-label', `${rawName || rawCode}: ${riskLabel}`);
-            const name = div.querySelector('.station-item-name');
-            const code = div.querySelector('.station-item-code');
-            if (name) name.textContent = rawName || rawCode || 'Trạm quan trắc';
-            if (code) {
-                code.textContent = hasDifferentCode ? rawCode : '';
-                code.style.display = hasDifferentCode ? '' : 'none';
-            }
+            _updateStationListItem(div, st, riskUi, badgeClass, riskLabel, nameText, rawCode, hasDifferentCode);
         } else {
-            div = document.createElement('button');
-            div.type = 'button';
-            div.className = 'station-item';
-            div.dataset.stationId = st.id;
-            div.dataset.state = riskUi.normalized.toLowerCase();
-            div.dataset.connection = getStationListConnection(st, riskUi);
-            div.setAttribute('aria-label', `${rawName || rawCode}: ${riskLabel}`);
-            div.innerHTML = `
-                <span class="station-state-mark" aria-hidden="true"><i class="bi bi-broadcast-pin"></i></span>
-                <span class="station-item-copy">
-                    <strong class="station-item-name">${escapeHtml(rawName || rawCode || 'Trạm quan trắc')}</strong>
-                    ${hasDifferentCode ? `<small class="station-item-code">${escapeHtml(rawCode)}</small>` : ''}
-                </span>
-                <span id="list-badge-${st.id}" class="badge station-status ${badgeClass}">${riskLabel}</span>
-                <i class="bi bi-chevron-right station-item-chevron" aria-hidden="true"></i>
-            `;
-            div.addEventListener('click', () => {
-                void selectStation(st.id);
-                if (window.innerWidth < 768) {
-                    const sidebar = document.getElementById('station-list-sidebar');
-                    setStationListSidebarOpen(sidebar, false);
-                }
-            });
-            container.appendChild(div);
+            container.appendChild(_createStationListItem(st, riskUi, badgeClass, riskLabel, nameText, rawCode, hasDifferentCode));
         }
     });
     if (typeof filterStations === 'function') {

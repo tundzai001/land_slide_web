@@ -306,7 +306,8 @@ html[data-app-view="admin"] body { font-family: var(--font-base); background: va
     border-radius: 18px !important;
     box-shadow: 0 28px 80px rgba(15, 37, 65, .22) !important;
 }
-.modal-header { padding: 18px 22px; border-color: var(--admin-border) !important; }
+.modal-header { padding: 20px 24px; border-color: var(--admin-border) !important; }
+.modal-title { font-size: 18px; font-weight: 600; }
 .modal-body { color: var(--admin-text) !important; }
 .modal-footer { padding: 14px 22px; border-color: var(--admin-border) !important; background: var(--admin-surface-muted) !important; }
 
@@ -915,8 +916,6 @@ html[data-app-view="admin"] body { font-family: var(--font-base); background: va
 .ops-kpi strong { font-weight: 600; font-variant-numeric: tabular-nums; }
 .management-status, .pi-device-status { border-radius: 5px; font-size: 12px; font-weight: 500; }
 .ops-drawer, .modal-content { border-radius: var(--panel-radius); box-shadow: var(--overlay-shadow) !important; }
-.modal-header { padding: 20px 24px; }
-.modal-title { font-size: 18px; font-weight: 600; }
 .modal-body .config-section, .modal-body .sensor-config-card { box-shadow: none !important; border-radius: var(--panel-radius) !important; }
 [data-theme="dark"] .btn-primary, [data-theme="dark"] .btn-gradient { color: var(--bg-primary) !important; }
 @media(min-width:992px) {

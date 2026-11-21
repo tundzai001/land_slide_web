@@ -222,7 +222,7 @@ class AdminOperationsFeature extends window.AdminManager {
                 status.textContent = 'Đã tải tài liệu.';
                 clearTimeout(this._guideStatusTimer);
                 this._guideStatusTimer = setTimeout(() => {
-                    if (status && status.textContent === 'Đã tải tài liệu.') {
+                    if (status.textContent === 'Đã tải tài liệu.') {
                         status.textContent = '';
                     }
                 }, 3000);
@@ -232,7 +232,7 @@ class AdminOperationsFeature extends window.AdminManager {
                 status.textContent = error.message;
                 clearTimeout(this._guideStatusTimer);
                 this._guideStatusTimer = setTimeout(() => {
-                    if (status) status.textContent = '';
+                    status.textContent = '';
                 }, 4000);
             }
         }

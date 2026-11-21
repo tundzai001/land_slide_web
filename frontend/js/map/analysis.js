@@ -881,7 +881,10 @@ function _safeEpochMs(value) {
     if (typeof normalizeEpochMs === 'function') return normalizeEpochMs(value);
     if (typeof window !== 'undefined' && typeof window.normalizeEpochMs === 'function') return window.normalizeEpochMs(value);
     const numeric = Number(value);
-    return Number.isFinite(numeric) ? (Math.abs(numeric) < 1e12 ? numeric * 1000 : numeric) : Date.parse(String(value));
+    if (Number.isFinite(numeric)) {
+        return Math.abs(numeric) < 1e12 ? numeric * 1000 : numeric;
+    }
+    return Date.parse(String(value));
 }
 
 function renderStaleInfo(data, mqttConnected, latestSensorTs) {
