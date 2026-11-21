@@ -1,6 +1,8 @@
 // Inspect and export the rendered measurements without additional API requests.
 function formatChartTimestamp(value) {
-    return Number.isFinite(value) ? new Date(value).toLocaleString('vi-VN', { hour12: false }) : 'Không có thời gian';
+    if (value === null || value === undefined || value === '') return 'Không có thời gian';
+    const ms = typeof value === 'number' ? value : (window.normalizeEpochMs ? window.normalizeEpochMs(value) : Date.parse(String(value)));
+    return Number.isFinite(ms) ? new Date(ms).toLocaleString('vi-VN', { hour12: false }) : 'Không có thời gian';
 }
 
 function setChartWorkspaceStatus(message, state = 'ready') {
@@ -231,4 +233,8 @@ function setupChartWorkspaceControls() {
             document.getElementById('btn-show-charts')?.focus();
         }
     });
+}
+
+if (typeof window !== 'undefined') {
+    window.formatChartTimestamp = formatChartTimestamp;
 }

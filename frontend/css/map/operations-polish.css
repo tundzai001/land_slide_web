@@ -792,8 +792,51 @@ html[data-theme="dark"] .station-filter-bar { background:var(--map-surface) !imp
 @media(max-width:900px) { .charts-expanded { left:8px !important; right:8px !important; top:74px !important; bottom:76px !important; } }
 @media(max-width:560px) { .top-navbar>.d-flex { gap:6px !important; } .top-navbar .brand-text .app-brand-plate { display:none; } .top-navbar .brand-text { max-width:105px; } .charts-expanded .chart-canvas-wrap { height:240px !important; } }
 @media(prefers-reduced-motion:reduce) { .chart-workspace-status[data-state="loading"]::before { animation:none; } .chart-tool-button { transition:none; } }
-.chart-stat-grid .fw-bold { color:var(--map-text) !important; font-size:22px !important; font-family:var(--font-base); font-weight:550 !important; font-variant-numeric:tabular-nums; }
-.chart-stat-grid .small { font-size:12px !important; }
+.chart-stat-grid {
+    display: flex !important;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 10px 0 14px !important;
+    padding: 10px 14px !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: 12px !important;
+    background: var(--map-surface-subtle) !important;
+    text-align: center;
+}
+.chart-stat-grid .flex-fill {
+    flex: 1 1 0%;
+    min-width: 0;
+    padding: 2px 6px;
+}
+.chart-stat-grid .border-start {
+    border-left: 1px solid var(--map-line) !important;
+}
+.chart-stat-label,
+.chart-stat-grid .small,
+.chart-stat-grid span:not(.chart-stat-value):not(.fw-bold) {
+    display: block;
+    margin-bottom: 4px;
+    color: #94a3b8 !important;
+    font-size: 0.72rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    line-height: 1.2;
+}
+.chart-stat-value,
+.chart-stat-grid .fw-bold {
+    display: block;
+    font-size: 20px !important;
+    font-family: var(--font-base);
+    font-weight: 700 !important;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+}
+.chart-stat-grid .text-primary { color: #38bdf8 !important; }
+.chart-stat-grid .text-danger { color: #f87171 !important; }
+.chart-stat-grid .text-success { color: #4ade80 !important; }
+.chart-stat-grid .text-info { color: #22d3ee !important; }
 .charts-panel-content { scroll-padding-top:16px; }
 #basemap-toggle { display:inline-flex; width:auto !important; padding-inline:12px; gap:8px; font-size:13px; align-items:center; }
 @media(max-width:1100px) { #basemap-toggle { width:44px !important; padding:0; } #basemap-toggle span { display:none; } }

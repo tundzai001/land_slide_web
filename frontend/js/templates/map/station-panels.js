@@ -223,20 +223,20 @@ window.LegacyTemplateParts['station-panels'] = `    <!-- RIGHT DETAIL SIDEBAR --
                 <div class="chart-title"><i class="bi bi-speedometer2"></i><span>Vận tốc GNSS</span></div>
                 <div class="chart-stat-grid">
                     <div class="flex-fill">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Mới nhất</div>
-                        <div class="fw-bold text-primary" id="stat-chart-gnss-latest">--</div>
+                        <span class="chart-stat-label">Mới nhất</span>
+                        <div class="chart-stat-value fw-bold text-primary" id="stat-chart-gnss-latest">--</div>
                     </div>
                     <div class="flex-fill border-start">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Cao nhất</div>
-                        <div class="fw-bold text-danger" id="stat-chart-gnss-max">--</div>
+                        <span class="chart-stat-label">Cao nhất</span>
+                        <div class="chart-stat-value fw-bold text-danger" id="stat-chart-gnss-max">--</div>
                     </div>
                     <div class="flex-fill border-start">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Thấp nhất</div>
-                        <div class="fw-bold text-success" id="stat-chart-gnss-min">--</div>
+                        <span class="chart-stat-label">Thấp nhất</span>
+                        <div class="chart-stat-value fw-bold text-success" id="stat-chart-gnss-min">--</div>
                     </div>
                     <div class="flex-fill border-start">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Trung bình</div>
-                        <div class="fw-bold text-info" id="stat-chart-gnss-avg">--</div>
+                        <span class="chart-stat-label">Trung bình</span>
+                        <div class="chart-stat-value fw-bold text-info" id="stat-chart-gnss-avg">--</div>
                     </div>
                 </div>
                 <div class="chart-canvas-wrap">
@@ -257,20 +257,20 @@ window.LegacyTemplateParts['station-panels'] = `    <!-- RIGHT DETAIL SIDEBAR --
                 <div class="chart-title"><i class="bi bi-water"></i><span>Mực nước ngầm / Áp lực nước lỗ rỗng</span></div>
                 <div class="chart-stat-grid">
                     <div class="flex-fill">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Mới nhất</div>
-                        <div class="fw-bold text-primary" id="stat-chart-water-latest">--</div>
+                        <span class="chart-stat-label">Mới nhất</span>
+                        <div class="chart-stat-value fw-bold text-primary" id="stat-chart-water-latest">--</div>
                     </div>
                     <div class="flex-fill border-start">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Cao nhất</div>
-                        <div class="fw-bold text-danger" id="stat-chart-water-max">--</div>
+                        <span class="chart-stat-label">Cao nhất</span>
+                        <div class="chart-stat-value fw-bold text-danger" id="stat-chart-water-max">--</div>
                     </div>
                     <div class="flex-fill border-start">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Thấp nhất</div>
-                        <div class="fw-bold text-success" id="stat-chart-water-min">--</div>
+                        <span class="chart-stat-label">Thấp nhất</span>
+                        <div class="chart-stat-value fw-bold text-success" id="stat-chart-water-min">--</div>
                     </div>
                     <div class="flex-fill border-start">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Trung bình</div>
-                        <div class="fw-bold text-info" id="stat-chart-water-avg">--</div>
+                        <span class="chart-stat-label">Trung bình</span>
+                        <div class="chart-stat-value fw-bold text-info" id="stat-chart-water-avg">--</div>
                     </div>
                 </div>
                 <div class="chart-canvas-wrap">

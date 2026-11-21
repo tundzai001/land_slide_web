@@ -909,13 +909,27 @@ function _handleRealtimeGnss(data, timestamp, advancedVisible, chartsVisible) {
 
     if (chartsVisible && charts['chart-gnss'] && velocityMmS !== null) {
         const chart = charts['chart-gnss'];
-        chart.data.labels.push(new Date(normalizeEpochMs(timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        const tsMs = normalizeEpochMs(timestamp || data.measured_at || Date.now());
+        const timeLabel = new Date(tsMs).toLocaleTimeString('vi-VN', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+        });
+        chart.data.labels.push(timeLabel);
         chart.data.datasets[0].data.push(velocityMmS);
+        if (!Array.isArray(chart._monitoringTimestamps)) {
+            chart._monitoringTimestamps = [];
+        }
+        chart._monitoringTimestamps.push(tsMs);
         if (chart.data.labels.length > 50) {
             chart.data.labels.shift();
             chart.data.datasets[0].data.shift();
+            chart._monitoringTimestamps.shift();
         }
         chart.update('none');
+
+        const numericValues = chart.data.datasets[0].data.filter(v => typeof v === 'number' && Number.isFinite(v));
+        if (typeof window._updateChartStatsElements === 'function') {
+            window._updateChartStatsElements('chart-gnss', numericValues);
+        }
     }
 }
 
@@ -925,11 +939,20 @@ function _handleRealtimeRain(data, timestamp, chartsVisible) {
 
     if (chartsVisible && charts['chart-rain']) {
         const chart = charts['chart-rain'];
-        chart.data.labels.push(new Date(normalizeEpochMs(timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        const tsMs = normalizeEpochMs(timestamp || Date.now());
+        const timeLabel = new Date(tsMs).toLocaleTimeString('vi-VN', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+        });
+        chart.data.labels.push(timeLabel);
         chart.data.datasets[0].data.push(intensity);
+        if (!Array.isArray(chart._monitoringTimestamps)) {
+            chart._monitoringTimestamps = [];
+        }
+        chart._monitoringTimestamps.push(tsMs);
         if (chart.data.labels.length > 50) {
             chart.data.labels.shift();
             chart.data.datasets[0].data.shift();
+            chart._monitoringTimestamps.shift();
         }
         chart.update('none');
     }
@@ -940,13 +963,27 @@ function _handleRealtimeWater(data, timestamp, chartsVisible) {
     setHTML('val-water', formatWaterLevelDisplay(data));
     if (chartsVisible && charts['chart-water']) {
         const chart = charts['chart-water'];
-        chart.data.labels.push(new Date(normalizeEpochMs(timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        const tsMs = normalizeEpochMs(timestamp || Date.now());
+        const timeLabel = new Date(tsMs).toLocaleTimeString('vi-VN', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+        });
+        chart.data.labels.push(timeLabel);
         chart.data.datasets[0].data.push(level);
+        if (!Array.isArray(chart._monitoringTimestamps)) {
+            chart._monitoringTimestamps = [];
+        }
+        chart._monitoringTimestamps.push(tsMs);
         if (chart.data.labels.length > 50) {
             chart.data.labels.shift();
             chart.data.datasets[0].data.shift();
+            chart._monitoringTimestamps.shift();
         }
         chart.update('none');
+
+        const numericValues = chart.data.datasets[0].data.filter(v => typeof v === 'number' && Number.isFinite(v));
+        if (typeof window._updateChartStatsElements === 'function') {
+            window._updateChartStatsElements('chart-water', numericValues);
+        }
     }
 }
 
@@ -983,16 +1020,23 @@ function _handleRealtimeImu(data, stationId, timestamp, chartsVisible) {
     }
     if (chartsVisible && charts['chart-imu']) {
         const chart = charts['chart-imu'];
-        const ts = Number(timestamp) || Math.floor(Date.now() / 1000);
-        const timeLabel = new Date(normalizeEpochMs(ts)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const tsMs = normalizeEpochMs(Number(timestamp) || Math.floor(Date.now() / 1000));
+        const timeLabel = new Date(tsMs).toLocaleTimeString('vi-VN', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+        });
         chart.data.labels.push(timeLabel);
         chart.data.datasets[0].data.push(finiteMetric(data.roll));
         chart.data.datasets[1].data.push(finiteMetric(data.pitch));
         chart.data.datasets[2].data.push(finiteMetric(data.yaw));
+        if (!Array.isArray(chart._monitoringTimestamps)) {
+            chart._monitoringTimestamps = [];
+        }
+        chart._monitoringTimestamps.push(tsMs);
 
         if (chart.data.labels.length > 50) {
             chart.data.labels.shift();
             chart.data.datasets.forEach(ds => ds.data.shift());
+            chart._monitoringTimestamps.shift();
         }
         chart.update('none');
     }

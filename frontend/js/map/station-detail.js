@@ -1198,6 +1198,23 @@ function buildChartTimeLabels(history) {
     });
 }
 
+function _resolveChartItemTimestampTitle(items, fallbackHistory = []) {
+    if (!items || !items.length) return '';
+    const idx = items[0].dataIndex;
+    const chartInst = items[0].chart;
+    const ts = chartInst?._monitoringTimestamps?.[idx];
+    if (Number.isFinite(ts)) {
+        return formatChartTimestamp(ts);
+    }
+    const raw = fallbackHistory[idx]?.timestamp;
+    const norm = normalizeEpochMs(raw);
+    if (Number.isFinite(norm)) {
+        return formatChartTimestamp(norm);
+    }
+    const fallback = chartInst?.data?.labels?.[idx];
+    return fallback || 'Thời gian quan trắc';
+}
+
 function _updateChartStatsElements(id, numericValues) {
     const hasValues = numericValues.length > 0;
     const maxVal = hasValues ? Math.max(...numericValues).toFixed(2) : '--';
@@ -1293,7 +1310,7 @@ function renderChart(id, history, key, color, label) {
                     padding: 10,
                     boxPadding: 4,
                     usePointStyle: true,
-                    callbacks: { title: items => formatChartTimestamp(normalizeEpochMs(history[items[0]?.dataIndex]?.timestamp)) },
+                    callbacks: { title: items => _resolveChartItemTimestampTitle(items, history) },
                 }
             },
             scales: {
@@ -1400,10 +1417,20 @@ function renderImuChart(history) {
                     labels: {
                         color: legendColor,
                         usePointStyle: true,
-                    callbacks: { title: items => formatChartTimestamp(normalizeEpochMs(history[items[0]?.dataIndex]?.timestamp)) },
                         pointStyle: 'circle',
                         font: { size: 11 }
                     }
+                },
+                tooltip: {
+                    backgroundColor: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+                    titleColor: isDark ? '#fff' : '#1e293b',
+                    bodyColor: isDark ? '#cbd5e1' : '#475569',
+                    borderColor: isDark ? '#334155' : '#e2e8f0',
+                    borderWidth: 1,
+                    padding: 10,
+                    boxPadding: 4,
+                    usePointStyle: true,
+                    callbacks: { title: items => _resolveChartItemTimestampTitle(items, history) }
                 }
             },
             scales: {
@@ -1419,4 +1446,8 @@ function renderImuChart(history) {
         }
     });
     charts['chart-imu']._monitoringTimestamps = history.map(row => normalizeEpochMs(row.timestamp));
+}
+
+if (typeof window !== 'undefined') {
+    window._updateChartStatsElements = _updateChartStatsElements;
 }
