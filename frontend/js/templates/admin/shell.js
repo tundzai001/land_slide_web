@@ -213,13 +213,6 @@ window.LegacyTemplateParts['shell'] = `
                         <footer class="ops-pagination"><span id="db-page-summary">0 bản ghi</span><div><button class="btn btn-outline-secondary" id="db-page-prev" onclick="window.dbManager.changePage(-1)" aria-label="Trang trước"><i class="bi bi-chevron-left"></i></button><span id="db-page-number">Trang 1</span><button class="btn btn-outline-secondary" id="db-page-next" onclick="window.dbManager.changePage(1)" aria-label="Trang sau"><i class="bi bi-chevron-right"></i></button></div></footer>
                     </div>
                 </section>
-
-                <div class="ops-drawer-backdrop" id="db-inspector-backdrop" onclick="window.dbManager.closeInspector()"></div>
-                <aside class="ops-drawer" id="db-inspector" aria-hidden="true" aria-labelledby="db-inspector-title">
-                    <header><div><span class="ops-eyebrow">Bản ghi</span><h5 id="db-inspector-title">Chi tiết bản ghi</h5></div><button class="management-icon-btn btn btn-outline-secondary" onclick="window.dbManager.closeInspector()" aria-label="Đóng chi tiết"><i class="bi bi-x-lg"></i></button></header>
-                    <div id="db-inspector-content" class="ops-drawer-body"></div>
-                    <footer id="db-inspector-actions" class="ops-drawer-footer"></footer>
-                </aside>
             </div>
 
             <!-- TAB: SIMULATION AUDIT -->
@@ -255,14 +248,23 @@ window.LegacyTemplateParts['shell'] = `
                     <div id="rescue-requests-body" class="rescue-queue" aria-live="polite"><div class="ops-empty"><div class="spinner-border text-primary"></div><p>Đang tải yêu cầu cứu hộ…</p></div></div>
                     <footer class="ops-pagination"><span id="rescue-page-summary">0 yêu cầu</span><div><button class="btn btn-outline-secondary" id="rescue-page-prev" onclick="window.adminManager?.changeRescuePage(-1)" aria-label="Trang trước"><i class="bi bi-chevron-left"></i></button><span id="rescue-page-number">Trang 1</span><button class="btn btn-outline-secondary" id="rescue-page-next" onclick="window.adminManager?.changeRescuePage(1)" aria-label="Trang sau"><i class="bi bi-chevron-right"></i></button></div></footer>
                 </section>
-                <div class="ops-drawer-backdrop" id="rescue-inspector-backdrop" onclick="window.adminManager?.closeRescueInspector()"></div>
-                <aside class="ops-drawer rescue-drawer" id="rescue-inspector" aria-hidden="true" aria-labelledby="rescue-inspector-title"><header><div><span class="ops-eyebrow">Yêu cầu hỗ trợ</span><h5 id="rescue-inspector-title">Chi tiết cứu hộ</h5></div><button class="management-icon-btn btn btn-outline-secondary" onclick="window.adminManager?.closeRescueInspector()" aria-label="Đóng chi tiết"><i class="bi bi-x-lg"></i></button></header><div id="rescue-inspector-content" class="ops-drawer-body"></div><footer id="rescue-inspector-actions" class="ops-drawer-footer"></footer></aside>
             </div>
 
 ${window.LegacyTemplateParts['pi-devices'] || ''}
 
         </div>
     </div>
+
+    <!-- DRAWERS / INSPECTORS -->
+    <div class="ops-drawer-backdrop" id="db-inspector-backdrop" onclick="window.dbManager.closeInspector()"></div>
+    <aside class="ops-drawer" id="db-inspector" aria-hidden="true" aria-labelledby="db-inspector-title">
+        <header><div><span class="ops-eyebrow">Bản ghi</span><h5 id="db-inspector-title">Chi tiết bản ghi</h5></div><button class="management-icon-btn btn btn-outline-secondary" onclick="window.dbManager.closeInspector()" aria-label="Đóng chi tiết"><i class="bi bi-x-lg"></i></button></header>
+        <div id="db-inspector-content" class="ops-drawer-body"></div>
+        <footer id="db-inspector-actions" class="ops-drawer-footer"></footer>
+    </aside>
+
+    <div class="ops-drawer-backdrop" id="rescue-inspector-backdrop" onclick="window.adminManager?.closeRescueInspector()"></div>
+    <aside class="ops-drawer rescue-drawer" id="rescue-inspector" aria-hidden="true" aria-labelledby="rescue-inspector-title"><header><div><span class="ops-eyebrow">Yêu cầu hỗ trợ</span><h5 id="rescue-inspector-title">Chi tiết cứu hộ</h5></div><button class="management-icon-btn btn btn-outline-secondary" onclick="window.adminManager?.closeRescueInspector()" aria-label="Đóng chi tiết"><i class="bi bi-x-lg"></i></button></header><div id="rescue-inspector-content" class="ops-drawer-body"></div><footer id="rescue-inspector-actions" class="ops-drawer-footer"></footer></aside>
 
     <!-- ============================================
          MODALS

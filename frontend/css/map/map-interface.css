@@ -361,6 +361,17 @@ textarea:focus-visible {
 }
 
 .leaflet-control-attribution,
+.mapboxgl-ctrl-attrib,
+.mapboxgl-ctrl-attrib-inner,
+.mapboxgl-compact,
+.mapboxgl-ctrl-logo,
+.mapboxgl-ctrl-bottom-right {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
 .leaflet-control-scale-line,
 .leaflet-bar,
 .leaflet-popup-content-wrapper,

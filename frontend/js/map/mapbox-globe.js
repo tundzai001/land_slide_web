@@ -293,7 +293,7 @@
                 maxZoom: 19,
                 maxPitch: 65,
                 renderWorldCopies: false,
-                attributionControl: { compact: true },
+                attributionControl: false,
                 antialias: false,
                 fadeDuration: 300,
             });

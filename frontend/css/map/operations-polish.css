@@ -36,7 +36,15 @@ html[data-theme="dark"] .map-floating-layer-panel {
     border-color: var(--map-line) !important;
 }
 
-html[data-theme="dark"] .leaflet-control-attribution,
+.leaflet-control-attribution,
+.mapboxgl-ctrl-attrib,
+.mapboxgl-ctrl-attrib-inner,
+.mapboxgl-compact,
+.mapboxgl-ctrl-logo,
+.mapboxgl-ctrl-bottom-right {
+    display: none !important;
+}
+
 html[data-theme="dark"] .leaflet-control-scale-line,
 html[data-theme="dark"] .leaflet-bar,
 html[data-theme="dark"] .leaflet-popup-content-wrapper,

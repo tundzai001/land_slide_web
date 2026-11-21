@@ -559,9 +559,13 @@ class DatabaseManager {
     }
 
     openInspector() {
-        document.getElementById('db-inspector').classList.add('open');
-        document.getElementById('db-inspector').setAttribute('aria-hidden', 'false');
-        document.getElementById('db-inspector-backdrop').classList.add('show');
+        const inspector = document.getElementById('db-inspector');
+        if (!inspector) return;
+        inspector.classList.add('open');
+        inspector.setAttribute('aria-hidden', 'false');
+        document.getElementById('db-inspector-backdrop')?.classList.add('show');
+        const content = document.getElementById('db-inspector-content');
+        if (content) content.scrollTop = 0;
         document.querySelector('#db-inspector > header button')?.focus();
     }
 

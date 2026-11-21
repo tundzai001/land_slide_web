@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "build": "ba2369f1cc8b",
+  "build": "e203b6cdb7b1",
   "assets": {
     "about.html": {
       "bytes": 4584,
-      "sha256": "7182aa2c62a543b7c42527b7435bebe26b4ee59dde47796037600f7eab7f3dd0"
+      "sha256": "51b6581c2f4399c00b9c435e1e73b5343ae1f3d8813885b82c75ec2899539ca6"
     },
     "about.min.css": {
       "bytes": 35597,
@@ -15,12 +15,12 @@
       "sha256": "1490db5a6203133a0c4107349ae85225847ba506d452edef314bec30431273b6"
     },
     "admin-app.min.js": {
-      "bytes": 562087,
-      "sha256": "5e8cb02085f266c5d88b8e59e2d7cf69a15392e8456bd6bc83013468854de3b5"
+      "bytes": 562154,
+      "sha256": "29cc9f8c2719dcc8c633739fc5dcd29dff008ee22999a2bcfa4bfac97ce3bc5c"
     },
     "admin.min.css": {
-      "bytes": 138897,
-      "sha256": "fb8cd0dbf0bc7630eefd1a4cac0952e7a560df7938a1e08b98ba61e2d5664a50"
+      "bytes": 139189,
+      "sha256": "7a83f8e1f292850dd320bc25ff209c27317ae2a7409e0840f8b436c372a9223d"
     },
     "aitogy.png": {
       "bytes": 202093,
@@ -32,11 +32,11 @@
     },
     "app-runtime.min.js": {
       "bytes": 19835,
-      "sha256": "a7af1c50dad96bf1a231adc905b8ba217e2c3ae7c88cf7e25f29e8bc76c08169"
+      "sha256": "064511cceac929282249031cd2f02f116918a1c909483281be398785bbff5a9a"
     },
     "app.html": {
       "bytes": 971,
-      "sha256": "d00db2466918cf9b75891a759a187a164c8b6782089826d32129be44947897ba"
+      "sha256": "c619238c0b77941419b7e61a0616ad0aa9fcc86f8c943ecb3c7fd2702158d007"
     },
     "digital-twin.min.js": {
       "bytes": 66740,
@@ -44,7 +44,7 @@
     },
     "index.html": {
       "bytes": 4410,
-      "sha256": "8705e8e3581123bd83633e4153b820033eb3a9d3b53339f9db8b8516692c7b5a"
+      "sha256": "da57db09fbdab4e44aea9e9d4dcb669e02a38d65933488129a35ae78929bdc84"
     },
     "landing.min.css": {
       "bytes": 18946,
@@ -59,16 +59,16 @@
       "sha256": "9e69fd1c0b9c9fbc5405028405828bc511a7628ddba482013297222568a6e7d0"
     },
     "map-app.min.js": {
-      "bytes": 548244,
-      "sha256": "1f3f954a1c778009494a0a2f66632cfb3141cc06e34a643e99de28bc86dd85c8"
+      "bytes": 548234,
+      "sha256": "d77b8eb5ae7a2e93f464afac90d1b38e61cb37e2fc099dd6e51b81454941360d"
     },
     "map.html": {
       "bytes": 2843,
-      "sha256": "bf45309d007272632406877281a360e4a93b2398d56eb056f4a01e0df1bd6482"
+      "sha256": "8ef67cfb8eb94481ea5ad67f6a08a2be2924d604003dbe8d8e5e46912f929f2b"
     },
     "map.min.css": {
-      "bytes": 185707,
-      "sha256": "8f7a53a085f22e8f196f34f80373d3df10b8b8f29a192c1346a9a151759c593f"
+      "bytes": 186041,
+      "sha256": "e34503b46f10d0f51d379b87381edb7a921ccc975d03a6848d3bad37443ca5f6"
     },
     "mapbox-gl-sdk.min.css": {
       "bytes": 36468,
